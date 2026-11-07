@@ -17,6 +17,7 @@ src/assistant_bench/
 │   ├── stores.py                           # Connections to hosted and local vote stores
 │   └── votes.py                            # Vote cuts and moderation, the snapshots that save cuts, and the round they close
 ├── collection.py                           # Collection of a family's trials into output records
+├── canaries.py                             # Route probes, their baseline comparison, and independent attempt records
 ├── arguments.py                            # The family arguments, system option, and name refusals the commands share
 ├── tasks.py                                # Rendering of cases into Harbor tasks, checks of authored tasks, and task versions
 ├── spend.py                                # The spend ledger of agent attempts, its pricing, and a run's projection and budget
@@ -59,7 +60,7 @@ Imports point downward through these layers, so a module never imports one above
 
 1. `cli`, `ci`, and `task_assets`
 2. `arena.commands`
-3. `collection` and `arguments`
+3. `canaries`, `collection`, and `arguments`
 4. `tasks` and `spend`
 5. `jobs`
 6. The remaining `arena` modules
