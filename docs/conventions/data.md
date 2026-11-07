@@ -25,4 +25,4 @@ Run artifacts live in the data directory, which `BENCH_DATA_DIR` names and which
 
 Point a single run at a scratch data directory with `BENCH_DATA_DIR=<dir>`. Leave `XDG_DATA_HOME` alone, since uv keeps its managed interpreters under it and would install a new CPython in `<dir>` and relink `.venv` to it, which breaks once `<dir>` is removed.
 
-Canary tasks, jobs and per-system baseline records live under `canaries/`, apart from family trials and collection. Their attempt ledger is `spend/canaries.jsonl`, outside family budgets. Preserve this ledger when resetting a canary baseline so the probe's spend survives.
+Canary tasks, jobs and per-system baseline records live under `canaries/`, apart from family trials and collection. Their attempt ledger is `spend/canaries.jsonl`, outside family budgets. Each job's adjacent accounting snapshot freezes its price and response ceiling before execution, so later runs can recover interrupted bookkeeping without current catalog prices. Preserve this ledger when resetting a canary baseline so the probe's spend survives.

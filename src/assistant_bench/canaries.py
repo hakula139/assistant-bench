@@ -7,10 +7,13 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from importlib.resources import files
+from pathlib import Path
+from typing import Any, cast
 
 from harbor.models.job.config import JobConfig
 from harbor.models.trial.result import TrialResult
 from pydantic import BaseModel, ConfigDict
+from pydantic_core import to_jsonable_python
 
 from assistant_bench import jobs
 from assistant_bench.catalog import System, SystemIdentity
@@ -19,7 +22,7 @@ from assistant_bench.harnesses.generate import OUTPUT_FILE
 from assistant_bench.harnesses.usage import MeasuredUsage
 from assistant_bench.messages import InputError
 from assistant_bench.paths import data_dir
-from assistant_bench.spend import update_canary_ledger
+from assistant_bench.spend import update_canary_ledger, write_canary_accounting
 from assistant_bench.tasks import render_task_config
 
 
@@ -105,9 +108,8 @@ def prepare(configs: Iterable[JobConfig], systems: Mapping[str, System]) -> list
             }
         )
         config = jobs.probe_job(actual, task, root / 'jobs')
-        stable_config = config.model_dump(
-            mode='json',
-            exclude={'job_name', 'jobs_dir', 'tasks'},
+        stable_config = _canonical_config(
+            config.model_dump(exclude={'job_name', 'jobs_dir', 'tasks'})
         )
         digest = hashlib.sha256(
             json.dumps(
@@ -123,12 +125,32 @@ def prepare(configs: Iterable[JobConfig], systems: Mapping[str, System]) -> list
     return probes
 
 
+def _canonical_config(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _canonical_config(item)
+            for key, item in cast(dict[str, Any], value).items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_canonical_config(item) for item in cast(Iterable[Any], value)]
+    if isinstance(value, (set, frozenset)):
+        return sorted(
+            (_canonical_config(item) for item in cast(Iterable[Any], value)),
+            key=lambda item: json.dumps(item, sort_keys=True),
+        )
+    return to_jsonable_python(value)
+
+
 def run(probes: list[Probe]) -> list[Record]:
     """Record every outcome and its spend before refusing a failed or changed probe."""
+    update_canary_ledger()
     records: list[Record] = []
     problems: list[str] = []
     for probe in probes:
         previous = read_records(probe.original.name)
+        write_canary_accounting(
+            jobs.job_path(probe.config), probe.actual, probe.ceiling_usd
+        )
         run_error: str | None = 'InterruptedProbe'
         try:
             jobs.run_job(
@@ -139,11 +161,11 @@ def run(probes: list[Probe]) -> list[Record]:
         except subprocess.CalledProcessError as error:
             run_error = type(error).__name__
         finally:
-            outcomes = _outcomes(probe, run_error)
-            _append(outcomes)
-            update_canary_ledger(
-                [jobs.job_path(probe.config)], {probe.actual.name: probe.actual}
-            )
+            try:
+                outcomes = _outcomes(probe, run_error)
+                _append(outcomes)
+            finally:
+                update_canary_ledger()
 
         records.extend(outcomes)
         problems.extend(
@@ -157,7 +179,7 @@ def run(probes: list[Probe]) -> list[Record]:
 
 
 def read_records(system: str) -> list[Record]:
-    path = data_dir() / 'canaries' / f'{system}.jsonl'
+    path = _records_file(system)
     return (
         [Record.model_validate_json(line) for line in path.read_text().splitlines()]
         if path.exists()
@@ -210,10 +232,15 @@ def _record(probe: Probe, result: TrialResult | None, run_error: str | None) -> 
 
 def _append(records: list[Record]) -> None:
     for record in records:
-        path = data_dir() / 'canaries' / f'{record.system}.jsonl'
+        path = _records_file(record.system)
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open('a') as file:
             file.write(record.model_dump_json() + '\n')
+
+
+def _records_file(system: str) -> Path:
+    key = hashlib.sha256(system.encode()).hexdigest()
+    return data_dir() / 'canaries' / f'{key}.jsonl'
 
 
 def _problem(record: Record, previous: list[Record]) -> str | None:

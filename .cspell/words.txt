@@ -58,6 +58,7 @@ isinstance
 isort
 jobq
 journalctl
+jsonable
 katex
 killpg
 kimi

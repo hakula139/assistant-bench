@@ -122,7 +122,7 @@ A fingerprint hashes a system's route, so an endpoint that starts serving anothe
 
 When the route serves another model, delete the minority job's trials of that system under `jobs/<family>/` and rerun them, or give the system a new name once its route is fixed, as [Authoring](authoring.md#systems) describes.
 
-A canary refusal happens before new family trials start. If the route changed models, remove that system's stale trials and `canaries/<system>.jsonl`, then rerun. For a benign template change, remove only the canary file to establish a new baseline. For a failed probe, correct the reported failure and rerun. Keep `spend/canaries.jsonl` so resetting a baseline preserves past costs.
+A canary refusal happens before new family trials start. If the route changed models, remove that system's stale trials and `canaries/<system-hash>.jsonl`, then rerun. The filename uses the SHA-256 digest of the UTF-8 system name, which each record also keeps. For a benign template change, remove only the canary file to establish a new baseline. For a failed probe, correct the reported failure and rerun. Keep `spend/canaries.jsonl` so resetting a baseline preserves past costs.
 
 ## Voting
 
@@ -209,8 +209,9 @@ Everything a run produces stays out of Git in the [data directory](../convention
 ```text
 assistant-bench/
 ├── agents/<harness>/<version>/<platform>/  # Verified vendor CLI executables for installed agents
-├── arena/                                 # Local vote database, signing keys and serve lock
-├── canaries/<system>.jsonl                 # Every route probe, including its identities, protocol, usage and outcome
+├── arena/                                  # Local vote database, signing keys and serve lock
+├── canaries/<system-hash>.jsonl            # Every route probe, including its identities, protocol, usage and outcome
+├── canaries/jobs/<job>.accounting.json     # Probe prices and response ceilings frozen before execution
 ├── canaries/jobs/<job>/                    # Probe Harbor jobs, with adjacent private CLI logs
 ├── canaries/task/                          # The fixed synthetic probe task
 ├── cases/<family>.toml                     # Local cases, appended to the committed ones

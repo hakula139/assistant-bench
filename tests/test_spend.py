@@ -1,4 +1,5 @@
 import asyncio
+import json
 import shutil
 from collections import Counter
 from datetime import datetime, timedelta
@@ -8,11 +9,13 @@ from typing import Any
 import pytest
 from harbor.job import Job
 from harbor.models.job.config import JobConfig
+from pydantic import ValidationError
 
 from assistant_bench import jobs
 from assistant_bench.catalog import Price, System
 from assistant_bench.families import load_cases, load_family
 from assistant_bench.harnesses.usage import ATTEMPTS_FILE, Attempt, MeasuredUsage
+from assistant_bench.messages import InputError
 from assistant_bench.spend import (
     Basis,
     Entry,
@@ -25,6 +28,7 @@ from assistant_bench.spend import (
     summarize,
     update_canary_ledger,
     update_ledger,
+    write_canary_accounting,
 )
 from assistant_bench.tasks import render_tasks
 from support import START, VOTES, StubEndpoint, make_system, with_settings
@@ -126,6 +130,32 @@ class TestUpdateLedger:
         assert [len(item.responses) for item in ledger] == [0, 1]
 
 
+class TestWriteCanaryAccounting:
+    @pytest.mark.parametrize(
+        ('price', 'ceiling'),
+        [(LARGE.price, 0.27048), (NO_WRITE_PRICE.price, None), (None, None)],
+        ids=['priced', 'unknown-write-price', 'unpriced'],
+    )
+    def test_freezes_accounting_before_harbor_creates_the_job(
+        self, data_dir: Path, price: Price | None, ceiling: float | None
+    ) -> None:
+        job = data_dir / 'canaries' / 'jobs' / 'probe-job'
+        actual = LARGE.model_copy(update={'max_output_tokens': 2048, 'price': price})
+        write_canary_accounting(job, actual, ceiling)
+        changed = actual.model_copy(update={'price': None})
+
+        with pytest.raises(FileExistsError):
+            write_canary_accounting(job, changed, None)
+
+        assert not job.exists()
+        write_attempts(job, attempt(responses=(None,)))
+        (recorded,) = update_canary_ledger()
+        assert recorded.price == actual.price
+        assert recorded.ceiling_usd == (
+            pytest.approx(ceiling) if ceiling is not None else None
+        )
+
+
 class TestUpdateCanaryLedger:
     def test_keeps_probe_spend_separate_and_prices_its_actual_allowance(
         self, data_dir: Path
@@ -137,15 +167,19 @@ class TestUpdateCanaryLedger:
         frozen = family_ledger.read_bytes()
         actual = LARGE.model_copy(update={'max_output_tokens': 2048})
         probe_job = data_dir / 'canaries' / 'jobs' / 'probe-job'
+        write_canary_accounting(probe_job, actual, 0.27048)
+        successful = attempt(responses=(MeasuredUsage(100, 0, 0, 40, None),))
         write_attempts(
             probe_job,
-            attempt(responses=(MeasuredUsage(100, 0, 0, 40, None),)),
+            successful,
+            successful,
             attempt(trial='failed__1', responses=(None,)),
         )
 
-        ledger = update_canary_ledger([probe_job], {actual.name: actual})
+        ledger = update_canary_ledger()
+        assert update_canary_ledger() == ledger
         shutil.rmtree(probe_job)
-        retained = update_canary_ledger([probe_job], {actual.name: actual})
+        retained = update_canary_ledger()
 
         assert retained == ledger
         assert [item.trial for item in ledger] == ['a__1', 'failed__1']
@@ -156,6 +190,34 @@ class TestUpdateCanaryLedger:
         assert all(item.ceiling_usd == pytest.approx(0.27048) for item in ledger)
         assert (data_dir / 'spend' / 'canaries.jsonl').read_text().count('\n') == 2
         assert family_ledger.read_bytes() == frozen
+
+    @pytest.mark.parametrize(
+        ('snapshot', 'error', 'message'),
+        [
+            ('missing', InputError, 'canary accounting.*The run was refused'),
+            ('mismatched', InputError, 'canary accounting.*The run was refused'),
+            ('unknown-price-field', ValidationError, 'price.unknown_rate'),
+        ],
+        ids=['missing', 'mismatched', 'unknown-price-field'],
+    )
+    def test_refuses_unaccountable_attempts_without_writing_a_ledger(
+        self, data_dir: Path, snapshot: str, error: type[Exception], message: str
+    ) -> None:
+        job = data_dir / 'canaries' / 'jobs' / 'probe-job'
+        write_attempts(job, attempt())
+        if snapshot == 'mismatched':
+            write_canary_accounting(job, make_system(name='other'), 0.04096)
+        elif snapshot == 'unknown-price-field':
+            write_canary_accounting(job, make_system(), 0.04096)
+            metadata = Path(f'{job}.accounting.json')
+            document = json.loads(metadata.read_text())
+            document['price']['unknown_rate'] = 1
+            metadata.write_text(json.dumps(document))
+
+        with pytest.raises(error, match=message):
+            update_canary_ledger()
+
+        assert not (data_dir / 'spend' / 'canaries.jsonl').exists()
 
 
 class TestSummarize:

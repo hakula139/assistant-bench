@@ -1,6 +1,10 @@
 import asyncio
+import hashlib
+import os
 import shutil
 import subprocess
+import sys
+import textwrap
 from dataclasses import replace
 from importlib.resources import files
 from pathlib import Path
@@ -9,15 +13,16 @@ import pytest
 from harbor.job import Job
 from harbor.models.job.config import JobConfig
 from harbor.models.trial.config import UserAgentConfig
+from pydantic import ValidationError
 
 from assistant_bench import canaries, jobs
 from assistant_bench.catalog import Api, Price, System, SystemIdentity
 from assistant_bench.families import load_cases, load_family
 from assistant_bench.harnesses import HOST_ENVIRONMENT, agent_kwargs, fingerprint
-from assistant_bench.harnesses.usage import ATTEMPTS_FILE, Attempt
+from assistant_bench.harnesses.usage import ATTEMPTS_FILE, Attempt, MeasuredUsage
 from assistant_bench.messages import InputError
 from assistant_bench.paths import DATA_DIR_VAR
-from assistant_bench.spend import Entry
+from assistant_bench.spend import CanaryAccounting, Entry, write_canary_accounting
 from assistant_bench.tasks import render_tasks
 from support import (
     START,
@@ -284,8 +289,221 @@ class TestPrepare:
         assert first.source_generate == second.source_generate
         assert first.protocol_digest != second.protocol_digest
 
+    def test_protocol_is_stable_across_independent_process_hash_seeds(self) -> None:
+        system = make_system()
+        config = benchmark(system)
+        program = textwrap.dedent(
+            """\
+            import sys
+            from harbor.models.job.config import JobConfig
+            from assistant_bench import canaries
+            from assistant_bench.catalog import System
+
+            system = System.model_validate_json(sys.argv[1])
+            config = JobConfig.model_validate_json(sys.argv[2])
+            print(canaries.prepare([config], {system.name: system})[0].protocol_digest)
+            """
+        )
+
+        digests = []
+        for seed in ('1', '2', '3'):
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    '-c',
+                    program,
+                    system.model_dump_json(),
+                    config.model_dump_json(),
+                ],
+                env=os.environ | {'PYTHONHASHSEED': seed},
+                capture_output=True,
+                text=True,
+            )
+            assert result.returncode == 0, result.stdout + result.stderr
+            digests.append(result.stdout.strip())
+
+        assert digests[0] == digests[1] == digests[2]
+
+    def test_protocol_preserves_the_order_of_extra_instructions(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        system = make_system()
+        original = jobs.probe_job
+        instructions = ['Use a formal tone.', 'Finish with a question.']
+
+        def probe_job(system: System, task: Path, root: Path) -> JobConfig:
+            return original(system, task, root).model_copy(
+                update={'extra_instructions': list(instructions)}
+            )
+
+        monkeypatch.setattr(jobs, 'probe_job', probe_job)
+        first = prepare_probe(system)
+        instructions.reverse()
+
+        second = prepare_probe(system)
+
+        assert first.protocol_digest != second.protocol_digest
+
 
 class TestRun:
+    @pytest.mark.parametrize('catalog', ['changed', 'removed'])
+    def test_recovers_interrupted_spend_from_frozen_accounting_before_any_new_job(
+        self,
+        data_dir: Path,
+        host_jobs: list[JobConfig],
+        monkeypatch: pytest.MonkeyPatch,
+        catalog: str,
+    ) -> None:
+        system = make_system(context_window=100_000, max_output_tokens=10_000)
+        interrupted = prepare_probe(system)
+        directory = interrupted.config.jobs_dir / 'orphaned-job'
+        write_canary_accounting(directory, interrupted.actual, interrupted.ceiling_usd)
+        attempt = Attempt(
+            trial='interrupted__1',
+            system=system.name,
+            fingerprint=fingerprint(interrupted.actual),
+            started_at=START,
+            finished_at=START,
+            responses=[MeasuredUsage(100, 0, 0, 40, None), None],
+        )
+        directory.mkdir()
+        (directory / ATTEMPTS_FILE).write_text((attempt.model_dump_json() + '\n') * 2)
+        ledger = data_dir / 'spend' / 'canaries.jsonl'
+        assert not ledger.exists()
+        run_job = jobs.run_job
+
+        def checked_run(config: JobConfig, *, log: Path | None = None) -> Path:
+            (recovered,) = [
+                Entry.model_validate_json(line)
+                for line in ledger.read_text().splitlines()
+            ]
+            assert recovered.job == 'orphaned-job'
+            assert recovered.price == system.price
+            assert recovered.ceiling_usd == pytest.approx(0.27048)
+            return run_job(config, log=log)
+
+        monkeypatch.setattr(jobs, 'run_job', checked_run)
+        changed = system.model_copy(
+            update={
+                'price': Price(input=10, output=20, cache_read=1, cache_write=12),
+                'max_output_tokens': 1024,
+            }
+        )
+        probes = [prepare_probe(changed)] if catalog == 'changed' else []
+
+        canaries.run(probes)
+        frozen = ledger.read_bytes()
+        assert canaries.run([]) == []
+
+        entries = [
+            Entry.model_validate_json(line) for line in ledger.read_text().splitlines()
+        ]
+        recovered = next(entry for entry in entries if entry.job == 'orphaned-job')
+        assert recovered.responses == attempt.responses
+        assert recovered.fingerprint == fingerprint(interrupted.actual)
+        assert recovered.price == system.price
+        assert recovered.ceiling_usd == pytest.approx(0.27048)
+        assert ledger.read_bytes() == frozen
+        if catalog == 'changed':
+            current = next(entry for entry in entries if entry.job != 'orphaned-job')
+            assert current.price == changed.price
+            assert current.ceiling_usd == pytest.approx(1.22048)
+            assert host_jobs == [probes[0].config]
+        else:
+            assert entries == [recovered]
+            assert host_jobs == []
+
+    @pytest.mark.parametrize('failure', ['outcomes', 'append'])
+    def test_reconciles_spend_even_when_an_outcome_cannot_be_saved(
+        self, data_dir: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+    ) -> None:
+        system = make_system()
+        probe = prepare_probe(system)
+        attempt = Attempt(
+            trial='canary__1',
+            system=system.name,
+            fingerprint=fingerprint(probe.actual),
+            started_at=START,
+            finished_at=START,
+            responses=[MeasuredUsage(100, 0, 0, 40, None)],
+        )
+
+        def run_job(config: JobConfig, *, log: Path | None = None) -> Path:
+            directory = jobs.job_path(config)
+            snapshot = Path(f'{directory}.accounting.json')
+            accounting = CanaryAccounting.model_validate_json(snapshot.read_text())
+            assert accounting.system == system.name
+            assert accounting.price == system.price
+            assert accounting.ceiling_usd == probe.ceiling_usd
+            assert not directory.exists()
+            directory.mkdir()
+            (directory / ATTEMPTS_FILE).write_text(attempt.model_dump_json() + '\n')
+            if failure == 'outcomes':
+                trial = directory / 'canary__1'
+                trial.mkdir()
+                (trial / 'result.json').write_text('{malformed')
+            else:
+                key = hashlib.sha256(system.name.encode()).hexdigest()
+                (data_dir / 'canaries' / f'{key}.jsonl').mkdir()
+            return directory
+
+        monkeypatch.setattr(jobs, 'run_job', run_job)
+
+        with pytest.raises(
+            ValidationError if failure == 'outcomes' else IsADirectoryError
+        ):
+            canaries.run([probe])
+
+        (entry,) = [
+            Entry.model_validate_json(line)
+            for line in (data_dir / 'spend' / 'canaries.jsonl').read_text().splitlines()
+        ]
+        assert entry.responses == attempt.responses
+        assert entry.price == system.price
+        assert entry.ceiling_usd == probe.ceiling_usd
+
+    @pytest.mark.parametrize(
+        'names',
+        [('../spend/canaries', 'vendor/model'), ('Model', 'model')],
+        ids=['path-like', 'case-distinct'],
+    )
+    def test_keeps_independent_baselines_without_overwriting_the_spend_ledger(
+        self,
+        endpoint: StubEndpoint,
+        host_jobs: list[JobConfig],
+        data_dir: Path,
+        names: tuple[str, str],
+    ) -> None:
+        first, second = [make_system(name=name) for name in names]
+        endpoint.response = completion('READY') | {'model': 'first-2026'}
+        canaries.run([prepare_probe(first)])
+        endpoint.response = completion('READY') | {'model': 'second-2026'}
+        canaries.run([prepare_probe(second)])
+        endpoint.response = completion('READY') | {'model': 'first-2026'}
+
+        canaries.run([prepare_probe(first)])
+
+        assert [
+            record.response_models for record in canaries.read_records(first.name)
+        ] == [
+            ['first-2026'],
+            ['first-2026'],
+        ]
+        (other,) = canaries.read_records(second.name)
+        assert other.system == second.name
+        assert other.response_models == ['second-2026']
+        assert all(
+            record.system == first.name for record in canaries.read_records(first.name)
+        )
+        entries = [
+            Entry.model_validate_json(line)
+            for line in (data_dir / 'spend' / 'canaries.jsonl').read_text().splitlines()
+        ]
+        assert [entry.system for entry in entries].count(first.name) == 2
+        assert [entry.system for entry in entries].count(second.name) == 1
+        assert all(entry.responses[0] is not None for entry in entries)
+        assert len(endpoint.requests) == len(host_jobs) == 3
+
     @pytest.mark.parametrize(
         'api',
         ['openai-chat-completions', 'openai-responses', 'anthropic-messages'],
