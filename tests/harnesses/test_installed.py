@@ -311,11 +311,13 @@ class TestFinish:
             (logs_dir / path).read_text() == value for path, value in preserved.items()
         )
         if claude:
-            assert set(peers) <= set(recorder.secrets())
+            remembered = all(peer in recorder.secrets() for peer in peers)
+            assert remembered
             with pytest.raises(InputError, match='known credential'):
                 audit_trial(logs_dir, set(recorder.secrets()))
         else:
-            assert not set(peers) & set(recorder.secrets())
+            remembered = any(peer in recorder.secrets() for peer in peers)
+            assert not remembered
 
     @pytest.mark.parametrize('link', ['logs', 'sessions', 'runtime', 'key'])
     def test_does_not_follow_session_control_symlinks(
@@ -384,7 +386,8 @@ class TestFinish:
             asyncio.run(agent.run('Write the greeting.', environment, AgentContext()))
 
         assert target.read_text() == credential
-        assert peer not in recorder.secrets()
+        remembered = peer in recorder.secrets()
+        assert not remembered
         selected = {
             'logs': logs,
             'sessions': logs / 'sessions',
