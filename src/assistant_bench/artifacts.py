@@ -441,7 +441,7 @@ def _selected_path(parts: tuple[str, ...], trial_name: str) -> bool:
         and parts[:2] == ('job', trial_name)
         and (
             (len(parts) == 3 and parts[2] in TRIAL_FILES)
-            or parts[2] in TRIAL_DIRECTORIES
+            or (len(parts) > 3 and parts[2] in TRIAL_DIRECTORIES)
         )
     )
 
@@ -513,14 +513,13 @@ class _TreeEntry:
 def _command(
     arguments: Sequence[str],
     *,
-    cwd: Path | None = None,
     content: bytes | None = None,
     check: bool = True,
     environment: Mapping[str, str] | None = None,
 ) -> subprocess.CompletedProcess[bytes]:
     try:
         result = subprocess.run(
-            arguments, cwd=cwd, input=content, capture_output=True, env=environment
+            arguments, input=content, capture_output=True, env=environment
         )
     except FileNotFoundError as error:
         raise InputError('Private artifacts require `git` and `gh` on PATH.') from error
