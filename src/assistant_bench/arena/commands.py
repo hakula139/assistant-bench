@@ -3,7 +3,7 @@
 import json
 from collections.abc import Sequence
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 import typer
 from pydantic import TypeAdapter, ValidationError
@@ -46,7 +46,7 @@ VoteIds = Annotated[
 
 
 @app.command()
-def prepare(family: FamilyArgument, target: publication.VotingTarget) -> None:
+def prepare(family: FamilyArgument, target: Literal['production', 'private']) -> None:
     """Prepare a cloud publication for review and print its immutable ID."""
     with open_context() as context, d1.connect('private') as database:
         generation = context.state.output_generation(family)
