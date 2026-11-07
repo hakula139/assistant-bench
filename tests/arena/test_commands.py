@@ -6,15 +6,15 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner, Result
 
-from assistant_bench import cli, collection
-from assistant_bench.arena import commands, publication
-from assistant_bench.arena.d1 import D1Error
+from assistant_bench import cli, collection, jobs
+from assistant_bench.arena import commands, local, publication
+from assistant_bench.arena.d1 import D1Error, SQLiteDatabase
 from assistant_bench.catalog import System
 from assistant_bench.collection import Collection
-from assistant_bench.families import Family, load_cases, load_family
+from assistant_bench.families import Family, VotesSettings, load_cases, load_family
+from assistant_bench.messages import InputError
 from assistant_bench.outputs import Output
 from support import (
-    SQLiteDatabase,
     make_system,
     make_trial,
     record_vote,
@@ -64,6 +64,7 @@ def prepared(family: Family) -> Path:
             load_cases(family),
             collected(),
             {name: system.display_name for name, system in SYSTEMS.items()},
+            target='production',
         ),
         collected(),
     )
@@ -89,7 +90,9 @@ def voted(prepared: Path, store: tuple[SQLiteDatabase, list[str]]) -> SQLiteData
     """Publish the prepared file and record two votes from one network tag."""
     database, _ = store
     published = publication.read(prepared)
-    publication.publish(database, published, NOW - timedelta(days=1))
+    publication.publish(
+        database, published, NOW - timedelta(days=1), target='production'
+    )
     record_vote(
         database,
         published,
@@ -254,6 +257,97 @@ class TestPublish:
         assert "'staging'" in result.stderr and "'production'" in result.stderr
 
 
+class TestServe:
+    @pytest.mark.usefixtures('collections')
+    def test_serves_local_content_and_deactivates_a_family_that_loses_its_pairs(
+        self,
+        family: Family,
+        arena_store: SQLiteDatabase,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        assert isinstance(family.settings, VotesSettings)
+        selected = family.model_copy(
+            update={
+                'settings': family.settings.model_copy(update={'public_voting': False})
+            }
+        )
+        calls: list[str] = []
+        generated = True
+
+        def load_family(name: str) -> Family:
+            return selected
+
+        def has_jobs(selected: Family) -> bool:
+            return generated
+
+        monkeypatch.setattr(commands, 'load_family', load_family)
+        monkeypatch.setattr(jobs, 'has_jobs', has_jobs)
+        monkeypatch.setattr(local, 'build', lambda: calls.append('build'))
+        monkeypatch.setattr(local, 'migrate', lambda: calls.append('migrate'))
+        monkeypatch.setattr(local, 'database', lambda: nullcontext(arena_store))
+        monkeypatch.setattr(local, 'keys', lambda: {'ACTOR_KEY': 'synthetic-key'})
+
+        def serve(keys: dict[str, str]) -> None:
+            calls.append('serve')
+            assert keys == {'ACTOR_KEY': 'synthetic-key'}
+            assert arena_store.execute('SELECT split FROM cases').rows == [
+                {'split': 'public'},
+                {'split': 'public'},
+            ]
+            with pytest.raises(InputError, match='Stop `bench serve`'), local.lock():
+                pytest.fail('The server released its lock before exiting.')
+
+        monkeypatch.setattr(local, 'serve', serve)
+
+        first = runner.invoke(cli.app, ['serve'])
+        assert first.exit_code == 0, first.output
+        generated = False
+        second = runner.invoke(cli.app, ['serve'])
+
+        assert second.exit_code == 1
+        assert 'No local case has two different passing outputs' in second.stderr
+        assert arena_store.execute('SELECT family FROM active').rows == []
+        assert calls == ['build', 'migrate', 'serve', 'build', 'migrate']
+
+    @pytest.mark.parametrize('failure', ['collection', 'build', 'migration'])
+    @pytest.mark.usefixtures('collections')
+    def test_stops_preparation_failures_before_starting_the_server(
+        self,
+        failure: str,
+        family: Family,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        calls: list[str] = []
+
+        def fail(*args: object) -> None:
+            raise InputError('The preparation input is invalid.')
+
+        def has_jobs(selected: Family) -> bool:
+            return True
+
+        def serve(keys: dict[str, str]) -> None:
+            pytest.fail('Server started.')
+
+        monkeypatch.setattr(jobs, 'has_jobs', has_jobs)
+        monkeypatch.setattr(local, 'build', lambda: calls.append('build'))
+        monkeypatch.setattr(local, 'migrate', lambda: calls.append('migration'))
+        monkeypatch.setattr(local, 'serve', serve)
+        if failure == 'collection':
+            monkeypatch.setattr(collection, 'collect', fail)
+        else:
+            monkeypatch.setattr(
+                local, 'build' if failure == 'build' else 'migrate', fail
+            )
+
+        result = runner.invoke(cli.app, ['serve'])
+
+        assert result.exit_code == 1
+        assert result.stderr == 'The preparation input is invalid.\n'
+        assert calls == (['build'] if failure == 'migration' else [])
+        with local.lock():
+            pass
+
+
 class TestStatus:
     def test_summarizes_the_active_families(
         self, prepared: Path, store: tuple[SQLiteDatabase, list[str]]
@@ -261,7 +355,7 @@ class TestStatus:
         database, _ = store
         published = publication.read(prepared)
         now = datetime.now(UTC)
-        publication.publish(database, published, now)
+        publication.publish(database, published, now, target='production')
         record_vote(database, published, now, actor='voter', age=timedelta(hours=1))
 
         result = invoke('status', 'production', 'writing-f')

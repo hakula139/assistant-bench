@@ -13,7 +13,7 @@ import textwrap
 import threading
 import tomllib
 from collections import defaultdict
-from collections.abc import Generator, Iterator, Mapping, Sequence
+from collections.abc import Generator, Iterator, Mapping
 from contextlib import closing, contextmanager, suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -46,7 +46,7 @@ from harbor.models.trial.result import (
 from harbor.models.verifier.result import VerifierResult
 from harbor.trial.regrade import local_task_name
 
-from assistant_bench.arena.d1 import Param, Result, Row
+from assistant_bench.arena.d1 import SQLiteDatabase
 from assistant_bench.arena.publication import (
     CaseFacts,
     Inventory,
@@ -919,20 +919,6 @@ def make_trial(
 MIGRATIONS_DIR = Path(__file__).parents[1] / 'web' / 'migrations'
 
 
-class SQLiteDatabase:
-    """The `d1.Database` protocol on CPython's sqlite3, in auto-commit like D1."""
-
-    def __init__(self, connection: sqlite3.Connection) -> None:
-        self.connection = connection
-
-    def execute(self, sql: str, params: Sequence[Param] = ()) -> Result:
-        before = self.connection.total_changes
-        cursor = self.connection.execute(sql, list(params))
-        columns = [column[0] for column in cursor.description or ()]
-        rows: list[Row] = [dict(zip(columns, row, strict=True)) for row in cursor]
-        return Result(rows=rows, changes=self.connection.total_changes - before)
-
-
 def record_vote(
     database: SQLiteDatabase,
     published: Publication,
@@ -1178,7 +1164,9 @@ def make_round(days: int, taken_at: datetime) -> tuple[Snapshot, list[Output]]:
         reference='acme-large',
         systems=ROUND_NAMES,
         defects=PROSE_DEFECTS,
-        cases=tuple(CaseFacts(key=case, category=c) for case, c in cases.items()),
+        cases=tuple(
+            CaseFacts(key=case, category=c, split='public') for case, c in cases.items()
+        ),
         outputs=tuple(facts),
     )
     cut = Cut(

@@ -24,6 +24,7 @@ from typer.testing import CliRunner, Result
 
 from assistant_bench import catalog, cli, collection, jobs, report
 from assistant_bench.arena import publication, votes
+from assistant_bench.arena.d1 import SQLiteDatabase
 from assistant_bench.catalog import (
     EXPORT_VAR,
     NixosConfigExport,
@@ -43,7 +44,6 @@ from assistant_bench.tasks import render_task_config, render_tasks
 from support import (
     FIXTURES,
     REPORT_FIXTURE,
-    SQLiteDatabase,
     current_fingerprints,
     finish_job,
     make_output,
@@ -1808,9 +1808,12 @@ class TestClose:
             load_cases(family),
             outputs,
             {'large': 'Public Large', 'small': 'Public Small'},
+            target='production',
         )
         store = Store(arena_store, published, [])
-        publication.publish(store.database, published, datetime.now(UTC))
+        publication.publish(
+            store.database, published, datetime.now(UTC), target='production'
+        )
 
         def connect(target: str) -> AbstractContextManager[SQLiteDatabase]:
             store.targets.append(target)

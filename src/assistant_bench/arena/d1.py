@@ -1,6 +1,7 @@
 """The arena's D1 databases, reached over Cloudflare's REST API."""
 
 import os
+import sqlite3
 import tomllib
 from collections.abc import Generator, Sequence
 from contextlib import contextmanager
@@ -45,6 +46,19 @@ class Database(Protocol):
     def execute(self, sql: str, params: Sequence[Param] = ()) -> Result:
         """Run one statement in auto-commit, binding `params` to its `?` slots."""
         ...
+
+
+class SQLiteDatabase:
+    """The database protocol on an autocommit SQLite connection."""
+
+    def __init__(self, connection: sqlite3.Connection) -> None:
+        self.connection = connection
+
+    def execute(self, sql: str, params: Sequence[Param] = ()) -> Result:
+        cursor = self.connection.execute(sql, list(params))
+        columns = [column[0] for column in cursor.description or ()]
+        rows: list[Row] = [dict(zip(columns, row, strict=True)) for row in cursor]
+        return Result(rows=rows, changes=max(cursor.rowcount, 0))
 
 
 # ── REST Client ──

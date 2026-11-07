@@ -34,6 +34,16 @@ from assistant_bench.scoring.length import text_length
 
 
 PUBLIC_SOURCES: tuple[CaseSource, ...] = ('public', 'synthetic')
+type VotingTarget = Literal['production', 'local']
+type CaseSplit = Literal['public', 'held-out', 'private']
+
+CASE_SPLITS: dict[CaseSource, CaseSplit] = {
+    'synthetic': 'public',
+    'public': 'public',
+    'transcript': 'private',
+    'held-out': 'held-out',
+}
+
 MAX_PARAMS = 100
 """D1's limit on the parameters one statement binds."""
 
@@ -48,6 +58,7 @@ class _Model(BaseModel):
 class CaseFacts(_Model):
     key: str
     category: Category
+    split: CaseSplit
 
 
 class PublishedCase(CaseFacts):
@@ -96,6 +107,7 @@ class Publication(_Model):
     """An immutable snapshot of a family's cases and outputs, named by its digest."""
 
     id: str
+    target: VotingTarget
     family: FamilyName
     display_name: str
     aspect: str | None
@@ -118,6 +130,18 @@ class Publication(_Model):
 # ── Preparation ──
 
 
+class NoPairsError(InputError):
+    """The selected publication has no comparison two systems can form."""
+
+
+def voting_target(family: Family, case: Case) -> VotingTarget:
+    """Select the sole vote store allowed to hold this case's content."""
+    assert isinstance(family.settings, VotesSettings)
+    if family.settings.public_voting and case.source in PUBLIC_SOURCES:
+        return 'production'
+    return 'local'
+
+
 def case_key(case: Case) -> str:
     """Digest what the voter reads, so an unchanged case keeps its key."""
     checklist: list[JsonValue] = list(case.checklist)
@@ -134,10 +158,10 @@ def prepare(
     cases: Sequence[Case],
     outputs: Sequence[Output],
     system_names: Mapping[str, str],
+    *,
+    target: VotingTarget,
 ) -> Publication:
-    """Build the production publication of the family's listed systems.
-
-    It holds only the public and synthetic cases, the ones production votes on.
+    """Build the target's publication of the family's listed systems.
 
     Raises
     ------
@@ -150,7 +174,7 @@ def prepare(
     if not isinstance(settings, VotesSettings):
         raise InputError(f'Family `{family.name}` is not scored by votes.')
 
-    if not settings.public_voting:
+    if target == 'production' and not settings.public_voting:
         raise InputError(
             f'Family `{family.name}` sets no `public_voting`, so production votes '
             'on none of its cases. Set `public_voting = true` in '
@@ -158,8 +182,13 @@ def prepare(
             'be shown to the public.'
         )
 
-    keys = {case.id: case_key(case) for case in cases if case.source in PUBLIC_SOURCES}
-    _refuse_repeated_cases(keys)
+    all_keys = {case.id: case_key(case) for case in cases}
+    _refuse_repeated_cases(all_keys)
+    keys = {
+        case.id: all_keys[case.id]
+        for case in cases
+        if voting_target(family, case) == target
+    }
 
     kept = [
         output
@@ -179,14 +208,15 @@ def prepare(
         key=lambda output: output.key,
     )
     if not _pairable(published):
-        raise InputError(
-            f'Family `{family.name}` has no production case on which two systems '
+        raise NoPairsError(
+            f'Family `{family.name}` has no {target} case on which two systems '
             'have different passing outputs, so no pair can be voted on.'
         )
 
     used = {output.case_key for output in published}
     draft = Publication(
         id='',
+        target=target,
         family=family.name,
         display_name=settings.display_name,
         aspect=settings.aspect,
@@ -204,6 +234,7 @@ def prepare(
                     PublishedCase(
                         key=keys[case.id],
                         category=case.category,
+                        split=CASE_SPLITS[case.source],
                         source=case.source,
                         instruction=case.instruction,
                         checklist=tuple(case.checklist),
@@ -347,7 +378,13 @@ def _fenced(text: str, language: str) -> str:
 # ── Publishing ──
 
 
-def publish(database: Database, publication: Publication, now: datetime) -> bool:
+def publish(
+    database: Database,
+    publication: Publication,
+    now: datetime,
+    *,
+    target: Literal['staging', 'production', 'local'],
+) -> bool:
     """Stage the publication and activate it for its family.
 
     Each step is idempotent, so rerunning an interrupted publish completes it.
@@ -359,7 +396,15 @@ def publish(database: Database, publication: Publication, now: datetime) -> bool
         A case's source is neither public nor synthetic, or the staged rows do
         not match the publication.
     """
-    if private := [c for c in publication.cases if c.source not in PUBLIC_SOURCES]:
+    expected = 'local' if target == 'local' else 'production'
+    if publication.target != expected:
+        raise InputError(
+            f'Publication `{publication.id}` targets `{publication.target}`, '
+            f'so it cannot be published to `{target}`.'
+        )
+    if target != 'local' and (
+        private := [c for c in publication.cases if c.source not in PUBLIC_SOURCES]
+    ):
         raise InputError(
             f'Publication `{publication.id}` holds {len(private)} cases whose source '
             'is neither `public` nor `synthetic`, so it cannot leave this machine.'
@@ -393,12 +438,13 @@ def publish(database: Database, publication: Publication, now: datetime) -> bool
     _insert(
         database,
         'cases',
-        ('publication_id', 'case_key', 'category', 'instruction', 'checklist'),
+        ('publication_id', 'case_key', 'category', 'split', 'instruction', 'checklist'),
         [
             (
                 publication.id,
                 case.key,
                 case.category,
+                case.split,
                 case.instruction,
                 json.dumps(case.checklist, ensure_ascii=False),
             )

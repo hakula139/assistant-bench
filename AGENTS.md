@@ -7,6 +7,7 @@ This file specifies the rules for every change and points to the conventions for
 ```bash
 uv run bench check                               # Validate every family and its reference solutions
 uv run bench run --system <name>                  # Generate a system's missing trials
+uv run bench serve                               # Vote locally on private cases
 uv run bench arena status production writing-zh  # Inspect the published voting family
 uv run bench close writing-zh                    # Close a voted round from the production votes
 ```

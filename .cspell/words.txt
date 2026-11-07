@@ -36,6 +36,7 @@ evals
 exog
 expit
 fallocate
+fcntl
 fdatasync
 fileno
 fsize

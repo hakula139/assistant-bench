@@ -8,20 +8,20 @@ from typing import Any
 import pytest
 
 from assistant_bench.arena import publication
-from assistant_bench.arena.d1 import Param, Result
+from assistant_bench.arena.d1 import Param, Result, SQLiteDatabase
 from assistant_bench.arena.publication import Publication
 from assistant_bench.families import (
     Case,
     Family,
     Gate,
 )
+from assistant_bench.messages import InputError
 from assistant_bench.outputs import Output
 from support import (
     ARENA_NAMES,
     ARENA_SYSTEMS,
     CODE_DEFECTS,
     FIXTURES,
-    SQLiteDatabase,
     make_case,
     make_trial,
     make_votes_family,
@@ -35,7 +35,7 @@ NOW = datetime(2026, 10, 29, 12, tzinfo=UTC)
 def prepare(
     family: Family, cases: Sequence[Case], outputs: Sequence[Output]
 ) -> Publication:
-    return publication.prepare(family, cases, outputs, ARENA_NAMES)
+    return publication.prepare(family, cases, outputs, ARENA_NAMES, target='production')
 
 
 def text_publication() -> Publication:
@@ -93,6 +93,45 @@ class RecordingDatabase:
 
 
 class TestPrepare:
+    @pytest.mark.parametrize('public_voting', [True, False])
+    def test_partitions_local_cases_and_records_their_split(
+        self, public_voting: bool
+    ) -> None:
+        family = make_votes_family(public_voting=public_voting)
+        cases = [
+            make_case('open', 'synthetic'),
+            make_case('quoted', 'public'),
+            make_case('private', 'transcript'),
+            make_case('secret', 'held-out'),
+        ]
+        outputs = [
+            make_trial(case.id, system) for case in cases for system in ARENA_SYSTEMS
+        ]
+        names = {publication.case_key(case): case.id for case in cases}
+
+        local = publication.prepare(family, cases, outputs, ARENA_NAMES, target='local')
+
+        expected = {'private': 'private', 'secret': 'held-out'}
+        if not public_voting:
+            expected |= {'open': 'public', 'quoted': 'public'}
+        assert {names[case.key]: case.split for case in local.cases} == expected
+        assert {row.case_key for row in local.outputs} == {
+            case.key for case in local.cases
+        }
+        assert local.target == 'local'
+        assert (
+            local.identity()
+            != local.model_copy(update={'target': 'production'}).identity()
+        )
+
+    def test_refuses_duplicate_cases_across_vote_stores(self) -> None:
+        first = make_case('first')
+        second = first.model_copy(update={'id': 'second', 'source': 'held-out'})
+        outputs = [make_trial('first', system) for system in ARENA_SYSTEMS]
+
+        with pytest.raises(InputError, match='share an instruction and checklist'):
+            prepare(make_votes_family(), [first, second], outputs)
+
     def test_publishes_only_the_public_and_synthetic_cases(self) -> None:
         family = make_votes_family()
         cases = [
@@ -361,13 +400,43 @@ class TestRead:
 
 
 class TestPublish:
+    def test_local_private_content_never_reaches_a_remote_store(
+        self, arena_store: SQLiteDatabase
+    ) -> None:
+        family = make_votes_family()
+        cases = [make_case('private', 'transcript'), make_case('hidden', 'held-out')]
+        prepared = publication.prepare(
+            family,
+            cases,
+            [make_trial(case.id, system) for case in cases for system in ARENA_SYSTEMS],
+            ARENA_NAMES,
+            target='local',
+        )
+        remote = RecordingDatabase(arena_store)
+
+        for target in ('staging', 'production'):
+            with pytest.raises(InputError, match='cannot be published'):
+                publication.publish(remote, prepared, NOW, target=target)
+        assert remote.statements == []
+        changed = publication.publish(arena_store, prepared, NOW, target='local')
+
+        assert changed
+        assert rows(arena_store, 'SELECT split FROM cases ORDER BY split') == [
+            ('held-out',),
+            ('private',),
+        ]
+        assert rows(arena_store, 'SELECT content FROM outputs ORDER BY content') == [
+            (row.content,)
+            for row in sorted(prepared.outputs, key=lambda row: row.content or '')
+        ]
+
     def test_stages_and_activates_the_publication(
         self, arena_store: SQLiteDatabase
     ) -> None:
         database = arena_store
         published = text_publication()
 
-        changed = publication.publish(database, published, NOW)
+        changed = publication.publish(database, published, NOW, target='production')
 
         assert changed
         assert rows(database, 'SELECT family, publication_id FROM active') == [
@@ -390,7 +459,7 @@ class TestPublish:
         )
         recording = RecordingDatabase(arena_store)
 
-        publication.publish(recording, published, NOW)
+        publication.publish(recording, published, NOW, target='production')
 
         inserts = [sql.split()[2] for sql in recording.statements if 'VALUES' in sql]
         assert inserts.count('cases') == 2
@@ -402,10 +471,10 @@ class TestPublish:
     ) -> None:
         database = arena_store
         published = text_publication()
-        publication.publish(database, published, NOW)
+        publication.publish(database, published, NOW, target='production')
         recording = RecordingDatabase(database)
 
-        changed = publication.publish(recording, published, NOW)
+        changed = publication.publish(recording, published, NOW, target='production')
 
         assert not changed
         assert len(recording.statements) == 1
@@ -420,9 +489,9 @@ class TestPublish:
             database, lambda sql: sql.startswith('INSERT INTO outputs')
         )
         with pytest.raises(Interrupted):
-            publication.publish(interrupted, published, NOW)
+            publication.publish(interrupted, published, NOW, target='production')
 
-        changed = publication.publish(database, published, NOW)
+        changed = publication.publish(database, published, NOW, target='production')
 
         assert changed
         assert rows(database, 'SELECT publication_id FROM active') == [(published.id,)]
@@ -437,7 +506,7 @@ class TestPublish:
         )
 
         with pytest.raises(ValueError, match='not completely staged'):
-            publication.publish(database, incomplete, NOW)
+            publication.publish(database, incomplete, NOW, target='production')
 
         assert rows(database, 'SELECT * FROM active') == []
 
@@ -446,14 +515,14 @@ class TestPublish:
     ) -> None:
         database = arena_store
         first = text_publication()
-        publication.publish(database, first, NOW)
+        publication.publish(database, first, NOW, target='production')
         second = prepare(
             make_votes_family(),
             [make_case('first')],
             [make_trial('first', system) for system in ARENA_SYSTEMS],
         )
 
-        publication.publish(database, second, NOW)
+        publication.publish(database, second, NOW, target='production')
 
         assert rows(database, 'SELECT publication_id FROM active') == [(second.id,)]
         assert rows(database, 'SELECT count(*) FROM publications') == [(2,)]
@@ -470,7 +539,7 @@ class TestPublish:
         private = draft.model_copy(update={'id': draft.identity()})
 
         with pytest.raises(ValueError, match='cannot leave this machine'):
-            publication.publish(database, private, NOW)
+            publication.publish(database, private, NOW, target='production')
 
         assert rows(database, 'SELECT count(*) FROM publications') == [(0,)]
 
@@ -482,7 +551,7 @@ class TestPublish:
         database = arena_store
 
         for published in (text_publication(), diff_publication()):
-            publication.publish(database, published, NOW)
+            publication.publish(database, published, NOW, target='production')
 
         dumped = dump(database.connection)
         if (
