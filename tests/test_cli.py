@@ -699,8 +699,8 @@ class TestCheck:
         assert (result.exit_code, result.stdout, result.stderr) == (
             1,
             '',
-            'Family `f`: harness `claude-code` is not one of `generate`, '
-            '`terminus-2`.\n',
+            'System `opus-5.5-high`: set its `harness` and pinned `version` '
+            'in `systems.toml`.\n',
         )
         assert submitted == []
 

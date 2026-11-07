@@ -671,11 +671,13 @@ def message_stream(payload: dict[str, Any]) -> list[bytes]:
     events: list[dict[str, Any]] = [{'type': 'message_start', 'message': start}]
     for index, block in enumerate(payload['content']):
         kind = block['type']
-        initial = (
+        initial: dict[str, Any] = (
             {'type': 'text', 'text': ''}
             if kind == 'text'
             else {'type': 'thinking', 'thinking': '', 'signature': ''}
             if kind == 'thinking'
+            else {**block, 'input': {}}
+            if kind == 'tool_use'
             else block
         )
         events.append(
@@ -689,6 +691,10 @@ def message_stream(payload: dict[str, Any]) -> list[bytes]:
                 {'type': 'signature_delta', 'signature': block['signature']},
             ]
             if kind == 'thinking'
+            else [
+                {'type': 'input_json_delta', 'partial_json': json.dumps(block['input'])}
+            ]
+            if kind == 'tool_use'
             else []
         )
         events.extend(

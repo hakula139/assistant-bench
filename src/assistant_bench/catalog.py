@@ -128,8 +128,17 @@ class SystemConfig(BaseModel):
     prompt: str | None = None
     """`nixos-config:<client>` selects global instructions as the system message."""
 
+    harness: Literal['claude-code', 'codex'] | None = None
+    version: Annotated[str, StringConstraints(pattern=r'^\d+\.\d+\.\d+$')] | None = None
+
     display_name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
     """Public label the site and reports show."""
+
+    @model_validator(mode='after')
+    def _check_harness_version(self) -> Self:
+        if (self.harness is None) != (self.version is None):
+            raise ValueError('`harness` and `version` must be set together')
+        return self
 
 
 _CONFIGS = TypeAdapter(dict[str, SystemConfig], config=ConfigDict(title='systems.toml'))
@@ -152,6 +161,7 @@ class SystemIdentity(BaseModel):
     thinking_mode: ThinkingMode | None = None
     prompt: str | None
     harness: str
+    version: str | None = None
     generation: Generation
     """Captured revision metadata, unchanged when another runtime resolves systems."""
 
@@ -263,7 +273,8 @@ def resolve_system(
                 else None
             ),
             prompt=_prompt(name, config.prompt, export),
-            harness='generate',
+            harness=config.harness or 'generate',
+            version=config.version,
             name=name,
             display_name=config.display_name,
             price=_price(entry.channel_cost.get(channel)),

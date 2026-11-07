@@ -56,6 +56,24 @@ class TestPrice:
         assert cost == (pytest.approx(expected) if expected is not None else None)
 
 
+class TestSystemConfig:
+    @pytest.mark.parametrize(
+        'fields',
+        [
+            {'harness': 'codex'},
+            {'version': '1.2.3'},
+            {'harness': 'codex', 'version': 'latest'},
+            {'harness': 'codex', 'version': '../1.2.3'},
+        ],
+        ids=['missing-version', 'missing-harness', 'unpinned-version', 'path-version'],
+    )
+    def test_requires_a_pinned_version_with_an_installed_harness(
+        self, fields: dict[str, Any]
+    ) -> None:
+        with pytest.raises(ValueError):
+            make_config(**fields)
+
+
 class TestLoadSystems:
     def test_resolves_each_table(
         self, export: NixosConfigExport, tmp_path: Path

@@ -19,23 +19,23 @@ categories = ["message"]
 
 A `family.toml` lists its fields in this order:
 
-| Field           | Required                   | Meaning                                                                                                                                                                               |
-| --------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `scorer`        | yes                        | `votes` for blind pairwise votes, or `tests` for a task family's test rewards. Case families use `votes`                                                                              |
-| `aspect`        | public families            | The skill measured. A public family uses an aspect from `web/src/lib/aspects.ts` and an ID starting with it. A private family may use any aspect ID                                   |
-| `display_name`  | yes                        | The short name within the aspect, or the whole name without one. The full name must be unique                                                                                         |
-| `public`        | no                         | Whether the site lists the family, its systems, and reports. Defaults to `false`                                                                                                      |
-| `public_voting` | no                         | For `votes`, publish the family for [production voting](../design/arena.md#publication-and-closing). Defaults to `false`                                                              |
-| `systems`       | no                         | The `systems.toml` tables to run. Defaults to empty                                                                                                                                   |
-| `reference`     | `votes`                    | One of `systems`, anchored at 1,000 when the round ranks it                                                                                                                           |
-| `render`        | `votes` task families      | `text` (default) for cases. Tasks require `diff`, showing each solution against `environment/app/`                                                                                    |
-| `language`      | no                         | `zh` or `en` for a `votes` case family's language gate                                                                                                                                |
-| `samples`       | yes                        | Harbor attempts per task and system, at least 1. Raising it runs only the extra attempts                                                                                              |
-| `harness`       | task families with systems | The agent every system uses, which must act in the task's environment, so currently `terminus-2`. Changing it replaces the family's trials. Case families use `generate` and set none |
-| `budget_usd`    | no                         | The USD that the [spend ledger](running.md#spend-and-budgets) and a run's projection may reach before `bench run` refuses priced pending trials. Defaults to none                     |
-| `categories`    | no                         | The case category IDs, in board order, that its cases and task metadata may use. Reports publish the IDs, and the site labels them from its glossary                                  |
-| `defects`       | no                         | For `votes`, unique issue IDs in presentation order. Defaults to empty, hiding Issues buttons. [Voting](voting.md#casting-a-vote) gives their shortcuts                               |
-| `[gates]`       | no                         | A `votes` case family's `min_chars`, `max_chars`, and `script = "hans"`, defined in [Writing](../design/families/writing.md#gates)                                                    |
+| Field           | Required                   | Meaning                                                                                                                                                                 |
+| --------------- | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `scorer`        | yes                        | `votes` for blind pairwise votes, or `tests` for a task family's test rewards. Case families use `votes`                                                                |
+| `aspect`        | public families            | The skill measured. A public family uses an aspect from `web/src/lib/aspects.ts` and an ID starting with it. A private family may use any aspect ID                     |
+| `display_name`  | yes                        | The short name within the aspect, or the whole name without one. The full name must be unique                                                                           |
+| `public`        | no                         | Whether the site lists the family, its systems, and reports. Defaults to `false`                                                                                        |
+| `public_voting` | no                         | For `votes`, publish the family for [production voting](../design/arena.md#publication-and-closing). Defaults to `false`                                                |
+| `systems`       | no                         | The `systems.toml` tables to run. Defaults to empty                                                                                                                     |
+| `reference`     | `votes`                    | One of `systems`, anchored at 1,000 when the round ranks it                                                                                                             |
+| `render`        | `votes` task families      | `text` (default) for cases. Tasks require `diff`, showing each solution against `environment/app/`                                                                      |
+| `language`      | no                         | `zh` or `en` for a `votes` case family's language gate                                                                                                                  |
+| `samples`       | yes                        | Harbor attempts per task and system, at least 1. Raising it runs only the extra attempts                                                                                |
+| `harness`       | task families with systems | The default agent for systems without an explicit harness, normally `terminus-2`. Changing it replaces those systems' trials. Case families use `generate` and set none |
+| `budget_usd`    | no                         | The USD that the [spend ledger](running.md#spend-and-budgets) and a run's projection may reach before `bench run` refuses priced pending trials. Defaults to none       |
+| `categories`    | no                         | The case category IDs, in board order, that its cases and task metadata may use. Reports publish the IDs, and the site labels them from its glossary                    |
+| `defects`       | no                         | For `votes`, unique issue IDs in presentation order. Defaults to empty, hiding Issues buttons. [Voting](voting.md#casting-a-vote) gives their shortcuts                 |
+| `[gates]`       | no                         | A `votes` case family's `min_chars`, `max_chars`, and `script = "hans"`, defined in [Writing](../design/families/writing.md#gates)                                      |
 
 A new category ID updates the `Category` literal, the `categories` list in `lib/categories.ts`, and the glossary, as [TypeScript](../conventions/typescript.md#reports) describes along with new defect IDs and languages.
 
@@ -118,9 +118,13 @@ display_name = "Claude Opus 5.5 · nixos-config"
 | `api`          | `openai-chat-completions` by default, `openai-responses`, or `anthropic-messages`. The catalog must support the selected API and effort |
 | `effort`       | A reasoning effort the catalog accepts for the model. A model that requires one defaults to its catalog level                           |
 | `prompt`       | The system message, as `nixos-config:<client>` for a rendered instruction file                                                          |
+| `harness`      | An installed agent override, `claude-code` for native Messages or `codex` for Responses. Requires `version` and a task family           |
+| `version`      | The installed CLI's pinned `major.minor.patch` release. Requires `harness`                                                              |
 | `display_name` | The required public name that the site and reports show                                                                                 |
 
 The site shows the display name, while URLs and outputs keep the table name. Closed reports freeze their own public labels and fingerprints. Display names must be unique within the catalog and within each report, so variants and snapshots need distinct labels.
+
+Installed agents use table names of the form `<model>-<harness>-<effort>`, and their display names include the model and harness. They cannot accept `prompt`. Their task images need the libraries the vendor's Linux executable requires, and the host needs access to the vendor's public release downloads.
 
 [Systems](../design/systems.md#fingerprints) decides whether a system whose fingerprint changes keeps its name. A rename alone keeps the fingerprint but reruns the system, since Harbor reuses a trial only under the same agent config.
 

@@ -47,6 +47,8 @@ Each case and system pair runs `samples` times, retrying a failed trial once. A 
 
 On a task family, the harness runs until completion or the task's operational timeout. The task's tests then grade `/app` in a fresh container, which needs Docker. Harbor reruns an errored trial on the next run. Until a rerun succeeds, a trial whose agent timed out or failed keeps its tests' verdict, while one the tests never graded has none.
 
+Installed agents require a named local Docker context using a Unix socket or Docker Desktop. Select it with `DOCKER_CONTEXT`. A standalone `DOCKER_HOST` and contexts using SSH or TCP endpoints are unsupported, since the model proxy runs on the client host. This is checked before CLI downloads or model calls.
+
 When Harbor exits, `bench run` collects the family's trials into `outputs/<family>.jsonl` and prints the summary that [Collecting Outputs](#collecting-outputs) describes, also when Harbor fails, so finished trials land before the command exits.
 
 Because a rerun generates only the trials that no earlier job of the family finished, adding a system to `family.toml` and rerunning sends requests for that system alone.
@@ -192,6 +194,7 @@ Everything a run produces stays out of Git in the [data directory](../convention
 
 ```text
 assistant-bench/
+├── agents/<harness>/<version>/<platform>/  # Verified vendor CLI executables for installed agents
 ├── cases/<family>.toml                     # Local cases, appended to the committed ones
 ├── cases/<family>/<task>/                  # Local tasks, beside the committed ones
 ├── checks/<family>/<job>/                  # Oracle and nop jobs from `bench check`

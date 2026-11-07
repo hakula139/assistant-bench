@@ -36,7 +36,12 @@ from assistant_bench.harnesses.native import (
 )
 from assistant_bench.harnesses.options import ApiOptions
 from assistant_bench.harnesses.responses import ResponsesLLM
-from assistant_bench.harnesses.usage import MeasuredUsage, append_attempt, measure
+from assistant_bench.harnesses.usage import (
+    MeasuredUsage,
+    append_attempt,
+    measure,
+    record_calls,
+)
 
 
 _RESPONSE = TypeAdapter(dict[str, Any])
@@ -125,7 +130,7 @@ class Terminus(Terminus2):
     @override
     def version(self) -> str:
         assert isinstance(self.options, TerminusOptions)
-        return load_generation().version('terminus-2', self.options.api)
+        return load_generation().version(True, self.options.api)
 
     @classmethod
     @override
@@ -298,26 +303,7 @@ class Terminus(Terminus2):
             if isinstance(llm, NativeLLM):
                 context.metadata['attempts'] = llm.attempts
             calls = llm.calls
-            context.metadata['cache_write_unpriced'] = any(
-                call.get('cache_write_unpriced', False) for call in calls
-            )
-            context.metadata['calls'] = calls
-            if calls and all('input_tokens' in call for call in calls):
-                context.n_input_tokens = sum(call['input_tokens'] for call in calls)
-                context.n_cache_tokens = sum(call['cache_tokens'] for call in calls)
-                context.n_output_tokens = sum(call['output_tokens'] for call in calls)
-                context.metadata['cache_write_tokens'] = sum(
-                    call['cache_write_tokens'] for call in calls
-                )
-                reasoning = [call['reasoning_tokens'] for call in calls]
-                context.metadata['reasoning_tokens'] = (
-                    None if None in reasoning else sum(reasoning)
-                )
-            else:
-                context.n_input_tokens = None
-                context.n_cache_tokens = None
-                context.n_output_tokens = None
-            context.cost_usd = None
+            record_calls(context, calls)
             append_attempt(
                 self.logs_dir,
                 self.options,

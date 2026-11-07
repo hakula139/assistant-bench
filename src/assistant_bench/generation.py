@@ -20,13 +20,13 @@ class Generation(BaseModel):
     messages_protocol: int = Field(gt=0)
     anthropic_api_version: str
 
-    def version(self, harness: str, api: str | None = None) -> str:
+    def version(self, harbor_loop: bool, api: str | None = None) -> str:
         if api == 'anthropic-messages':
             return (
-                f'{self.version(harness)}+messages.{self.messages_protocol}'
+                f'{self.version(harbor_loop)}+messages.{self.messages_protocol}'
                 f'.{self.anthropic_api_version}'
             )
-        if harness == 'terminus-2':
+        if harbor_loop:
             return f'{self.harbor}+bench.{self.protocol}'
         return str(self.protocol)
 

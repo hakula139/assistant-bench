@@ -48,7 +48,7 @@ class Generate(BaseAgent):
     @override
     def version(self) -> str:
         assert isinstance(self.options, GenerateOptions)
-        return load_generation().version('generate', self.options.api)
+        return load_generation().version(False, self.options.api)
 
     @classmethod
     @override

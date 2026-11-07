@@ -109,7 +109,7 @@ class TestGenerate:
 
             version = agent.version()
 
-            assert version == load_generation().version('generate')
+            assert version == load_generation().version(False)
 
     class TestPreflight:
         def test_rejects_an_unknown_option(self, endpoint: StubEndpoint) -> None:

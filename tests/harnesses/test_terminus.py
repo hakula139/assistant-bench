@@ -287,7 +287,7 @@ class TestTerminus:
         assert agent.client.get_model_context_limit() == 98304
         assert agent.client.get_model_output_limit() == 32768
         assert agent.options.max_turns is None
-        assert agent.version() == load_generation().version('terminus-2')
+        assert agent.version() == load_generation().version(True)
         assert endpoint.requests == []
 
     class TestPreflight:

@@ -5,6 +5,7 @@ import sys
 from collections import Counter
 from datetime import datetime, timedelta, tzinfo
 from pathlib import Path
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from harbor.job_diff import DiffAction, compare_job_trials, load_source_trials
@@ -55,17 +56,18 @@ class TestCheckSystems:
         ('harness', 'system', 'message'),
         [
             pytest.param(
-                'claude-code',
+                'unknown',
                 make_system(),
-                'Family `f`: harness `claude-code` is not one of `generate`, '
-                '`terminus-2`.',
+                'Family `f`: harness `unknown` is not one of `generate`, '
+                '`terminus-2`, `claude-code`, `codex`.',
                 id='unknown-harness',
             ),
             pytest.param(
                 'generate',
                 make_system(),
                 'Family `f`: harness `generate` makes one request and never acts '
-                "in a task's environment, so choose among `terminus-2`.",
+                "in a task's environment, so choose among `terminus-2`, "
+                '`claude-code`, `codex`.',
                 id='single-call-harness',
             ),
             pytest.param(
@@ -74,6 +76,20 @@ class TestCheckSystems:
                 'Family `f` lists `acme-large`, whose prompt the `terminus-2` '
                 'harness cannot send. Remove them from `systems`.',
                 id='unsent-prompt',
+            ),
+            pytest.param(
+                'terminus-2',
+                make_system(harness='codex', version='1.2.3'),
+                'System `acme-large`: harness `codex` accepts '
+                '`openai-responses` (got `openai-chat-completions`).',
+                id='installed-wrong-api',
+            ),
+            pytest.param(
+                'codex',
+                make_system(api='openai-responses'),
+                'System `acme-large`: set its `harness` and pinned `version` '
+                'in `systems.toml`.',
+                id='installed-missing-version',
             ),
         ],
     )
@@ -481,8 +497,44 @@ class TestRunJob:
         shutil.copyfile(FIXTURES / 'recording-harbor.sh', harbor)
         harbor.chmod(0o755)
         monkeypatch.setenv('STUB_HARBOR_EXIT_CODE', str(exit_code))
+        environment = jobs.harbor_environment()
+        monkeypatch.setattr(
+            jobs,
+            'harbor_environment',
+            lambda: environment | {'STUB_HARBOR_EXIT_CODE': str(exit_code)},
+        )
         monkeypatch.setattr(sys, 'executable', str(directory / 'python'))
         return harbor
+
+    def test_checks_installed_context_before_downloads_or_harbor(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        config = JobConfig(
+            agents=[
+                trial_config.AgentConfig(
+                    import_path='assistant_bench.harnesses.installed:Codex',
+                    kwargs={'version': '1.2.3'},
+                )
+            ]
+        )
+        engine = Mock()
+        download = Mock()
+        run = Mock()
+        monkeypatch.setattr(
+            jobs,
+            'check_local_context',
+            AsyncMock(side_effect=ValueError('context refused')),
+        )
+        monkeypatch.setattr(subprocess, 'check_output', engine)
+        monkeypatch.setattr(jobs, 'artifact', download)
+        monkeypatch.setattr(subprocess, 'run', run)
+
+        with pytest.raises(ValueError, match='context refused'):
+            jobs.run_job(config)
+
+        engine.assert_not_called()
+        download.assert_not_called()
+        run.assert_not_called()
 
     def test_runs_harbor_on_the_config(
         self, data_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

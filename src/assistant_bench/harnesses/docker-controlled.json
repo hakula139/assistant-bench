@@ -1,0 +1,9 @@
+{
+  "services": {
+    "harbor-docker-egress-control-sidecar": {
+      "extra_hosts": {
+        "host.docker.internal": "host-gateway"
+      }
+    }
+  }
+}

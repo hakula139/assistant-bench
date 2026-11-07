@@ -90,6 +90,33 @@ def measure(api: Api, reported: object) -> dict[str, Any]:
     }
 
 
+def record_calls(context: AgentContext, calls: list[dict[str, Any]]) -> None:
+    """Record inclusive trial usage only when every completed call has valid usage."""
+    context.metadata = {
+        **(context.metadata or {}),
+        'calls': calls,
+        'cache_write_unpriced': any(
+            call.get('cache_write_unpriced', False) for call in calls
+        ),
+    }
+    if calls and all('input_tokens' in call for call in calls):
+        context.n_input_tokens = sum(call['input_tokens'] for call in calls)
+        context.n_cache_tokens = sum(call['cache_tokens'] for call in calls)
+        context.n_output_tokens = sum(call['output_tokens'] for call in calls)
+        context.metadata['cache_write_tokens'] = sum(
+            call['cache_write_tokens'] for call in calls
+        )
+        reasoning = [call['reasoning_tokens'] for call in calls]
+        context.metadata['reasoning_tokens'] = (
+            None if None in reasoning else sum(reasoning)
+        )
+    else:
+        context.n_input_tokens = None
+        context.n_cache_tokens = None
+        context.n_output_tokens = None
+    context.cost_usd = None
+
+
 def measured_usage(api: Api, reported: object) -> MeasuredUsage | None:
     """Return inclusive counters only when every reported count is consistent."""
     try:

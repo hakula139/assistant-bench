@@ -1056,14 +1056,15 @@ class TestCollect:
         assert output.response_models == tuple(models)
 
     def test_names_an_unknown_harness(self, families_dir: Path) -> None:
-        family = with_settings(voted_tasks(families_dir), harness='claude-code')
+        family = with_settings(voted_tasks(families_dir), harness='unknown')
         system = make_system()
 
         with pytest.raises(ValueError) as error:
             collection.collect(family, {system.name: system})
 
         assert str(error.value) == (
-            'Family `f`: harness `claude-code` is not one of `generate`, `terminus-2`.'
+            'Family `f`: harness `unknown` is not one of `generate`, '
+            '`terminus-2`, `claude-code`, `codex`.'
         )
 
     @pytest.mark.parametrize('api', ['openai-chat-completions', 'openai-responses'])

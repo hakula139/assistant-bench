@@ -1,5 +1,7 @@
 """Harbor trials under Docker, which the Harbor Smoke job runs."""
 
+import json
+import threading
 from collections import Counter
 from collections.abc import Callable
 from importlib import metadata
@@ -13,18 +15,54 @@ from harbor.models.trial.result import TrialResult
 from assistant_bench import collection, jobs
 from assistant_bench.catalog import NixosConfigExport
 from assistant_bench.families import case_task, load_cases, load_family
+from assistant_bench.harnesses.usage import ATTEMPTS_FILE, Attempt
 from support import (
     StubEndpoint,
     make_system,
     message,
     message_stream,
     reasoned_response,
+    response,
     terminus_completion,
     write_task_family,
 )
 
 
 pytestmark = [pytest.mark.docker, pytest.mark.usefixtures('export')]
+
+
+@pytest.fixture
+def installed_downloads(loopback_requests_only: set[tuple[str, str]]) -> None:
+    downloads = loopback_requests_only
+    for platform in ('linux-arm64', 'linux-x64'):
+        downloads.add(
+            (
+                'downloads.claude.ai',
+                f'/claude-code-releases/2.1.319/{platform}/claude',
+            )
+        )
+    downloads.add(
+        ('downloads.claude.ai', '/claude-code-releases/2.1.319/manifest.json')
+    )
+    downloads.add(('api.github.com', '/repos/openai/codex/releases/tags/rust-v0.167.0'))
+    for architecture in ('aarch64', 'x86_64'):
+        downloads.add(
+            (
+                'github.com',
+                '/openai/codex/releases/download/rust-v0.167.0/'
+                f'codex-{architecture}-unknown-linux-musl.tar.gz',
+            )
+        )
+    for asset in (
+        '7b6f4118-1fd3-4666-a2a7-651f4fa02f3d',
+        '8d61505c-e73b-41b2-b8d8-28d9ef5843c5',
+    ):
+        downloads.add(
+            (
+                'release-assets.githubusercontent.com',
+                f'/github-production-release-asset/965415649/{asset}',
+            )
+        )
 
 
 def solution_commands(task: Path) -> str:
@@ -227,3 +265,122 @@ def test_terminus_runs_a_voted_task_family_once_and_regrades_a_tests_edit(
     assert len(endpoint.requests) == requests
     (regraded,) = collection.collect(family, {system.name: system}).outputs
     assert regraded == output
+
+
+@pytest.mark.parametrize(
+    ('harness', 'version', 'api'),
+    [
+        ('claude-code', '2.1.319', 'anthropic-messages'),
+        ('codex', '0.167.0', 'openai-responses'),
+    ],
+)
+@pytest.mark.usefixtures('installed_downloads')
+@pytest.mark.parametrize('cancelled', [False, True], ids=['finished', 'cancelled'])
+def test_installed_cli_preserves_native_trace_usage_and_task_diff(
+    endpoint: StubEndpoint,
+    families_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    harness: str,
+    version: str,
+    api: str,
+    cancelled: bool,
+) -> None:
+    for name, value in endpoint.env.items():
+        monkeypatch.setenv(name, value)
+    write_task_family(families_dir, 'echo', systems=('acme-large',))
+    family = load_family('f')
+    task = case_task(family, 'echo')
+    command = solution_commands(task).strip()
+    if cancelled:
+        task_config = task / 'task.toml'
+        task_config.write_text(
+            task_config.read_text().replace('timeout_sec = 120.0', 'timeout_sec = 15.0')
+        )
+    if harness == 'claude-code':
+        first = message(stop_reason='tool_use', message_id='tool')
+        first['content'] = [
+            {
+                'type': 'tool_use',
+                'id': 'tool-1',
+                'name': 'Bash',
+                'input': {'command': command},
+            }
+        ]
+        final = message('Done.', message_id='final')
+        final['content'] = [{'type': 'text', 'text': 'Done.'}]
+        endpoint.streams = [message_stream(first), message_stream(final)]
+    else:
+        first = response(None, response_id='resp-tool')
+        first['output'] = [
+            {
+                'type': 'function_call',
+                'id': 'fc-1',
+                'call_id': 'call-1',
+                'name': 'exec_command',
+                'arguments': json.dumps({'cmd': command}),
+                'status': 'completed',
+            }
+        ]
+        final = response('Done.', response_id='resp-final')
+        endpoint.streams = []
+        for payload in (first, final):
+            events: list[dict[str, Any]] = [
+                {'type': 'response.created', 'response': {**payload, 'output': []}},
+                *[
+                    {
+                        'type': 'response.output_item.done',
+                        'output_index': index,
+                        'item': item,
+                    }
+                    for index, item in enumerate(payload['output'])
+                ],
+                {'type': 'response.completed', 'response': payload},
+            ]
+            endpoint.streams.append(
+                [f'data: {json.dumps(event)}\n\n'.encode() for event in events]
+            )
+    endpoint.stream = endpoint.streams[-1]
+    system = make_system(
+        api=api,
+        harness=harness,
+        version=version,
+        thinking_mode='anthropic-adaptive' if harness == 'claude-code' else None,
+        max_output_tokens=32768,
+        context_window=131072,
+    )
+    selected = jobs.family_systems(family, [system])
+    config = jobs.job(family, selected, [task])
+    if cancelled:
+        endpoint.response_gate = threading.Event()
+        endpoint.response_gate_after = 1
+
+    try:
+        job_dir = jobs.run_job(config)
+    finally:
+        if endpoint.response_gate is not None:
+            endpoint.response_gate.set()
+
+    (output,) = collection.collect(family, {system.name: system}).outputs
+    if cancelled:
+        assert output.error == 'AgentTimeoutError'
+        assert endpoint.response_waiting.is_set()
+    else:
+        assert output.error is None
+        assert output.reward == 1.0
+        assert output.text is not None and '+hello' in output.text
+    turns = 1 if cancelled else 2
+    assert output.input_tokens == turns * (130 if harness == 'claude-code' else 120)
+    assert output.output_tokens == turns * 40
+    assert list(job_dir.rglob('trajectory.json'))
+    (attempt,) = [
+        Attempt.model_validate_json(line)
+        for line in (job_dir / ATTEMPTS_FILE).read_text().splitlines()
+    ]
+    assert all(usage and usage.output_tokens == 40 for usage in attempt.responses)
+    assert len(attempt.responses) == turns
+    key = endpoint.key_file.read_text().strip().encode()
+    assert not [
+        path
+        for path in job_dir.rglob('*')
+        if path.is_file() and key in path.read_bytes()
+    ]
