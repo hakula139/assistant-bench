@@ -9,7 +9,7 @@ import {
   DefectsTable,
   HeadToHeadTable,
   RoundsTable,
-  VotesStat,
+  SystemStats,
 } from '@/components/boards/SystemTables';
 import { terms } from '@/lib/glossary';
 import { reportNames } from '@/lib/systems';
@@ -163,11 +163,18 @@ describe('vote counts', () => {
   });
 });
 
-describe('VotesStat', () => {
+describe('SystemStats', () => {
   afterEach(cleanup);
 
   test('opens what decisive means from the decisive count', async () => {
-    render(<VotesStat votes={114} decisive={89} />);
+    const { standings } = await round();
+    render(
+      <SystemStats
+        standing={{ ...standings[0], votes: 114, decisive_votes: 89 }}
+        round="2026-10-21"
+        roundHref="/writing/en/rounds/2026-10-21/"
+      />,
+    );
 
     await userEvent.setup().click(screen.getByRole('button', { name: '(89 decisive)' }));
 

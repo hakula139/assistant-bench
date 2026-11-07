@@ -1,5 +1,5 @@
 import type { ForestPlotRow } from '@/components/charts/ForestPlot';
-import { Stat } from '@/components/site/PageParts';
+import { Stat, statList } from '@/components/site/PageParts';
 import { Hint, StatusMark } from '@/components/site/Term';
 import {
   Table,
@@ -10,7 +10,14 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import type { Defect } from '@/lib/defects';
-import { formatCount, formatPercent, formatScore, formatSeconds, MISSING } from '@/lib/format';
+import {
+  formatCount,
+  formatPercent,
+  formatScore,
+  formatScoreRange,
+  formatSeconds,
+  MISSING,
+} from '@/lib/format';
 import {
   defectTerms,
   fallbackAnchor,
@@ -30,18 +37,36 @@ import type {
 } from '@/lib/report';
 import { reportNames, systemName, type SystemNames } from '@/lib/systems';
 
-/**
- * The system page's Votes figure as one island, so the decisive count's hint is the element a tap
- * lands on, which an Astro slot around it would not be.
- */
-export function VotesStat({ votes, decisive }: { votes: number; decisive: number }) {
+export function SystemStats({
+  standing,
+  round,
+  roundHref,
+}: {
+  standing: Standing;
+  round: string;
+  roundHref: string;
+}) {
   return (
-    <Stat
-      label="Votes"
-      detail={<Hint term={terms.decisive}>({formatCount(decisive)} decisive)</Hint>}
-    >
-      {formatCount(votes)}
-    </Stat>
+    <dl className={statList}>
+      <Stat
+        label="Score"
+        detail={standing.interval ? `(${formatScoreRange(standing.interval)})` : undefined}
+      >
+        {formatScore(standing.score)}
+      </Stat>
+      <Stat label="Rank">{standing.rank}</Stat>
+      <Stat
+        label="Votes"
+        detail={
+          <Hint term={terms.decisive}>({formatCount(standing.decisive_votes)} decisive)</Hint>
+        }
+      >
+        {formatCount(standing.votes)}
+      </Stat>
+      <Stat label="Round">
+        <a href={roundHref}>{round}</a>
+      </Stat>
+    </dl>
   );
 }
 
