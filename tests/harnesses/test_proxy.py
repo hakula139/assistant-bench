@@ -6,8 +6,10 @@ import httpx2
 import pytest
 
 from assistant_bench.catalog import Api
+from assistant_bench.harnesses.accounting import RequestReceipt, TrialAccounting
 from assistant_bench.harnesses.endpoint import Endpoint
 from assistant_bench.harnesses.proxy import connect
+from assistant_bench.state import State
 from support import StubEndpoint, message, message_stream, response
 
 
@@ -17,7 +19,11 @@ class TestConnect:
         'reported', [True, False], ids=['measured', 'usage-missing']
     )
     def test_forwards_stream_bytes_and_records_only_completed_response_usage(
-        self, endpoint: StubEndpoint, api: Api, reported: bool
+        self,
+        endpoint: StubEndpoint,
+        begun_trial: TrialAccounting,
+        api: Api,
+        reported: bool,
     ) -> None:
         payload = message() if api == 'anthropic-messages' else response()
         if not reported:
@@ -34,15 +40,21 @@ class TestConnect:
         body = b'{"model":"acme/large","stream":true,"input":"hello"}'
 
         async def request() -> tuple[bytes, list[dict[str, Any]]]:
-            async with connect(configured, api, 'acme/large') as connection:
+            async with connect(
+                configured, api, 'acme/large', recorder=begun_trial
+            ) as connection:
                 url = connection.url.replace('host.docker.internal', '127.0.0.1')
                 async with httpx2.AsyncClient() as client:
                     headers = {'Authorization': f'Bearer {connection.token}'}
                     first = await client.post(url + path, content=body, headers=headers)
-                    partial = await client.post(
-                        url + path, content=body, headers=headers
-                    )
-                    assert partial.content == b''.join(stream[:-1])
+                    partial: list[bytes] = []
+                    with pytest.raises(httpx2.RemoteProtocolError):
+                        async with client.stream(
+                            'POST', url + path, content=body, headers=headers
+                        ) as reply:
+                            async for chunk in reply.aiter_bytes():
+                                partial.append(chunk)
+                    assert b''.join(partial) == b''.join(stream[:-1])
                 return first.content, connection.calls
 
         content, calls = asyncio.run(request())
@@ -63,6 +75,7 @@ class TestConnect:
         )
         assert all(sent.headers['x-trace'] == 'bench' for sent in endpoint.requests)
         assert all(sent.body['model'] == 'acme/large' for sent in endpoint.requests)
+        assert begun_trial.fatal
 
     @pytest.mark.parametrize(
         ('authorization', 'path', 'body', 'status'),
@@ -86,6 +99,7 @@ class TestConnect:
     def test_rejects_requests_outside_the_trial_model_and_api(
         self,
         endpoint: StubEndpoint,
+        begun_trial: TrialAccounting,
         authorization: str | None,
         path: str,
         body: object,
@@ -95,7 +109,7 @@ class TestConnect:
 
         async def request() -> int:
             async with connect(
-                configured, 'openai-responses', 'acme/large'
+                configured, 'openai-responses', 'acme/large', recorder=begun_trial
             ) as connection:
                 url = connection.url.replace('host.docker.internal', '127.0.0.1')
                 async with httpx2.AsyncClient() as client:
@@ -113,3 +127,107 @@ class TestConnect:
 
         assert received == status
         assert endpoint.requests == []
+
+    @pytest.mark.parametrize(
+        'ending', [b'\n', b'\r\n', b'\r'], ids=['lf', 'crlf', 'cr']
+    )
+    @pytest.mark.parametrize('split', [1, 7, 4096], ids=['byte', 'small', 'whole'])
+    def test_preserves_complete_frame_bytes_with_a_durable_terminal_receipt(
+        self,
+        endpoint: StubEndpoint,
+        begun_trial: TrialAccounting,
+        private_state: State,
+        ending: bytes,
+        split: int,
+    ) -> None:
+        payload = response('Hello, 世界.')
+        event = {'type': 'response.completed', 'response': payload}
+        raw = (
+            b': keep-alive'
+            + ending * 2
+            + b'event: response.completed'
+            + ending
+            + b'data: '
+            + json.dumps(event, ensure_ascii=False).encode()
+            + ending * 2
+        )
+        endpoint.stream = [
+            raw[index : index + split] for index in range(0, len(raw), split)
+        ]
+        configured = Endpoint.read(endpoint.env.get, 'openai-responses')
+
+        async def request() -> bytes:
+            async with connect(
+                configured, 'openai-responses', 'acme/large', recorder=begun_trial
+            ) as connection:
+                url = connection.url.replace('host.docker.internal', '127.0.0.1')
+                async with (
+                    httpx2.AsyncClient() as client,
+                    client.stream(
+                        'POST',
+                        url + '/v1/responses',
+                        json={'model': 'acme/large', 'stream': True},
+                        headers={'Authorization': f'Bearer {connection.token}'},
+                    ) as reply,
+                ):
+                    received = bytearray()
+                    async for chunk in reply.aiter_bytes():
+                        received.extend(chunk)
+                        if b'response.completed' in received:
+                            (stored,) = private_state.requests('sample')
+                            assert isinstance(stored['receipt_json'], str)
+                    return bytes(received)
+
+        received = asyncio.run(request())
+
+        assert received == raw
+        (stored,) = private_state.requests('sample')
+        assert isinstance(stored['receipt_json'], str)
+        saved = RequestReceipt.model_validate_json(stored['receipt_json'])
+        assert saved.usage is not None
+        assert saved.usage.output_tokens == 40
+        assert not begun_trial.fatal
+
+    def test_failed_terminal_persistence_never_forwards_terminal_bytes(
+        self,
+        endpoint: StubEndpoint,
+        begun_trial: TrialAccounting,
+        private_state: State,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        prefix = b': ready\n\n'
+        terminal = json.dumps(
+            {'type': 'response.completed', 'response': response()}
+        ).encode()
+        endpoint.stream = [prefix, b'data: ' + terminal + b'\n\n']
+        configured = Endpoint.read(endpoint.env.get, 'openai-responses')
+
+        def unavailable(self: State, request_id: str, receipt_json: str) -> None:
+            raise OSError('Database unavailable.')
+
+        monkeypatch.setattr(State, 'record_receipt', unavailable)
+
+        async def request() -> bytes:
+            async with connect(
+                configured, 'openai-responses', 'acme/large', recorder=begun_trial
+            ) as connection:
+                url = connection.url.replace('host.docker.internal', '127.0.0.1')
+                received = bytearray()
+                async with httpx2.AsyncClient() as client:
+                    with pytest.raises(httpx2.RemoteProtocolError):
+                        async with client.stream(
+                            'POST',
+                            url + '/v1/responses',
+                            json={'model': 'acme/large', 'stream': True},
+                            headers={'Authorization': f'Bearer {connection.token}'},
+                        ) as reply:
+                            async for chunk in reply.aiter_bytes():
+                                received.extend(chunk)
+                return bytes(received)
+
+        received = asyncio.run(request())
+
+        assert b'response.completed' not in received
+        (stored,) = private_state.requests('sample')
+        assert stored['receipt_json'] is None
+        assert begun_trial.fatal
