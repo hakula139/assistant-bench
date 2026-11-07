@@ -11,7 +11,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import cast
 from uuid import UUID
 
 from harbor.job_diff import (
@@ -51,7 +50,7 @@ from assistant_bench.harnesses.docker import HOST_OVERLAY, check_local_context
 from assistant_bench.harnesses.endpoint import ENDPOINT_VARS
 from assistant_bench.harnesses.native import NativeCompletionError
 from assistant_bench.messages import InputError, code
-from assistant_bench.state import State
+from assistant_bench.state import ArtifactGeneration, State
 
 
 N_CONCURRENT_TRIALS = 8
@@ -358,6 +357,7 @@ def materialize_sources(
     root: Path,
     *,
     private_root: Path,
+    generation: ArtifactGeneration,
 ) -> list[tuple[SourceJobConfig, Path]]:
     """Restore registered trials and prepare separate portable Harbor views."""
     tasks = {
@@ -373,12 +373,12 @@ def materialize_sources(
     views: dict[UUID, _SourceView] = {}
     references: dict[UUID, ArtifactRef] = {}
     jobs: dict[Path, list[Path]] = {}
-    for row in state.artifacts(family.name):
-        run = state.run(cast(str, row['run_id']))
+    for row in generation.artifacts:
+        run = state.run(row.run_id)
         reference = ArtifactRef(
-            commit_sha=cast(str, row['commit_sha']),
-            path=cast(str, row['path']),
-            manifest_digest=cast(str, row['manifest_digest']),
+            commit_sha=row.commit_sha,
+            path=row.path,
+            manifest_digest=row.manifest_digest,
         )
         archive = repository.materialize(
             reference, Path(tempfile.mkdtemp(prefix='raw-', dir=directory))
@@ -396,8 +396,8 @@ def materialize_sources(
             or manifest.code_revision != run.code_revision
             or manifest.case_revision != run.case_revision
             or manifest.trial_id != str(result.id)
-            or str(result.id) != row['source_trial_id']
-            or manifest.trial_name != row['trial_id']
+            or str(result.id) != row.source_trial_id
+            or manifest.trial_name != row.trial_id
             or result.trial_name != manifest.trial_name
         ):
             raise InputError('Registered trial artifacts have conflicting identities.')

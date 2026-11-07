@@ -150,7 +150,8 @@ def run(probes: list[Probe], context: RunContext) -> list[Record]:
     records: list[Record] = []
     problems: list[str] = []
     for probe in probes:
-        baseline = context.state.baseline(probe.original.name)
+        key = context_key(probe)
+        baseline = context.state.baseline(probe.original.name, key)
         previous = [Record.model_validate_json(baseline)] if baseline else []
         run_id = str(uuid4())
         run_error: str | None = 'InterruptedProbe'
@@ -167,6 +168,9 @@ def run(probes: list[Probe], context: RunContext) -> list[Record]:
                 },
                 scope='canaries',
                 run_id=run_id,
+                expected_source_revision=context.state.artifact_generation(
+                    'canaries'
+                ).revision,
                 log=probe.config.jobs_dir / f'{probe.config.job_name}.log',
             )
             run_error = None
@@ -180,16 +184,24 @@ def run(probes: list[Probe], context: RunContext) -> list[Record]:
             context.state.append_canary(run_id, outcomes[0].model_dump_json())
 
         records.extend(outcomes)
-        problems.extend(
+        probe_problems = [
             problem
             for record in outcomes
             if (problem := _problem(record, previous)) is not None
-        )
-        if not problems:
-            context.state.establish_baseline(probe.original.name, run_id)
+        ]
+        problems.extend(probe_problems)
+        if not probe_problems:
+            context.state.establish_baseline(probe.original.name, key, run_id)
     if problems:
         raise InputError('\n'.join(problems))
     return records
+
+
+def context_key(probe: Probe) -> str:
+    return json.dumps(
+        [fingerprint(probe.source_generate), probe.protocol_digest],
+        separators=(',', ':'),
+    )
 
 
 def read_records(system: str, state: State) -> list[Record]:

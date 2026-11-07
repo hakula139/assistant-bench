@@ -32,7 +32,7 @@ from assistant_bench.harnesses.accounting import (
 )
 from assistant_bench.harnesses.endpoint import HEADERS_VAR, KEY_FILE_VAR
 from assistant_bench.messages import InputError
-from assistant_bench.runtime import RunContext
+from assistant_bench.runtime import REPOSITORY_VAR, RunContext
 from assistant_bench.spend import Accounting, Entry
 from assistant_bench.state import Claim, Run, State
 
@@ -44,6 +44,7 @@ class ExecutionInput(BaseModel):
 
     run: Run
     accounting: dict[str, Accounting]
+    expected_source_revision: int
 
 
 def execute(
@@ -53,6 +54,8 @@ def execute(
     *,
     scope: str,
     run_id: str,
+    expected_source_revision: int,
+    max_requests: int | None = None,
     log: Path | None = None,
 ) -> Run:
     run = Run(
@@ -62,10 +65,17 @@ def execute(
         code_revision=context.code_revision,
         case_revision=context.case_revision,
         created_at=datetime.now(UTC).isoformat(),
+        max_requests=max_requests,
     )
     context.state.create_run(run)
     path = context.root / f'execution-{run.id}.json'
-    path.write_text(ExecutionInput(run=run, accounting=accounting).model_dump_json())
+    path.write_text(
+        ExecutionInput(
+            run=run,
+            accounting=accounting,
+            expected_source_revision=expected_source_revision,
+        ).model_dump_json()
+    )
     try:
         jobs.run_job(config, log=log, plugin_context=path)
     except BaseException as error:
@@ -82,7 +92,11 @@ class ExecutionPlugin(BaseJobPlugin):
         self._root = Path(context_file).parent
         self._input = ExecutionInput.model_validate_json(Path(context_file).read_text())
         self._stack = ExitStack()
-        self._state = State(self._stack.enter_context(connect('private')))
+        self._credential = d1_token()
+        self._state = State(
+            self._stack.enter_context(connect('private', credential=self._credential))
+        )
+        self._repository = ArtifactRepository(os.environ[REPOSITORY_VAR])
         self._claims: dict[str, Claim] = {}
         self._recorders: dict[
             UUID, tuple[TrialAccounting, Token[TrialAccounting | None]]
@@ -95,6 +109,7 @@ class ExecutionPlugin(BaseJobPlugin):
             raise InputError('Cloud executions require a fresh matching Harbor job.')
         if self._state.run(self._input.run.id) != self._input.run:
             raise InputError('The execution metadata differs from its cloud record.')
+        await asyncio.to_thread(self._repository.head)
         self._job_dir = job.job_dir
         plan = await JobPlan.from_config(
             job.config.model_copy(deep=True), job_id=job.id
@@ -133,7 +148,7 @@ class ExecutionPlugin(BaseJobPlugin):
             if not matches:
                 raise InputError('Harbor changed a planned trial before admission.')
 
-        revision = self._state.source_revision(self._input.run.scope)
+        revision = self._input.expected_source_revision
         try:
             for configured, (index, _, change) in zip(actual, expected, strict=True):
                 if change.action == DiffAction.REGRADE:
@@ -197,6 +212,7 @@ class ExecutionPlugin(BaseJobPlugin):
             claim = self._claims[event.trial_name]
             attempt = recorder.attempt()
             if attempt is None:
+                await self._publish(event, recorder.secrets())
                 if not self._state.cancel_claim(claim.id):
                     raise InputError(
                         'A trial that never started could not release its claim.'
@@ -210,9 +226,9 @@ class ExecutionPlugin(BaseJobPlugin):
                 ceiling_usd=accounting.ceiling_usd,
             )
             self._state.record_entry(claim.id, entry.model_dump_json())
+            await self._publish(event, recorder.secrets())
             if recorder.fatal:
                 raise InputError('A trial has uncertain accounting and cannot settle.')
-            await self._publish(event, recorder.secrets())
             self._state.settle_claim(claim.id)
         except BaseException:
             await recorder.uncertain()
@@ -224,7 +240,7 @@ class ExecutionPlugin(BaseJobPlugin):
         if self._job_dir is None:
             raise InputError('The execution has no initialized Harbor job directory.')
         known = set(secrets)
-        known.add(d1_token())
+        known.add(self._credential)
         for agent in event.config.agent.env:
             if any(
                 word in agent.upper() for word in ('TOKEN', 'SECRET', 'PASSWORD', 'KEY')
@@ -235,7 +251,7 @@ class ExecutionPlugin(BaseJobPlugin):
         if headers := os.environ.get(HEADERS_VAR):
             known.update(json.loads(headers).values())
         run = self._input.run
-        repository = ArtifactRepository(os.environ['BENCH_DATA_REPOSITORY'])
+        repository = self._repository
         artifact_id = str(uuid4())
         destination = self._root / 'snapshots' / artifact_id / run.job
         source = self._job_dir

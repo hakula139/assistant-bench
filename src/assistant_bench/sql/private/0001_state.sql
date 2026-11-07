@@ -10,6 +10,7 @@ CREATE TABLE runs (
     code_revision TEXT,
     case_revision TEXT,
     created_at TEXT NOT NULL,
+    max_requests INTEGER CHECK (max_requests > 0),
     status TEXT NOT NULL DEFAULT 'prepared'
         CHECK (status IN ('prepared', 'running', 'complete', 'uncertain')),
     UNIQUE (scope, job)
@@ -109,16 +110,17 @@ CREATE TABLE attempt_entries (
     job TEXT NOT NULL,
     trial TEXT NOT NULL,
     started_at TEXT NOT NULL,
-    claim_id TEXT NOT NULL REFERENCES attempt_claims (id),
-    attempt_id TEXT NOT NULL UNIQUE REFERENCES attempt_starts (id),
+    claim_id TEXT REFERENCES attempt_claims (id),
+    attempt_id TEXT UNIQUE REFERENCES attempt_starts (id),
     entry_json TEXT NOT NULL CHECK (json_valid(entry_json)),
-    PRIMARY KEY (scope, job, trial, started_at)
+    PRIMARY KEY (scope, job, trial, started_at),
+    CHECK ((claim_id IS NULL) = (attempt_id IS NULL))
 ) STRICT;
 
 CREATE INDEX attempt_entries_claim ON attempt_entries (claim_id);
 
 CREATE TRIGGER entries_need_start BEFORE INSERT ON attempt_entries
-WHEN NOT EXISTS (
+WHEN NEW.claim_id IS NOT NULL AND NOT EXISTS (
     SELECT 1 FROM attempt_starts AS starts
     JOIN attempt_claims AS claims ON claims.id = starts.claim_id
     JOIN runs ON runs.id = claims.run_id
@@ -197,6 +199,12 @@ CREATE TABLE trial_artifacts (
     PRIMARY KEY (run_id, trial_id)
 ) STRICT;
 
+CREATE TRIGGER artifacts_advance_source AFTER INSERT ON trial_artifacts
+BEGIN
+    UPDATE source_heads SET revision = revision + 1
+    WHERE scope = (SELECT scope FROM runs WHERE id = NEW.run_id);
+END;
+
 CREATE TRIGGER trial_artifacts_keep_content BEFORE UPDATE ON trial_artifacts
 BEGIN
     SELECT RAISE(ABORT, 'Trial artifact references are immutable');
@@ -259,12 +267,6 @@ WHEN NEW.state = 'settled'
     )
 BEGIN
     SELECT RAISE(ABORT, 'A settled claim requires its ledger, artifacts and receipts');
-END;
-
-CREATE TRIGGER claims_advance_source AFTER UPDATE OF state ON attempt_claims
-WHEN OLD.state != 'settled' AND NEW.state = 'settled'
-BEGIN
-    UPDATE source_heads SET revision = revision + 1 WHERE scope = NEW.scope;
 END;
 
 CREATE TABLE collections (
@@ -367,6 +369,8 @@ BEGIN
 END;
 
 CREATE TABLE canary_baselines (
-    system TEXT PRIMARY KEY,
-    run_id TEXT NOT NULL REFERENCES canary_records (run_id)
+    system TEXT NOT NULL,
+    context_key TEXT NOT NULL,
+    run_id TEXT NOT NULL REFERENCES canary_records (run_id),
+    PRIMARY KEY (system, context_key)
 ) STRICT;
