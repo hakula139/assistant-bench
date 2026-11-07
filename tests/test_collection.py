@@ -1,5 +1,6 @@
 import json
 import shutil
+from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -10,11 +11,13 @@ import pytest
 import tomli_w
 from harbor.models.agent.context import AgentContext
 from harbor.models.environment_type import EnvironmentType
+from harbor.models.job.config import SourceJobConfig
 from harbor.models.trial import config as trial_config
 from harbor.models.trial.result import TimingInfo
 
 from assistant_bench import collection, jobs
-from assistant_bench.catalog import System
+from assistant_bench.catalog import Price, System
+from assistant_bench.database import SQLiteDatabase
 from assistant_bench.diffs import workspace_diff
 from assistant_bench.families import (
     Case,
@@ -26,13 +29,13 @@ from assistant_bench.families import (
     load_family,
 )
 from assistant_bench.harnesses import fingerprint
-from assistant_bench.harnesses.usage import ATTEMPTS_FILE, Attempt
-from assistant_bench.messages import InputError
-from assistant_bench.outputs import Output
+from assistant_bench.harnesses.usage import MeasuredUsage
+from assistant_bench.outputs import read_outputs
 from assistant_bench.paths import FAMILIES_DIR, data_dir as bench_data_dir
+from assistant_bench.runtime import RunContext
 from assistant_bench.scoring import checkers
 from assistant_bench.scoring.gates import failed_gates
-from assistant_bench.spend import Entry
+from assistant_bench.spend import Accounting, Entry
 from assistant_bench.tasks import (
     TASK_VERSION,
     current_versions,
@@ -71,7 +74,7 @@ def current_agent(
     family: Family = VOTES, system: System | None = None
 ) -> trial_config.AgentConfig:
     resolved = jobs.family_systems(family, [system or make_system()])
-    return jobs.job(family, resolved, []).agents[0]
+    return jobs.job(family, resolved, [], root=bench_data_dir(), sources=[]).agents[0]
 
 
 def record_trial(
@@ -83,7 +86,10 @@ def record_trial(
     **fields: Any,
 ) -> UUID:
     if family.source == 'cases' and fields.get('instruction', 'Hi.') is not None:
-        existing = {case.id: case for case in load_cases(family)}
+        existing = {
+            case.id: case
+            for case in load_cases(family, private_root=bench_data_dir() / 'cases')
+        }
         case_id = Path(fields['task']).name
         existing[case_id] = Case(
             id=case_id,
@@ -95,7 +101,13 @@ def record_trial(
         )
         declare_cases(family, list(existing.values()))
 
-    config = jobs.job(family, jobs.family_systems(family, [make_system()]), [])
+    config = jobs.job(
+        family,
+        jobs.family_systems(family, [make_system()]),
+        [],
+        root=bench_data_dir(),
+        sources=[],
+    )
     return write_trial(
         job_dir,
         name,
@@ -114,46 +126,73 @@ def declare_cases(family: Family, cases: list[Case]) -> None:
 
 def render_cases(family: Family, cases: list[Case]) -> list[Path]:
     declare_cases(family, cases)
-    return render_tasks(family, cases)
+    return render_tasks(family, cases, root=bench_data_dir())
+
+
+def record_accounting(
+    database: SQLiteDatabase,
+    job: str,
+    trial: str,
+    system: System,
+    usage: MeasuredUsage,
+    *,
+    seconds: int = 0,
+) -> None:
+    frozen = Accounting.of(system)
+    entry = Entry(
+        job=job,
+        trial=trial,
+        system=system.name,
+        fingerprint=fingerprint(system),
+        started_at=START + timedelta(seconds=seconds),
+        finished_at=START + timedelta(seconds=seconds + 1),
+        responses=[usage],
+        price=frozen.price,
+        ceiling_usd=frozen.ceiling_usd,
+    )
+    database.execute(
+        """
+        INSERT INTO attempt_entries (
+            scope, job, trial, started_at, claim_id, attempt_id, entry_json
+        ) VALUES (?, ?, ?, ?, NULL, NULL, ?)
+        """,
+        ('f', job, trial, entry.started_at.isoformat(), entry.model_dump_json()),
+    )
 
 
 class TestCollect:
     @pytest.fixture(autouse=True)
-    def current_sources(self, families_dir: Path, data_dir: Path) -> None:
+    def current_sources(
+        self,
+        families_dir: Path,
+        data_dir: Path,
+        run_context: RunContext,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         write_votes_family(families_dir, ['acme-large'], name='smoke-text')
         write_votes_family(families_dir, ['acme-large'], name='f')
         cases = data_dir / 'cases' / 'smoke-text.toml'
         cases.parent.mkdir(parents=True)
         cases.write_text((FAMILIES_DIR / 'smoke-text' / 'cases.toml').read_text())
-
-    def test_records_the_ledger_before_refusing_an_unreadable_trial(
-        self, data_dir: Path
-    ) -> None:
-        job = data_dir / 'jobs' / 'f' / 'job-1'
-        write_trial(
-            job,
-            'c__1',
-            trial_config.AgentConfig(
-                import_path='x:Y', kwargs={'system': 'acme-large'}
-            ),
-            task='f/c',
+        self.context = replace(
+            run_context, root=data_dir, private_root=data_dir / 'cases'
         )
-        (job / 'c__1' / 'lock.json').unlink()
-        attempt = Attempt(
-            trial='c__1',
-            system='acme-large',
-            fingerprint='fp',
-            started_at=START,
-            finished_at=START,
-            responses=[None],
-        )
-        (job / ATTEMPTS_FILE).write_text(attempt.model_dump_json() + '\n')
 
-        with pytest.raises(InputError):
-            collection.collect(VOTES, {'acme-large': make_system()})
+        def sources(
+            context: RunContext, family: Family
+        ) -> list[tuple[SourceJobConfig, Path]]:
+            return [
+                jobs.job_source(path)
+                for path in sorted((data_dir / 'jobs' / family.name).glob('*'))
+                if path.is_dir()
+            ]
 
-        (line,) = (data_dir / 'spend' / 'f.jsonl').read_text().splitlines()
-        assert Entry.model_validate_json(line).trial == 'c__1'
+        monkeypatch.setattr(RunContext, 'sources', sources)
+
+    def collect(
+        self, family: Family, systems: dict[str, System]
+    ) -> collection.Collection:
+        return collection.collect(family, systems, self.context)
 
     @pytest.mark.parametrize('deleted', [False, True], ids=['edited', 'removed'])
     def test_excludes_stale_case_sources_without_rerendering_installed_tasks(
@@ -163,14 +202,14 @@ class TestCollect:
         system = make_system()
         original = Case(id='a', category='reply', source='synthetic', instruction='Hi.')
         tasks = render_cases(family, [original])
-        config = jobs.job(family, [system], tasks)
+        config = jobs.job(family, [system], tasks, root=bench_data_dir(), sources=[])
         finish_generation(
             config.model_copy(update={'job_name': 'job-1'}), 'Old answer.'
         )
         current = original.model_copy(update={'instruction': 'Write a new answer.'})
         declare_cases(family, [] if deleted else [current])
 
-        outputs = collection.collect(family, {system.name: system}).outputs
+        outputs = self.collect(family, {system.name: system}).outputs
 
         assert outputs == []
         assert (tasks[0] / 'instruction.md').read_text() == 'Hi.'
@@ -210,7 +249,7 @@ class TestCollect:
 
         (data_dir / 'tasks' / 'smoke-text' / 'stray.md').write_text('Stray.')
 
-        outputs = collection.collect(family, systems).outputs
+        outputs = self.collect(family, systems).outputs
 
         assert {(output.case, output.system) for output in outputs} == {
             ('en-greeting', 'b'),
@@ -239,7 +278,7 @@ class TestCollect:
             )
         render_cases(family, cases[:1])
 
-        (output,) = collection.collect(family, {'acme-large': make_system()}).outputs
+        (output,) = self.collect(family, {'acme-large': make_system()}).outputs
 
         assert output.case == 'a'
 
@@ -265,7 +304,7 @@ class TestCollect:
             family=family,
         )
 
-        (output,) = collection.collect(family, {'acme-large': make_system()}).outputs
+        (output,) = self.collect(family, {'acme-large': make_system()}).outputs
 
         assert output.case == path.name
 
@@ -273,7 +312,9 @@ class TestCollect:
         self, data_dir: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         family = load_family('smoke-text')
-        render_cases(family, load_cases(family)[:1])
+        render_cases(
+            family, load_cases(family, private_root=bench_data_dir() / 'cases')[:1]
+        )
         record_trial(
             data_dir / 'jobs' / 'smoke-text' / 'job-1',
             'en-greeting__1',
@@ -286,7 +327,7 @@ class TestCollect:
         )
         monkeypatch.setattr('assistant_bench.tasks.AGENT_TIMEOUT_SEC', 60.0)
 
-        outputs = collection.collect(family, {'acme-large': make_system()}).outputs
+        outputs = self.collect(family, {'acme-large': make_system()}).outputs
 
         assert outputs == []
 
@@ -313,13 +354,15 @@ class TestCollect:
             family=family,
         )
 
-        (output,) = collection.collect(family, {'acme-large': make_system()}).outputs
+        (output,) = self.collect(family, {'acme-large': make_system()}).outputs
 
         assert output.text == (document if eligible else reply)
         assert output.gate_failures == ([] if eligible else [Gate.HTML])
 
     @pytest.mark.parametrize('api', ['openai-chat-completions', 'openai-responses'])
-    def test_collects_generations_and_errors(self, data_dir: Path, api: str) -> None:
+    def test_collects_generations_and_errors(
+        self, data_dir: Path, api: str, private_store: SQLiteDatabase
+    ) -> None:
         job_dir = data_dir / 'jobs' / 'f' / 'job-1'
         system = make_system(api=api)
         generate = current_agent(VOTES, system)
@@ -348,8 +391,15 @@ class TestCollect:
         record_trial(
             job_dir, 'a__1', generate, task='f/a', error='TimeoutError', family=VOTES
         )
+        record_accounting(
+            private_store,
+            'job-1',
+            'b__1',
+            system,
+            MeasuredUsage(1_000, 600, 0, 500, 100),
+        )
 
-        outputs = collection.collect(VOTES, {system.name: system}).outputs
+        outputs = self.collect(VOTES, {system.name: system}).outputs
 
         assert [(output.case, output.error) for output in outputs] == [
             ('a', 'TimeoutError'),
@@ -371,7 +421,7 @@ class TestCollect:
             'stop_details': None,
             'input_tokens': 1_000,
             'cached_tokens': 600,
-            'cache_write_tokens': None,
+            'cache_write_tokens': 0,
             'output_tokens': 500,
             'reasoning_tokens': 100,
             'cost_usd': pytest.approx((400 * 2.0 + 600 * 0.2 + 500 * 10.0) / 1e6),
@@ -379,8 +429,7 @@ class TestCollect:
             'response_models': ('large-2026',),
             'request_id': 'req-1',
         }
-        written = (data_dir / 'outputs' / 'f.jsonl').read_text().splitlines()
-        assert [Output.model_validate_json(line) for line in written] == outputs
+        assert read_outputs('f', self.context.state) == outputs
 
     @pytest.mark.parametrize(
         ('agent', 'kwargs', 'environment', 'verifier'),
@@ -418,7 +467,7 @@ class TestCollect:
             family,
             [Case(id='a', category='reply', source='held-out', instruction='Hi.')],
         )
-        current = jobs.job(family, [system], tasks)
+        current = jobs.job(family, [system], tasks, root=bench_data_dir(), sources=[])
         (current_agent_config,) = current.agents
         old = current.model_copy(
             update={
@@ -439,14 +488,14 @@ class TestCollect:
         gates = Mock(wraps=failed_gates)
         monkeypatch.setattr(collection, 'failed_gates', gates)
 
-        (output,) = collection.collect(family, {system.name: system}).outputs
+        (output,) = self.collect(family, {system.name: system}).outputs
 
         assert (output.job, output.text) == ('job-2', 'current config')
         gates.assert_called_once_with(family.settings, 'current config', 'stop', 'Hi.')
 
         shutil.rmtree(data_dir / 'jobs' / 'f' / 'job-2')
 
-        assert collection.collect(family, {system.name: system}).outputs == []
+        assert self.collect(family, {system.name: system}).outputs == []
 
     @pytest.mark.parametrize(
         ('errors', 'kept'),
@@ -473,7 +522,7 @@ class TestCollect:
                 family=family,
             )
 
-        outputs = collection.collect(family, {system.name: system}).outputs
+        outputs = self.collect(family, {system.name: system}).outputs
 
         assert [(output.job, output.error) for output in outputs] == [(kept, None)]
 
@@ -501,7 +550,7 @@ class TestCollect:
             family=family,
         )
 
-        outputs = collection.collect(family, {system.name: system}).outputs
+        outputs = self.collect(family, {system.name: system}).outputs
 
         assert [(output.job, output.error, output.text) for output in outputs] == [
             ('2026-10-20__10-00-00', 'TimeoutError', None)
@@ -531,7 +580,7 @@ class TestCollect:
                 family=family,
             )
 
-        outputs = collection.collect(family, {system.name: system}).outputs
+        outputs = self.collect(family, {system.name: system}).outputs
 
         assert [
             (output.system, output.fingerprint, output.text) for output in outputs
@@ -555,7 +604,7 @@ class TestCollect:
                 family=family,
             )
 
-        outputs = collection.collect(family, {'acme-large': make_system()}).outputs
+        outputs = self.collect(family, {'acme-large': make_system()}).outputs
 
         assert [(output.case, output.gate_failures) for output in outputs] == [
             ('a', []),
@@ -583,7 +632,7 @@ class TestCollect:
             family=VOTES,
         )
 
-        (output,) = collection.collect(VOTES, {'acme-large': make_system()}).outputs
+        (output,) = self.collect(VOTES, {'acme-large': make_system()}).outputs
 
         assert output.gate_failures == []
 
@@ -616,7 +665,7 @@ class TestCollect:
                 family=family,
             )
 
-        outputs = collection.collect(family, {'acme-large': make_system()}).outputs
+        outputs = self.collect(family, {'acme-large': make_system()}).outputs
 
         assert [output.case for output in outputs] == (['echo'] if kept else [])
 
@@ -656,7 +705,7 @@ class TestCollect:
             family=family,
         )
 
-        (output,) = collection.collect(family, {'acme-large': make_system()}).outputs
+        (output,) = self.collect(family, {'acme-large': make_system()}).outputs
 
         assert (output.error, output.reward, output.gate_failures) == (
             error,
@@ -728,7 +777,7 @@ class TestCollect:
                 family=family,
             )
 
-        (output,) = collection.collect(family, {'acme-large': make_system()}).outputs
+        (output,) = self.collect(family, {'acme-large': make_system()}).outputs
 
         assert (
             output.job,
@@ -744,12 +793,15 @@ class TestCollect:
             pytest.param(2, [Gate.TESTS], id='regrade-of-a-regrade'),
         ],
     )
-    def test_gives_a_regrade_the_output_of_the_trial_that_wrote_its_solution(
+    @pytest.mark.parametrize('origin_entries', [0, 1, 2])
+    def test_gives_a_regrade_only_its_uniquely_accounted_origin_usage(
         self,
         families_dir: Path,
         data_dir: Path,
         regrades: int,
         verdict: list[Gate],
+        origin_entries: int,
+        private_store: SQLiteDatabase,
     ) -> None:
         rewards = [0.0, 1.0, 0.5]
         family = voted_tasks(families_dir, 'echo')
@@ -779,7 +831,6 @@ class TestCollect:
             'greeting.txt'
         )
         for minor in range(1, regrades + 1):
-            # Harbor's regrade copies the artifacts with symlinks dereferenced.
             source = record_trial(
                 data_dir / 'jobs' / 'f' / f'job-{minor + 1}',
                 f'echo__regrade-{minor}',
@@ -794,8 +845,28 @@ class TestCollect:
                 family=family,
             )
         break_setting(case_task(family, 'echo'), ('task', 'version'), f'1.{regrades}.0')
+        frozen = system.model_copy(
+            update={'price': Price(input=7, output=30, cache_read=1)}
+        )
+        for index in range(origin_entries):
+            record_accounting(
+                private_store,
+                origin.name,
+                'echo__origin',
+                frozen,
+                MeasuredUsage(1_000, 0, 0, 500, None),
+                seconds=index,
+            )
+        record_accounting(
+            private_store,
+            f'job-{regrades + 1}',
+            f'echo__regrade-{regrades}',
+            system,
+            MeasuredUsage(99_000, 0, 0, 99_000, None),
+            seconds=100,
+        )
 
-        (output,) = collection.collect(family, {system.name: system}).outputs
+        (output,) = self.collect(family, {system.name: system}).outputs
 
         assert output.model_dump(
             include={
@@ -815,8 +886,8 @@ class TestCollect:
             'text': GREETING_DIFF + 'diff --git a/link b/link\nnew file mode 120000\n'
             '--- /dev/null\n+++ b/link\n@@ -0,0 +1 @@\n+greeting.txt\n'
             '\\ No newline at end of file\n',
-            'input_tokens': 1_000,
-            'cost_usd': pytest.approx((1_000 * 2.0 + 500 * 10.0) / 1e6),
+            'input_tokens': 1_000 if origin_entries == 1 else None,
+            'cost_usd': pytest.approx(0.022) if origin_entries == 1 else None,
             'latency_sec': 30.0,
             'harness_version': '0.24.0',
             'reward': rewards[regrades],
@@ -829,7 +900,13 @@ class TestCollect:
     ) -> None:
         family = voted_tasks(families_dir, 'echo')
         system = make_system()
-        config = jobs.job(family, jobs.family_systems(family, [system]), [])
+        config = jobs.job(
+            family,
+            jobs.family_systems(family, [system]),
+            [],
+            root=bench_data_dir(),
+            sources=[],
+        )
         agent = config.agents[0]
         old_agent = (
             agent.model_copy(update={'kwargs': agent.kwargs | {'max_turns': 40}})
@@ -867,7 +944,7 @@ class TestCollect:
         )
         break_setting(case_task(family, 'echo'), ('task', 'version'), '1.1.0')
 
-        outputs = collection.collect(family, {system.name: system}).outputs
+        outputs = self.collect(family, {system.name: system}).outputs
 
         assert outputs == []
 
@@ -920,7 +997,7 @@ class TestCollect:
         )
         break_setting(case_task(family, 'echo'), ('task', 'version'), '1.1.0')
 
-        (output,) = collection.collect(family, {'acme-large': make_system()}).outputs
+        (output,) = self.collect(family, {'acme-large': make_system()}).outputs
 
         assert (
             output.job,
@@ -966,7 +1043,7 @@ class TestCollect:
         diff = Mock(wraps=workspace_diff)
         monkeypatch.setattr(collection, 'workspace_diff', diff)
 
-        outputs = collection.collect(family, {'acme-large': make_system()}).outputs
+        outputs = self.collect(family, {'acme-large': make_system()}).outputs
 
         assert [(output.job, output.trial) for output in outputs] == [
             ('job-1', 'echo__origin')
@@ -987,7 +1064,13 @@ class TestCollect:
         family = voted_tasks(families_dir, 'echo')
         system = make_system()
         (run,) = jobs.family_systems(family, [system])
-        config = jobs.job(family, [run], [case_task(family, 'echo')])
+        config = jobs.job(
+            family,
+            [run],
+            [case_task(family, 'echo')],
+            root=bench_data_dir(),
+            sources=[],
+        )
         agent = config.agents[0]
         current = agent.kwargs
         for job, kwargs in (
@@ -1003,7 +1086,7 @@ class TestCollect:
                 )
             )
 
-        (output,) = collection.collect(family, {system.name: system}).outputs
+        (output,) = self.collect(family, {system.name: system}).outputs
 
         assert output.job == 'job-2'
 
@@ -1016,13 +1099,17 @@ class TestCollect:
         )
         for job, bound in (('job-1', 100), ('job-2', 300)):
             config = jobs.job(
-                family, [system.model_copy(update={'max_output_tokens': bound})], tasks
+                family,
+                [system.model_copy(update={'max_output_tokens': bound})],
+                tasks,
+                root=bench_data_dir(),
+                sources=[],
             )
             finish_generation(
                 config.model_copy(update={'job_name': job}), f'reply at {bound}'
             )
 
-        outputs = collection.collect(family, {system.name: system}).outputs
+        outputs = self.collect(family, {system.name: system}).outputs
 
         assert outputs == []
 
@@ -1064,7 +1151,7 @@ class TestCollect:
             family=VOTES,
         )
 
-        (output,) = collection.collect(VOTES, {'acme-large': make_system()}).outputs
+        (output,) = self.collect(VOTES, {'acme-large': make_system()}).outputs
 
         assert output.latency_sec == latency
 
@@ -1085,7 +1172,7 @@ class TestCollect:
             context=AgentContext(metadata={'calls': calls}),
         )
 
-        (output,) = collection.collect(VOTES, {'acme-large': make_system()}).outputs
+        (output,) = self.collect(VOTES, {'acme-large': make_system()}).outputs
 
         assert output.response_models == tuple(models)
 
@@ -1094,7 +1181,7 @@ class TestCollect:
         system = make_system()
 
         with pytest.raises(ValueError) as error:
-            collection.collect(family, {system.name: system})
+            self.collect(family, {system.name: system})
 
         assert str(error.value) == (
             'Family `f`: harness `unknown` is not one of `generate`, '
@@ -1120,7 +1207,7 @@ class TestCollect:
             family=VOTES,
         )
 
-        (output,) = collection.collect(VOTES, {system.name: system}).outputs
+        (output,) = self.collect(VOTES, {system.name: system}).outputs
 
         assert output.system == system.name
         assert output.cost_usd is None
@@ -1134,7 +1221,7 @@ class TestCollect:
         result.write_text(result.read_text()[:20])
 
         with pytest.raises(ValueError) as error:
-            collection.collect(VOTES, {'acme-large': make_system()})
+            self.collect(VOTES, {'acme-large': make_system()})
 
         assert str(error.value).startswith(
             f"Source trial '{trial.resolve()}' has an unreadable result.json"
@@ -1150,10 +1237,13 @@ class TestCollect:
     ) -> None:
         write_checkers_family(families_dir)
         family = load_family('instructions-format')
-        cases = load_cases(family)
+        cases = load_cases(family, private_root=bench_data_dir() / 'cases')
         system = make_system(name='acme')
-        paths = render_tasks(family, cases)
-        finish_generation(jobs.job(family, [system], paths[:1]), 'Wait…')
+        paths = render_tasks(family, cases, root=bench_data_dir())
+        finish_generation(
+            jobs.job(family, [system], paths[:1], root=bench_data_dir(), sources=[]),
+            'Wait…',
+        )
         (result_file,) = (data_dir / 'jobs' / family.name).glob('*/*/result.json')
         payload = json.loads(result_file.read_text())
         payload['agent_result']['metadata']['finish_reason'] = (
@@ -1169,7 +1259,7 @@ class TestCollect:
         result_file.write_text(json.dumps(payload))
         inputs = jobs.current_inputs(family, [system])
         versions = current_versions(family, {case.id: case for case in cases})
-        first = collection.collect(family, {'acme': system}).outputs
+        first = self.collect(family, {'acme': system}).outputs
         assert first[0].checks is not None and not first[0].checks.passed
 
         assert cases[0].checks is not None
@@ -1182,7 +1272,7 @@ class TestCollect:
             )
         )
         monkeypatch.setattr(checkers, 'REVISION', 'format-2')
-        second = collection.collect(family, {'acme': system}).outputs
+        second = self.collect(family, {'acme': system}).outputs
 
         assert second[0].checks is not None
         assert second[0].checks.revision == 'format-2'
@@ -1215,7 +1305,9 @@ class TestReadTrials:
         declare_cases(VOTES, [])
         (task / 'instruction.md').unlink()
 
-        outputs = collection.read_trials(VOTES, job)
+        outputs = collection.read_trials(
+            VOTES, job, private_root=bench_data_dir() / 'cases'
+        )
 
         assert outputs == []
 
@@ -1234,7 +1326,9 @@ class TestReadTrials:
                 output=f'Reply {attempt}.',
             )
 
-        outputs = collection.read_trials(VOTES, job)
+        outputs = collection.read_trials(
+            VOTES, job, private_root=bench_data_dir() / 'cases'
+        )
 
         assert sorted(
             (output.case, output.system, output.text) for output in outputs

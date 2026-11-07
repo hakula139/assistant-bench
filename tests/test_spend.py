@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from assistant_bench.catalog import Price, System
-from assistant_bench.database import Param, Result
+from assistant_bench.database import Param, Result, SQLiteDatabase
 from assistant_bench.harnesses.accounting import RequestReceipt
 from assistant_bench.harnesses.usage import Attempt, MeasuredUsage
 from assistant_bench.spend import (
@@ -25,7 +25,13 @@ from assistant_bench.spend import (
     summarize,
 )
 from assistant_bench.state import AttemptStart, Claim, RequestAdmission, Run, State
-from support import START, VOTES, make_system, private_database, with_settings
+from support import (
+    START,
+    VOTES,
+    make_system,
+    private_database,
+    with_settings,
+)
 
 
 # $3 at `make_system`'s price.
@@ -130,15 +136,53 @@ def spend_of(*entries: Entry | PendingAttempt) -> Spend:
 
 
 class TestReadLedger:
+    def test_unlinked_history_retains_its_original_price_alongside_linked_attempts(
+        self, private_state: State, private_store: SQLiteDatabase
+    ) -> None:
+        historical = entry(
+            job='old-job',
+            priced_as=LARGE.model_copy(
+                update={'price': Price(input=7, output=30, cache_read=1)}
+            ),
+        )
+        raw = historical.model_dump_json(indent=2)
+        private_store.execute(
+            """
+            INSERT INTO attempt_entries (
+                scope, job, trial, started_at, claim_id, attempt_id, entry_json
+            ) VALUES (?, ?, ?, ?, NULL, NULL, ?)
+            """,
+            (
+                'f',
+                historical.job,
+                historical.trial,
+                historical.started_at.isoformat(),
+                raw,
+            ),
+        )
+        current = entry(job='new-job')
+        owner, start = started(private_state, current, 'new')
+        admitted(private_state, start, 'new-request', USAGE)
+        private_state.record_entry(owner.id, current.model_dump_json())
+
+        recorded = read_ledger('f', private_state)
+
+        assert {item.job: item for item in recorded} == {
+            historical.job: historical,
+            current.job: current,
+        }
+        assert spend_of(*recorded).known_usd == pytest.approx(13)
+        assert raw in private_state.entries('f')
+
     def test_retains_each_frozen_attempt_once_and_separates_canary_spend(
         self, private_state: State
     ) -> None:
         frozen = [entry(), entry(job='job-2', priced_as=None)]
-        for index, recorded in enumerate(frozen):
-            owner, start = started(private_state, recorded, str(index))
+        for index, frozen_entry in enumerate(frozen):
+            owner, start = started(private_state, frozen_entry, str(index))
             admitted(private_state, start, f'request-{index}', USAGE)
-            private_state.record_entry(owner.id, recorded.model_dump_json())
-            private_state.record_entry(owner.id, recorded.model_dump_json())
+            private_state.record_entry(owner.id, frozen_entry.model_dump_json())
+            private_state.record_entry(owner.id, frozen_entry.model_dump_json())
         other = entry(job='probe-job')
         owner, start = started(private_state, other, 'probe', scope='canaries')
         admitted(private_state, start, 'request-probe', USAGE)
