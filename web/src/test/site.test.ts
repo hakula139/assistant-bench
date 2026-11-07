@@ -274,7 +274,13 @@ describe('built pages', () => {
         for (const state of path === vote ? ['reading', 'issues'] : ['page']) {
           if (state === 'issues') {
             await page.getByRole('button', { name: 'Issues' }).first().click();
-            await page.getByRole('dialog', { name: 'Issues in output A' }).waitFor();
+            const dialog = page.getByRole('dialog', { name: 'Issues in output A' });
+            await dialog.scrollIntoViewIfNeeded();
+            await dialog.evaluate(async (element) => {
+              await Promise.all(
+                element.getAnimations({ subtree: true }).map((animation) => animation.finished),
+              );
+            });
           }
 
           const results = await new AxeBuilder({ page })
