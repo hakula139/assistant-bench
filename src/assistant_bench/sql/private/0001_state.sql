@@ -7,8 +7,8 @@ CREATE TABLE runs (
     id TEXT PRIMARY KEY,
     scope TEXT NOT NULL,
     job TEXT NOT NULL,
-    code_revision TEXT NOT NULL,
-    case_revision TEXT NOT NULL,
+    code_revision TEXT,
+    case_revision TEXT,
     created_at TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'prepared'
         CHECK (status IN ('prepared', 'running', 'complete', 'uncertain')),

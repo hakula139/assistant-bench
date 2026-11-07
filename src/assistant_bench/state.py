@@ -17,11 +17,13 @@ type RunStatus = Literal['prepared', 'running', 'complete', 'uncertain']
 
 @dataclass(frozen=True)
 class Run:
+    """Revision fields are None only for unknown historical execution provenance."""
+
     id: str
     scope: str
     job: str
-    code_revision: str
-    case_revision: str
+    code_revision: str | None
+    case_revision: str | None
     created_at: str
 
 
@@ -677,8 +679,8 @@ class State:
             id=cast(str, row['id']),
             scope=cast(str, row['scope']),
             job=cast(str, row['job']),
-            code_revision=cast(str, row['code_revision']),
-            case_revision=cast(str, row['case_revision']),
+            code_revision=cast(str | None, row['code_revision']),
+            case_revision=cast(str | None, row['case_revision']),
             created_at=cast(str, row['created_at']),
         )
 
