@@ -307,6 +307,87 @@ describe('built pages', () => {
     },
     120_000,
   );
+
+  test('keeps HTML previews above the ballot on a short desktop with a long prompt', async () => {
+    assert(browser);
+    const family = { family: 'frontend-fixture', aspect: 'frontend', display_name: 'Fixture' };
+    const state = makeState({
+      pair: {
+        id: '00000000-0000-4000-8000-000000000001',
+        instruction: [
+          'Design a fictional community event page for beginners interested in drawing and nature.',
+          'Include the following practical details:',
+          '- The event takes place on Saturday from 10:00 to 16:00 at a community hall.',
+          '- Entry is free and visitors may arrive at any time.',
+          '- Materials are provided and no experience is required.',
+          '- The schedule includes a morning walk, a workshop and an afternoon exchange.',
+          '- The hall has step-free entry, an accessible toilet and a quiet room.',
+          '- Children are welcome with an adult.',
+          '- Outdoor activities move indoors during heavy rain.',
+          '- Bring water and clothing appropriate for the weather.',
+          'Return a complete HTML document with inline CSS and native controls.',
+        ].join('\n\n'),
+        checklist: ['Present the schedule clearly.', 'Keep practical information easy to find.'],
+        category: 'feature',
+        render: 'html',
+        defects: ['facts'],
+      },
+    });
+    const context = await browser.newContext({ viewport: { width: 1440, height: 720 } });
+    await context.route('**', (route) => route.abort());
+    await context.route(`${origin}/**`, async (route) => {
+      const { pathname } = new URL(route.request().url());
+      if (pathname === '/api/families' || pathname === '/api/pair') {
+        await route.fulfill({ json: pathname === '/api/pair' ? state : { families: [family] } });
+        return;
+      }
+      if (pathname.startsWith('/api/previews/')) {
+        await route.fulfill({
+          contentType: 'text/html',
+          body: '<!doctype html><html><head><title>Fixture</title></head><body><h1>Event</h1></body></html>',
+        });
+        return;
+      }
+      const file = join(directory, pathname);
+      const found = await stat(file).then(
+        (stats) => stats.isFile(),
+        () => false,
+      );
+      await route.fulfill(found ? { path: file } : { status: 404 });
+    });
+    const page = await context.newPage();
+
+    try {
+      await page.goto(`${origin}${vote}?family=${family.family}`);
+      await page.getByRole('region', { name: 'Output A', exact: true }).waitFor();
+      await page.waitForLoadState('networkidle');
+
+      for (const prompt of ['expanded', 'collapsed']) {
+        if (prompt === 'collapsed') {
+          await page.getByRole('button', { name: 'Prompt', exact: true }).click();
+        }
+        const ballot = await page.locator('[aria-label="Verdict"]').boundingBox();
+        const submit = await page.getByRole('button', { name: /Submit vote/ }).boundingBox();
+        assert(ballot);
+        assert(submit);
+        for (const side of ['A', 'B']) {
+          const frame = await page.locator(`iframe[title="Output ${side} preview"]`).boundingBox();
+          assert(frame);
+          expect(frame.height, `${prompt}: output ${side} is usable`).toBeGreaterThan(0);
+          expect(
+            frame.y + frame.height,
+            `${prompt}: output ${side} precedes ballot`,
+          ).toBeLessThanOrEqual(ballot.y);
+        }
+        expect(
+          submit.y + submit.height,
+          `${prompt}: submit stays in the viewport`,
+        ).toBeLessThanOrEqual(720);
+      }
+    } finally {
+      await context.close();
+    }
+  }, 60_000);
 });
 
 describe('Pages deployment', () => {
