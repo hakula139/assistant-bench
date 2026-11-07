@@ -256,10 +256,15 @@ class TestState:
             assert state.get_claim(owner.id) == owner
 
     class TestCancelClaim:
+        @pytest.mark.parametrize(
+            'uncertain', [False, True], ids=['claimed', 'uncertain']
+        )
         def test_cancels_work_before_execution_without_inventing_a_completed_trial(
-            self, state: State
+            self, state: State, uncertain: bool
         ) -> None:
             parent, owner = claimed(state)
+            if uncertain:
+                state.mark_uncertain(owner.id)
 
             assert state.cancel_claim(owner.id)
 
