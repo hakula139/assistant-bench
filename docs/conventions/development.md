@@ -20,7 +20,7 @@ Hooks that fix files in place fail the commit if they make changes, so stage the
 
 The authored task applications, reference solutions and hidden tests follow the host code's formatting and spelling too. Deliberately wrong variants are unformatted, untyped patches, and the root verifier test requires each one to fail on an assertion.
 
-The Node hooks run the tools pinned in `node_modules`, and the Ruff hooks run the Ruff pinned in `uv.lock`, so `pnpm install` and `uv sync` come first in a new checkout. Of the hooks, `nix flake check` runs only the others, because the check's store source has neither `node_modules` nor the virtualenv, while [CI](ci.md#checks) runs those tools.
+The shared devkit hooks use Nix-provided tools for spelling and Markdown checks. Prettier uses the locked Node tools for its Astro plugin, and Ruff uses the tools pinned in `uv.lock`, so `pnpm install` and `uv sync` come first in a new checkout. `nix flake check` runs the shared hooks, while [CI](ci.md#checks) also runs the locked Node and Python tools.
 
 ## Where Settings Live
 
