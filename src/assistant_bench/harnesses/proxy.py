@@ -13,11 +13,17 @@ from pydantic import TypeAdapter, ValidationError
 
 from assistant_bench.catalog import Api
 from assistant_bench.generation import load_generation
-from assistant_bench.harnesses.endpoint import Endpoint
+from assistant_bench.harnesses.accounting import REQUEST_ID, TrialAccounting
+from assistant_bench.harnesses.endpoint import Endpoint, receipt
 from assistant_bench.harnesses.usage import measure
 
 
 _REQUEST = TypeAdapter(dict[str, Any])
+
+
+class _FrameDecoder(SSEDecoder):
+    def frames(self, chunks: AsyncIterator[bytes]) -> AsyncIterator[bytes]:
+        return self._aiter_chunks(chunks)
 
 
 @dataclass(frozen=True)
@@ -29,17 +35,18 @@ class Connection:
 
 @asynccontextmanager
 async def connect(
-    endpoint: Endpoint, api: Api, model: str
+    endpoint: Endpoint, api: Api, model: str, *, recorder: TrialAccounting
 ) -> AsyncGenerator[Connection]:
     """Expose only the selected model's inference paths until the trial finishes."""
     token = secrets.token_urlsafe(32)
+    recorder.remember_secret(token)
     calls: list[dict[str, Any]] = []
     paths = (
         ('/v1/messages', '/v1/messages/count_tokens')
         if api == 'anthropic-messages'
         else ('/v1/responses',)
     )
-    async with endpoint.http_client() as client:
+    async with endpoint.http_client(api, recorder=recorder) as client:
 
         async def forward(request: web.Request) -> web.StreamResponse:
             provided = request.headers.get('x-api-key', '')
@@ -88,50 +95,88 @@ async def connect(
                 )
                 await response.prepare(request)
 
-                async def chunks() -> AsyncIterator[bytes]:
-                    async for chunk in upstream.aiter_bytes():
-                        await response.write(chunk)
-                        yield chunk
-
-                if 'text/event-stream' in upstream.headers.get('content-type', ''):
-                    usage: dict[str, Any] = {}
-                    reported_model: str | None = None
-                    async for event in SSEDecoder().aiter_bytes(chunks()):
-                        if not event.data or event.data == '[DONE]':
-                            continue
-                        data = event.json()
-                        kind = data.get('type')
-                        if kind == 'message_start':
-                            usage = data['message'].get('usage') or {}
-                            reported_model = data['message'].get('model')
-                        elif kind == 'message_delta':
-                            usage.update(data.get('usage', {}))
-                        elif kind == 'message_stop':
+                request_id = upstream.request.extensions.get(REQUEST_ID)
+                terminal = False
+                try:
+                    if 'text/event-stream' in upstream.headers.get('content-type', ''):
+                        usage: dict[str, Any] = {}
+                        message: dict[str, Any] = {}
+                        final_usage = False
+                        decoder = _FrameDecoder()
+                        async for frame in decoder.frames(upstream.aiter_bytes()):
+                            for event in decoder.iter_bytes(iter([frame])):
+                                if not event.data or event.data == '[DONE]':
+                                    continue
+                                data = _REQUEST.validate_python(event.json())
+                                kind = data.get('type')
+                                completed: dict[str, Any] | None = None
+                                if kind == 'message_start':
+                                    message = _REQUEST.validate_python(data['message'])
+                                    usage = dict(message.get('usage') or {})
+                                elif kind == 'message_delta':
+                                    usage.update(data.get('usage', {}))
+                                    message.update(data.get('delta', {}))
+                                    final_usage = True
+                                elif kind == 'message_stop':
+                                    completed = {
+                                        **message,
+                                        'usage': usage if final_usage else None,
+                                    }
+                                elif kind in (
+                                    'response.completed',
+                                    'response.incomplete',
+                                    'response.failed',
+                                ):
+                                    completed = _REQUEST.validate_python(
+                                        data['response']
+                                    )
+                                if completed is not None:
+                                    assert isinstance(request_id, str)
+                                    await recorder.confirm(
+                                        request_id,
+                                        receipt(
+                                            api,
+                                            completed,
+                                            upstream.status_code,
+                                            upstream.headers.get('x-request-id'),
+                                        ),
+                                    )
+                                    terminal = True
+                                    calls.append(
+                                        {
+                                            **measure(api, completed.get('usage')),
+                                            'responded': True,
+                                            'response_model': completed.get('model'),
+                                        }
+                                    )
+                            await response.write(frame)
+                        if isinstance(request_id, str) and not terminal:
+                            await recorder.uncertain()
+                            raise ValueError(
+                                'The inference stream has no terminal receipt.'
+                            )
+                    else:
+                        if isinstance(request_id, str):
+                            terminal = True
+                            try:
+                                payload = _REQUEST.validate_json(upstream.content)
+                            except ValidationError:
+                                payload = {}
                             calls.append(
                                 {
-                                    **measure(api, usage),
+                                    **measure(api, payload.get('usage')),
                                     'responded': True,
-                                    'response_model': reported_model,
+                                    'response_model': payload.get('model'),
                                 }
                             )
-                        elif kind in (
-                            'response.completed',
-                            'response.incomplete',
-                            'response.failed',
-                        ):
-                            completed = data['response']
-                            calls.append(
-                                {
-                                    **measure(api, completed.get('usage')),
-                                    'responded': True,
-                                    'response_model': completed.get('model'),
-                                }
-                            )
-                else:
-                    async for _ in chunks():
-                        pass
-                await response.write_eof()
-                return response
+                        async for chunk in upstream.aiter_bytes():
+                            await response.write(chunk)
+                    await response.write_eof()
+                    return response
+                except BaseException:
+                    if isinstance(request_id, str) and not terminal:
+                        await recorder.uncertain()
+                    raise
 
         app = web.Application(client_max_size=0)
         for path in paths:
