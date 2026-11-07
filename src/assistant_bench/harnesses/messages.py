@@ -134,6 +134,7 @@ async def request_messages(
     """Persist any received message snapshot when streaming ends or fails."""
     started = time.monotonic()
     stopped = False
+    streaming = False
     recorder = current_trial()
     try:
         async with client.messages.stream(
@@ -146,6 +147,7 @@ async def request_messages(
             if effort
             else omit,
         ) as stream:
+            streaming = True
             result.request_id = stream.request_id
             async for event in stream:
                 if event.type == 'message_start':
@@ -180,7 +182,7 @@ async def request_messages(
         result.complete = stopped
         result.check(complete=False)
     except BaseException:
-        if not stopped:
+        if streaming and not stopped:
             await recorder.uncertain()
         raise
     finally:
