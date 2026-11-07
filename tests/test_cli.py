@@ -1829,7 +1829,12 @@ class TestClose:
         reports_dir: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        write_votes_family(families_dir, ['large', 'small'], CLOSE_CASES, samples=2)
+        configuration = families_dir / 'f' / 'family.toml'
+        configuration.write_text(
+            configuration.read_text().replace(
+                'public_voting = true', 'public_voting = false'
+            )
+        )
         record_vote(
             store.database,
             store.published,
