@@ -571,7 +571,9 @@ def _clone(repository: _Repository, root: Path) -> Path:
             str(clone),
         ],
     )
-    (clone / '.git' / 'info' / 'attributes').write_text(
+    information = clone / '.git' / 'info'
+    information.mkdir(exist_ok=True)
+    (information / 'attributes').write_text(
         '* -text -filter -ident -working-tree-encoding\n'
     )
     return clone
