@@ -175,6 +175,11 @@ export const app = new Hono<Api>()
       c.header('Cache-Control', 'no-store');
       c.header('Content-Security-Policy', "frame-ancestors 'self'");
       c.header('X-Frame-Options', 'SAMEORIGIN');
+      if (c.req.path.startsWith('/api/previews/')) {
+        for (const [name, value] of Object.entries(previewHeaders)) {
+          c.header(name, value);
+        }
+      }
       if (
         new URL(c.req.url).origin !== c.env.APP_ORIGIN ||
         !(await verifyOwner(c.req.raw, c.env))
