@@ -37,7 +37,7 @@ Drop a test once another covers everything it checks.
 
 ## Accessibility
 
-`site.test.ts` serves the built site's files and a vote API pair from `web/src/test/arena.ts` through Playwright routes, and aborts every other request. On each page in Chromium, under the light and dark color schemes and after the page's islands hydrate, it runs axe-core's default rules and `target-size`, and fails on any violation, page error, or console error. The vote page is checked on a text pair with its first Issues list open. Until a public family closes a round, the built site draws no Plot chart, so `PlotFigure.test.tsx` also runs axe-core on a drawn chart in jsdom, which checks its ARIA but not its colors. [`AGENTS.md`](../../AGENTS.md#rules-for-every-change) gives the command that installs the browser.
+`site.test.ts` builds in an isolated root with a closed synthetic round so system pages and hydrated charts are included. It serves the built files and a vote API pair from `web/src/test/arena.ts` through Playwright routes, and aborts every other request. On each page in Chromium, under the light and dark color schemes and after the page's islands hydrate, it runs axe-core's default rules and `target-size`, and fails on any violation, page error, or console error. The vote page is checked on a text pair with its first Issues list open. `PlotFigure.test.tsx` also runs axe-core on a drawn chart in jsdom, which checks its ARIA but not its colors. [`AGENTS.md`](../../AGENTS.md#rules-for-every-change) gives the command that installs the browser.
 
 ## Docker Trials
 

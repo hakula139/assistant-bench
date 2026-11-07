@@ -58,7 +58,7 @@ function Definition({ term, side = 'top' }: { term: Term; side?: Side }) {
 export function Hint({ term, side, children }: { term: Term; side?: Side; children?: ReactNode }) {
   return (
     <Popover>
-      <PopoverTrigger className="min-h-6 min-w-6 cursor-help text-left underline decoration-faint decoration-dotted underline-offset-4">
+      <PopoverTrigger className="-my-0.5 min-h-6 min-w-6 cursor-help text-left underline decoration-faint decoration-dotted underline-offset-4">
         {children ?? term.term}
       </PopoverTrigger>
       <Definition term={term} side={side} />

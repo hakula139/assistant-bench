@@ -1,6 +1,17 @@
+import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises';
+import {
+  cp,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,6 +23,7 @@ import { chromium, type Browser } from 'playwright';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 
 import { makeState, VOTE_FAMILY } from '@/test/arena';
+import { readReport } from '@/test/fixture';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const origin = 'https://site.example';
@@ -19,7 +31,8 @@ const repository = 'https://forge.example.com/team/project';
 const base = '/team/project/mr-7/';
 let directory: string;
 let prefixed: string;
-let browser: Browser;
+let fixture: string;
+let browser: Browser | undefined;
 
 beforeAll(async () => {
   // Vitest sets `NODE_ENV=test`, under which Vite would bundle React's development build, and a
@@ -29,13 +42,37 @@ beforeAll(async () => {
   delete env.BENCH_NIXOS_CONFIG;
   delete env.CI_PAGES_URL;
   delete env.CI_PROJECT_URL;
+  fixture = await mkdtemp(join(tmpdir(), 'bench-site-'));
+  const site = join(fixture, 'web');
+  await mkdir(join(site, 'node_modules'), { recursive: true });
+  await Promise.all(
+    ['src', 'astro.config.ts', 'package.json', 'tsconfig.json'].map((entry) =>
+      cp(join(root, entry), join(site, entry), { recursive: true }),
+    ),
+  );
+  await symlink(join(root, 'public'), join(site, 'public'));
+  for (const entry of ['families', 'systems.toml']) {
+    await symlink(join(root, '..', entry), join(fixture, entry));
+  }
+  for (const entry of await readdir(join(root, 'node_modules'))) {
+    if (!entry.startsWith('.')) {
+      await symlink(join(root, 'node_modules', entry), join(site, 'node_modules', entry));
+    }
+  }
+  const report = await readReport('report', 'votes');
+  report.family = 'writing-zh';
+  const reports = join(fixture, 'reports', report.family);
+  await mkdir(reports, { recursive: true });
+  await writeFile(join(reports, `${report.round}.json`), JSON.stringify(report));
+
   const build = (outDir: string, extra: NodeJS.ProcessEnv = {}) =>
-    promisify(execFile)('pnpm', ['exec', 'astro', 'build', '--outDir', outDir], {
-      cwd: root,
-      env: { ...env, ...extra },
-    });
-  directory = await mkdtemp(join(tmpdir(), 'bench-site-'));
-  prefixed = await mkdtemp(join(tmpdir(), 'bench-site-'));
+    promisify(execFile)(
+      process.execPath,
+      [join(root, 'node_modules/astro/bin/astro.mjs'), 'build', '--outDir', outDir],
+      { cwd: site, env: { ...env, ...extra } },
+    );
+  directory = join(fixture, 'dist');
+  prefixed = join(fixture, 'prefixed');
   await build(directory);
   // GitLab's `CI_PAGES_URL` carries no trailing slash.
   await build(prefixed, {
@@ -46,9 +83,10 @@ beforeAll(async () => {
 }, 180_000);
 
 afterAll(async () => {
-  await browser.close();
-  await rm(directory, { recursive: true, force: true });
-  await rm(prefixed, { recursive: true, force: true });
+  await browser?.close();
+  if (fixture) {
+    await rm(fixture, { recursive: true, force: true });
+  }
 }, 60_000);
 
 test("bundles React's production build", async () => {
@@ -166,6 +204,7 @@ describe('built pages', () => {
   const vote = '/vote/index.html';
   const api = new Map<string, unknown>([
     ['GET /api/families', { families: [VOTE_FAMILY] }],
+    ['GET /api/freshness', { status: 'current' }],
     ['GET /api/pair', makeState()],
   ]);
   let pages: string[];
@@ -180,6 +219,7 @@ describe('built pages', () => {
   test.each(['light', 'dark'] as const)(
     "pass axe-core's default rules and target-size in the %s theme, without errors, once their islands hydrate",
     async (theme) => {
+      assert(browser);
       const context = await browser.newContext({ colorScheme: theme });
       await context.route('**', (route) => route.abort());
       await context.route(`${origin}/**`, async (route) => {
@@ -249,7 +289,9 @@ describe('built pages', () => {
       }
       await context.close();
 
-      expect(pages).toEqual(expect.arrayContaining(['/index.html', vote]));
+      expect(pages).toEqual(
+        expect.arrayContaining(['/index.html', '/writing/zh/acme-large/index.html', vote]),
+      );
       expect(problems).toEqual({});
     },
     120_000,
@@ -258,6 +300,7 @@ describe('built pages', () => {
 
 describe('Pages deployment', () => {
   test('serves pages and assets below its base without the vote page', async () => {
+    assert(browser);
     const context = await browser.newContext();
     const fetched = new Set<string>();
     const missing: string[] = [];
