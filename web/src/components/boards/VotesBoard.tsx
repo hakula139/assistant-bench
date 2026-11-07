@@ -20,6 +20,7 @@ import { Hint } from '@/components/site/Term';
 import {
   Table,
   TableBody,
+  TableCaption,
   TableCell,
   TableHead,
   TableHeader,
@@ -174,14 +175,31 @@ function RoundSummary({ round, lengthBias }: { round: VotesReport; lengthBias: T
               : ' Intervals use independent case clusters at the recorded interval level.'}
         </p>
         {results.public_held_out.scores.length > 0 && (
-          <ul>
-            {results.public_held_out.scores.map((row) => (
-              <li key={row.system}>
-                {systemName(reportNames(round.systems), row.system)}: {formatScore(row.difference)}{' '}
-                points ({formatScore(row.interval.lower)} to {formatScore(row.interval.upper)}).
-              </li>
-            ))}
-          </ul>
+          <Table>
+            <TableCaption>Public minus held-out score points.</TableCaption>
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">System</TableHead>
+                <TableHead scope="col" numeric>
+                  Difference
+                </TableHead>
+                <TableHead scope="col" numeric>
+                  Interval
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {results.public_held_out.scores.map((row) => (
+                <TableRow key={row.system}>
+                  <TableCell>{systemName(reportNames(round.systems), row.system)}</TableCell>
+                  <TableCell numeric>{formatScore(row.difference)}</TableCell>
+                  <TableCell numeric>
+                    {formatScore(row.interval.lower)} to {formatScore(row.interval.upper)}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         )}
       </details>
       <details className={note}>

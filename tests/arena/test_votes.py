@@ -718,6 +718,49 @@ class TestSnapshotFiles:
 
 
 class TestVotingInput:
+    def test_unions_partly_overlapping_system_fields_in_store_order(self) -> None:
+        a, b = fact('a', 'public', 'acme-large'), fact('b', 'public', 'acme-small')
+        c, d = fact('c', 'held', 'acme-large'), fact('d', 'held', 'acme-pro')
+        production = snapshot((a, b), (vote(1, a, b),)).production
+        local = snapshot((c, d), (vote(1, c, d),)).production
+        assert production is not None and local is not None
+        production = production.model_copy(
+            update={
+                'inventory': production.inventory.model_copy(
+                    update={
+                        'systems': {
+                            system: ARENA_NAMES[system]
+                            for system in ('acme-large', 'acme-small')
+                        }
+                    }
+                )
+            }
+        )
+        local = local.model_copy(
+            update={
+                'inventory': local.inventory.model_copy(
+                    update={
+                        'systems': {
+                            system: ARENA_NAMES[system]
+                            for system in ('acme-large', 'acme-pro')
+                        }
+                    }
+                )
+            }
+        )
+        merged = Snapshot(
+            family=FAMILY.name, taken_at=NOW, production=production, local=local
+        )
+
+        analysis = votes.voting_input(merged, FAMILY, [])
+
+        assert analysis.systems == ('acme-large', 'acme-small', 'acme-pro')
+        assert list(votes.system_names(merged)) == list(analysis.systems)
+        assert {row.comparison.right for row in analysis.ordinary} == {
+            'acme-small',
+            'acme-pro',
+        }
+
     def test_merges_disjoint_stores_with_independent_actors_and_cut_validation(
         self,
     ) -> None:

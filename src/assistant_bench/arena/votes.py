@@ -102,16 +102,22 @@ class Snapshot(_Model):
         outputs: set[str] = set()
         fingerprints: dict[str, str] = {}
         first = cuts[0][1].inventory
+        names: dict[str, str] = {}
         for _, cut in cuts:
             inventory = cut.inventory
             if inventory.family != self.family:
                 raise ValueError('Every cut must belong to the snapshot family.')
             if (
                 inventory.reference != first.reference
-                or inventory.systems != first.systems
                 or inventory.defects != first.defects
             ):
                 raise ValueError('Store cuts disagree on their frozen family settings.')
+            for system, name in inventory.systems.items():
+                if system in names and names[system] != name:
+                    raise ValueError('Store cuts disagree on a system display name.')
+                names[system] = name
+            if inventory.reference not in inventory.systems:
+                raise ValueError('A cut must name its reference system.')
             case_keys = {case.key for case in inventory.cases}
             output_keys = {output.key for output in inventory.outputs}
             if len(case_keys) != len(inventory.cases) or len(output_keys) != len(
@@ -509,6 +515,7 @@ def voting_input(
             'outputs': tuple(
                 output for _, cut in cuts for output in cut.inventory.outputs
             ),
+            'systems': system_names(snapshot),
         }
     )
     published = {output.key: output for output in inventory.outputs}
@@ -575,7 +582,11 @@ def fingerprints(snapshot: Snapshot) -> dict[str, str]:
 
 
 def system_names(snapshot: Snapshot) -> dict[str, str]:
-    return snapshot.cuts()[0][1].inventory.systems
+    return {
+        system: name
+        for _, cut in snapshot.cuts()
+        for system, name in cut.inventory.systems.items()
+    }
 
 
 def _counts(vote: Vote, published: dict[str, OutputFacts]) -> bool:
@@ -584,6 +595,9 @@ def _counts(vote: Vote, published: dict[str, OutputFacts]) -> bool:
         a is not None
         and b is not None
         and a.case_key == b.case_key == vote.case_key
+        and a.system == vote.a_system
+        and b.system == vote.b_system
+        and a.system != b.system
         and a.verdict == b.verdict == 'pass'
         and a.content_digest != b.content_digest
     )
