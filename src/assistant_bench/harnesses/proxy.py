@@ -100,8 +100,11 @@ async def connect(
                 try:
                     if (
                         upstream.is_success
-                        and 'text/event-stream'
-                        in upstream.headers.get('content-type', '')
+                        and upstream.headers.get('content-type', '')
+                        .split(';', 1)[0]
+                        .strip()
+                        .lower()
+                        == 'text/event-stream'
                     ):
                         usage: dict[str, Any] = {}
                         message: dict[str, Any] = {}
