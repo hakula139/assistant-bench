@@ -1272,6 +1272,37 @@ describe('VoteApp', () => {
     expect(location.search).toBe('');
   });
 
+  test('shows a stale draw on the family list and waits for the voter to select again', async () => {
+    const api = stubApi();
+    const fetch = api.fetch.getMockImplementation();
+    const stale = vi.fn(() =>
+      Promise.resolve(Response.json({ error: 'stale_pair' }, { status: 409 })),
+    );
+    override(api, '/api/pair', stale);
+    const user = userEvent.setup();
+    render(<VoteApp />);
+
+    await user.click(await screen.findByRole('button', { name: FAMILY.display_name }));
+
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      'This pair changed. Review the current outputs and choose again.',
+    );
+    expect(screen.getByRole('heading', { name: 'Choose a family to vote on' })).toBeDefined();
+    expect(screen.queryByRole('region', { name: 'Output A' })).toBeNull();
+    expect(screen.queryByRole('region', { name: 'Output B' })).toBeNull();
+    expect(stale).toHaveBeenCalledTimes(1);
+    expect(location.search).toBe('');
+
+    api.fetch.mockImplementation(
+      (url, init) => fetch?.(url, init) ?? Promise.reject(new Error('No stub')),
+    );
+    await user.click(screen.getByRole('button', { name: FAMILY.display_name }));
+    await screen.findByText('Output A1');
+
+    expect(api.pairRequests).toEqual([FAMILY.family]);
+    expect(stale).toHaveBeenCalledTimes(1);
+  });
+
   test('returns from a linked family without a round to the family list', async () => {
     stubApi();
     history.replaceState(null, '', '/vote/?family=retired');

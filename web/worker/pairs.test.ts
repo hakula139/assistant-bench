@@ -1,16 +1,9 @@
 import { env } from 'cloudflare:workers';
 import { describe, expect, test, vi } from 'vitest';
 
+import { candidates, draw, next, ranker, type Comparison, type Rank } from './pairs';
 import {
-  candidates,
-  draw,
-  next,
-  ranker,
-  type Comparison,
-  type PassingOutput,
-  type Rank,
-} from './pairs';
-import {
+  actorOf,
   admitted,
   call,
   CODING,
@@ -42,45 +35,35 @@ const systemsOf = (row: { a_system: string; b_system: string } | null) =>
   row === null ? null : [row.a_system, row.b_system].sort();
 
 describe('candidates', () => {
-  const output = (case_key: string, system: string, content_digest: string, index = 0) =>
-    ({
-      output_key: `${case_key}/${system}/${index}`,
-      case_key,
-      system,
-      content_digest,
-    }) satisfies PassingOutput;
-
-  test('pairs systems on a case with some differing samples, skipping voted comparisons', () => {
-    const outputs = [
-      output('first', 'large', 'x'),
-      output('first', 'large', 'y', 1),
-      output('first', 'small', 'x'),
-      output('first', 'pro', 'z'),
-      output('second', 'large', 'same'),
-      output('second', 'small', 'same'),
-      output('third', 'large', 'alone'),
+  test('expands pair facts and skips voted comparisons regardless of their side order', () => {
+    const facts = [
+      { low_system: 'large', high_system: 'pro', case_keys: '["first", "second"]' },
+      { low_system: 'large', high_system: 'small', case_keys: '["first"]' },
+      { low_system: 'pro', high_system: 'small', case_keys: '["first"]' },
     ];
 
-    const found = candidates(outputs, [{ case_key: 'first', a_system: 'pro', b_system: 'large' }]);
+    const found = candidates(facts, [{ case_key: 'first', a_system: 'pro', b_system: 'large' }]);
 
-    expect(
-      found.map(({ caseKey, systems, outputs }) => ({
-        caseKey,
-        systems,
-        outputs: outputs.map((side) => side.map(({ output_key }) => output_key)),
-      })),
-    ).toEqual([
-      {
-        caseKey: 'first',
-        systems: ['large', 'small'],
-        outputs: [['first/large/0', 'first/large/1'], ['first/small/0']],
-      },
-      {
-        caseKey: 'first',
-        systems: ['pro', 'small'],
-        outputs: [['first/pro/0'], ['first/small/0']],
-      },
+    expect(found).toEqual([
+      { caseKey: 'second', systems: ['large', 'pro'] },
+      { caseKey: 'first', systems: ['large', 'small'] },
+      { caseKey: 'first', systems: ['pro', 'small'] },
     ]);
+  });
+
+  test('normalizes SQL system order before returning comparisons and matching vote history', () => {
+    const bmp = 'system-\ue000';
+    const astral = 'system-\u{10000}';
+    const facts = [{ low_system: bmp, high_system: astral, case_keys: '["first", "second"]' }];
+
+    const found = candidates(facts, []);
+    const remaining = candidates(facts, [{ case_key: 'first', a_system: bmp, b_system: astral }]);
+
+    expect(found).toEqual([
+      { caseKey: 'first', systems: [astral, bmp] },
+      { caseKey: 'second', systems: [astral, bmp] },
+    ]);
+    expect(remaining).toEqual([{ caseKey: 'second', systems: [astral, bmp] }]);
   });
 });
 
@@ -88,10 +71,6 @@ describe('draw', () => {
   const comparison = (caseKey: string, low: string, high: string): Comparison => ({
     caseKey,
     systems: [low, high],
-    outputs: [
-      [{ output_key: `${caseKey}/${low}`, case_key: caseKey, system: low, content_digest: low }],
-      [{ output_key: `${caseKey}/${high}`, case_key: caseKey, system: high, content_digest: high }],
-    ],
   });
 
   /** A voter's order given as fixed ranks, with every unlisted item ranked last. */
@@ -114,52 +93,35 @@ describe('draw', () => {
 
     const drawn = await draw(rank, comparisons, coverage);
 
-    expect(drawn).toEqual({ caseKey: 'first', a: 'first/large', b: 'first/small' });
+    expect(drawn).toEqual({ caseKey: 'first', systems: ['large', 'small'] });
   });
 
-  test('draws only a sample pair whose contents differ', async () => {
-    const output = (system: string, index: number, content_digest: string) => ({
-      output_key: `first/${system}/${index}`,
-      case_key: 'first',
-      system,
-      content_digest,
+  test('breaks equal coverage by the keyed system-pair rank and then the keyed case rank', async () => {
+    const rank = fixed({
+      'pair large pro': '20',
+      'pair large small': '10',
+      'case large small first': '30',
+      'case large small second': '00',
     });
-    const rank = fixed({ 'sample first/large/0 first/small/0': '00' });
 
     const drawn = await draw(
       rank,
       [
-        {
-          caseKey: 'first',
-          systems: ['large', 'small'],
-          outputs: [[output('large', 0, 'x'), output('large', 1, 'y')], [output('small', 0, 'x')]],
-        },
+        comparison('first', 'large', 'pro'),
+        comparison('first', 'large', 'small'),
+        comparison('second', 'large', 'small'),
       ],
       new Map(),
     );
 
-    expect(drawn).toEqual({ caseKey: 'first', a: 'first/large/1', b: 'first/small/0' });
-  });
-
-  test.each([
-    ['an even', '20', { a: 'first/large', b: 'first/small' }],
-    ['an odd', '21', { a: 'first/small', b: 'first/large' }],
-  ])("orders the panes by the sample rank's lowest bit, with %s rank", async (_, sample, panes) => {
-    const rank = fixed({ 'sample first/large first/small': sample });
-
-    const drawn = await draw(rank, [comparison('first', 'large', 'small')], new Map());
-
-    expect(drawn).toEqual({ caseKey: 'first', ...panes });
+    expect(drawn).toEqual({ caseKey: 'second', systems: ['large', 'small'] });
   });
 });
 
 describe('next', () => {
   test('orders one system pair differently for different voters', async () => {
     const comparisons = candidates(
-      Object.keys(threeWay(8)).flatMap((caseKey) => [
-        { output_key: `${caseKey}/a`, case_key: caseKey, system: 'a', content_digest: 'a' },
-        { output_key: `${caseKey}/b`, case_key: caseKey, system: 'b', content_digest: 'b' },
-      ]),
+      [{ low_system: 'a', high_system: 'b', case_keys: JSON.stringify(Object.keys(threeWay(8))) }],
       [],
     );
     const order = async (actor: string) => {
@@ -181,6 +143,55 @@ describe('next', () => {
 });
 
 describe('GET /api/pair', () => {
+  test.each([
+    '00000000-0000-4000-8000-000000000001',
+    '00000000-0000-4000-8000-000000000017',
+  ] as const)(
+    'draws the lowest-ranked distinct-content sample pair for actor %s',
+    async (actor) => {
+      await publish(SYNTHETIC, {
+        first: {
+          'acme-large': ['shared', 'large first', 'large second'],
+          'acme-small': ['shared', 'small first', 'small second'],
+        },
+      });
+      const random = vi.spyOn(crypto, 'randomUUID').mockReturnValue(actor);
+      const from = await admitted();
+      random.mockRestore();
+      const rank = ranker('test-actor-key', await actorOf(from), SYNTHETIC);
+      const outputs = (
+        await env.DB.prepare(
+          "SELECT output_key, system, content_digest FROM outputs WHERE verdict = 'pass' AND publication_id = ?",
+        )
+          .bind(`${SYNTHETIC}-publication`)
+          .all<{ output_key: string; system: string; content_digest: string }>()
+      ).results;
+      const ranked = await Promise.all(
+        outputs
+          .filter(({ system }) => system === 'acme-large')
+          .flatMap((a) =>
+            outputs
+              .filter((b) => b.system === 'acme-small' && b.content_digest !== a.content_digest)
+              .map(async (b) => ({ a, b, rank: await rank('sample', a.output_key, b.output_key) })),
+          ),
+      );
+      ranked.sort((a, b) => a.rank.localeCompare(b.rank));
+      const expected = ranked[0];
+      const swapped = Number.parseInt(expected.rank.slice(-1), 16) & 1;
+
+      const state = await pairOf(from, SYNTHETIC);
+      const actual = await env.DB.prepare('SELECT a_output, b_output FROM pairs WHERE id = ?')
+        .bind(state.pair?.id)
+        .first();
+
+      expect(actual).toEqual({
+        a_output: (swapped ? expected.b : expected.a).output_key,
+        b_output: (swapped ? expected.a : expected.b).output_key,
+      });
+      expect(state.pair?.a).not.toBe(state.pair?.b);
+    },
+  );
+
   test('draws the system pair with the fewest counted votes in the family', async () => {
     await publish(SYNTHETIC, threeWay(3));
     for (const caseKey of ['case-0', 'case-1']) {
@@ -195,6 +206,26 @@ describe('GET /api/pair', () => {
     const { pair } = await pairOf(from, SYNTHETIC);
 
     expect(systemsOf(await pendingRow(pair?.id ?? ''))).toEqual(['acme-pro', 'acme-small']);
+  });
+
+  test('counts votes on Unicode system pairs before drawing the less covered alternative', async () => {
+    const bmp = 'system-\ue000';
+    const astral = 'system-\u{10000}';
+    await publish(SYNTHETIC, {
+      first: { [bmp]: ['First BMP.'], [astral]: ['First astral.'] },
+      second: { 'acme-large': ['Second large.'], 'acme-small': ['Second small.'] },
+    });
+    await seedVote(SYNTHETIC, 'first', [bmp, astral]);
+    const random = vi
+      .spyOn(crypto, 'randomUUID')
+      .mockReturnValue('00000000-0000-4000-8000-000000000001');
+    const from = await admitted();
+    random.mockRestore();
+
+    const { pair } = await pairOf(from, SYNTHETIC);
+
+    expect(systemsOf(await pendingRow(pair?.id ?? ''))).toEqual(['acme-large', 'acme-small']);
+    expect(pair?.instruction).toBe('Instruction second');
   });
 
   test('shows the pair with its prompt, panes and defects, counting the remaining comparisons', async () => {
@@ -270,6 +301,47 @@ describe('GET /api/pair', () => {
     expect(state.pair?.id).not.toBe(pair?.id);
     expect(state.pair?.instruction).toMatch(/^Instruction case-\d$/);
     expect(state.remaining).toBe(6);
+  });
+
+  test('rejects a draw superseded during sample loading and preserves the newer pending pair', async () => {
+    await publish(SYNTHETIC, threeWay(2));
+    const from = await admitted();
+    const prepare = env.DB.prepare.bind(env.DB);
+    let replacement: string | undefined;
+    let switched = false;
+    vi.spyOn(env.DB, 'prepare').mockImplementation((query) => {
+      const statement = prepare(query);
+      if (query.includes('system IN (?, ?)')) {
+        const bind = statement.bind.bind(statement);
+        vi.spyOn(statement, 'bind').mockImplementation((...values) => {
+          const bound = bind(...values);
+          const all = bound.all.bind(bound);
+          vi.spyOn(bound, 'all').mockImplementation(async <T>() => {
+            const result = await all<T>();
+            if (!switched) {
+              switched = true;
+              await publish(SYNTHETIC, threeWay(2), 'replacement');
+              replacement = (await pairOf(from, SYNTHETIC)).pair?.id;
+            }
+            return result;
+          });
+          return bound;
+        });
+      }
+      return statement;
+    });
+
+    const response = await call(from, 'GET', `/pair?family=${SYNTHETIC}`);
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: 'stale_pair' });
+    expect(replacement).toEqual(expect.any(String));
+    expect(
+      await env.DB.prepare('SELECT id, publication_id FROM pairs WHERE family = ?')
+        .bind(SYNTHETIC)
+        .all(),
+    ).toMatchObject({ results: [{ id: replacement, publication_id: 'replacement' }] });
+    expect((await pairOf(from, SYNTHETIC)).pair?.id).toBe(replacement);
   });
 
   test('answers null once the actor has voted on every comparison', async () => {
