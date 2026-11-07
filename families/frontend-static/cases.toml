@@ -14,6 +14,8 @@ Facts to include:
 
 Include a clear introduction, a useful schedule, practical access information, and a prominent way to jump to the schedule. Use only these event facts. Invent visual details freely, including decorative artwork made with HTML and CSS.
 
+Do not use SVG animation elements. Static SVG and CSS animation are allowed.
+
 Return only one complete self-contained HTML document, either bare or in one html fence, with explicit <!doctype html>, <html>, <head>, and <body> opening and closing boundaries. Use inline CSS and optionally data-URL images or fonts. The page will run in an isolated viewport with no JavaScript, network access, form submission, external dependencies, or persistent storage. Links may point only to fragments in this document. Native HTML controls such as details are available. Make the page useful at narrow phone and wide desktop widths, with readable text, visible keyboard focus, and clear content hierarchy. Do not include commentary outside the document.
 '''
 checklist = [
@@ -38,6 +40,8 @@ Snapshot at 14:20 UTC on June 12:
 - Previous incidents: June 10, "Search indexing lag", resolved 09:30 UTC after 35 minutes. June 7, "Notification delivery delays", resolved 17:10 UTC after 50 minutes. June 5, no incidents reported.
 
 Include the snapshot time and timezone, component status, current incident timeline, and recent history. Make incident details expandable if useful. Do not imply that the current incident is resolved, add an update subscription that cannot work, or invent additional measurements.
+
+Do not use SVG animation elements. Static SVG and CSS animation are allowed.
 
 Return only one complete self-contained HTML document, either bare or in one html fence, with explicit <!doctype html>, <html>, <head>, and <body> opening and closing boundaries. Use inline CSS and optionally data-URL images or fonts. The page will run in an isolated viewport with no JavaScript, network access, form submission, external dependencies, or persistent storage. Links may point only to fragments in this document. Native HTML controls such as details are available. Make the page useful at narrow phone and wide desktop widths, with readable text, visible keyboard focus, and status meanings conveyed beyond color. Do not include commentary outside the document.
 '''
@@ -64,6 +68,8 @@ Plans, billed monthly in USD with no annual option:
 
 Include a concise plan overview, a comparison that makes member and storage limits easy to scan, and answers to likely questions about trials, exports, and downgrades. You may recommend a plan for a concrete team size if the recommendation follows these facts. Any call to action must be a clearly labeled in-page link to relevant details, since signup is unavailable. Do not add discounts, features, guarantees, or fees.
 
+Do not use SVG animation elements. Static SVG and CSS animation are allowed.
+
 Return only one complete self-contained HTML document, either bare or in one html fence, with explicit <!doctype html>, <html>, <head>, and <body> opening and closing boundaries. Use inline CSS and optionally data-URL images or fonts. The page will run in an isolated viewport with no JavaScript, network access, form submission, external dependencies, or persistent storage. Links may point only to fragments in this document. Native HTML controls such as details are available. Make the page useful at narrow phone and wide desktop widths, with readable text, visible keyboard focus, and clear comparison semantics. Do not include commentary outside the document.
 '''
 checklist = [
@@ -89,6 +95,8 @@ Use these facts:
 - Before leaving, return tools, label unfinished repairs with the coordinator, and share one thing learned. After two sessions, volunteers can discuss training interests with the coordinator. There is no required weekly commitment.
 
 Include a short preparation checklist, an ordered first-session guide, conspicuous safety boundaries, and a useful way to navigate the page. Native disclosure sections can hold optional detail. This is a reading guide, so do not suggest checklist choices will be saved or provide working account or registration controls. Do not add safety procedures or obligations beyond the facts.
+
+Do not use SVG animation elements. Static SVG and CSS animation are allowed.
 
 Return only one complete self-contained HTML document, either bare or in one html fence, with explicit <!doctype html>, <html>, <head>, and <body> opening and closing boundaries. Use inline CSS and optionally data-URL images or fonts. The page will run in an isolated viewport with no JavaScript, network access, form submission, external dependencies, or persistent storage. Links may point only to fragments in this document. Native HTML controls such as details are available. Make the page useful at narrow phone and wide desktop widths, with readable text, visible keyboard focus, and clear content hierarchy. Do not include commentary outside the document.
 '''
