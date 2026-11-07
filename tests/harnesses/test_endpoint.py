@@ -172,10 +172,8 @@ class TestEndpoint:
             asyncio.run(request())
 
             first, second = endpoint.requests
-            header = 'x-api-key' if api == 'anthropic-messages' else 'authorization'
-            prefix = '' if api == 'anthropic-messages' else 'Bearer '
-            sent_original = first.headers[header] == prefix + original_key
-            sent_rotated = second.headers[header] == prefix + rotated_key
+            sent_original = first.headers['authorization'] == f'Bearer {original_key}'
+            sent_rotated = second.headers['authorization'] == f'Bearer {rotated_key}'
             assert sent_original and sent_rotated
             assert first.headers['x-session-token'] == original_header
             assert second.headers['x-rotated-token'] == rotated_header
