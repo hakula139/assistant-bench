@@ -18,7 +18,7 @@ from typer.core import TyperGroup
 from assistant_bench import canaries, collection, jobs, report
 from assistant_bench.arena import commands, local, votes
 from assistant_bench.arena.commands import app as arena_app
-from assistant_bench.arena.d1 import D1Error, connect
+from assistant_bench.arena.d1 import connect
 from assistant_bench.arguments import (
     FamilyArgument,
     FamilyArguments,
@@ -32,6 +32,7 @@ from assistant_bench.catalog import (
     load_export,
     load_systems,
 )
+from assistant_bench.database import D1Error
 from assistant_bench.families import (
     CheckersSettings,
     Family,

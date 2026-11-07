@@ -25,7 +25,6 @@ from typer.testing import CliRunner, Result
 
 from assistant_bench import canaries, catalog, cli, collection, jobs, report
 from assistant_bench.arena import local, publication, votes
-from assistant_bench.arena.d1 import SQLiteDatabase
 from assistant_bench.catalog import (
     EXPORT_VAR,
     NixosConfigExport,
@@ -35,6 +34,7 @@ from assistant_bench.catalog import (
 )
 from assistant_bench.cli import app
 from assistant_bench.collection import Collection
+from assistant_bench.database import SQLiteDatabase
 from assistant_bench.families import Family, Gate, load_cases, load_family
 from assistant_bench.harnesses import fingerprint
 from assistant_bench.harnesses.endpoint import SDK_HEADERS_VAR

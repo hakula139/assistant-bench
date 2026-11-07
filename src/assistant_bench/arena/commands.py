@@ -10,10 +10,10 @@ import typer
 
 from assistant_bench import collection, jobs
 from assistant_bench.arena import local, publication, votes
-from assistant_bench.arena.d1 import Database
 from assistant_bench.arena.stores import TargetName, connect
 from assistant_bench.arguments import FamilyArgument, OptionalFamilyArgument
 from assistant_bench.catalog import load_export, load_systems
+from assistant_bench.database import Database
 from assistant_bench.families import (
     Choice,
     VotesSettings,

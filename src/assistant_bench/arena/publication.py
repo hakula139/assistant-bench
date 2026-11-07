@@ -11,7 +11,7 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, JsonValue, ValidationError, model_validator
 
-from assistant_bench.arena.d1 import Database, Param
+from assistant_bench.database import Database, Param
 from assistant_bench.families import (
     Case,
     CaseSource,

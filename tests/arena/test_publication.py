@@ -9,8 +9,8 @@ from typing import Any
 import pytest
 
 from assistant_bench.arena import publication
-from assistant_bench.arena.d1 import Param, Result, SQLiteDatabase
 from assistant_bench.arena.publication import Publication
+from assistant_bench.database import Param, Result, SQLiteDatabase
 from assistant_bench.families import (
     Case,
     Family,

@@ -46,7 +46,6 @@ from harbor.models.trial.result import (
 from harbor.models.verifier.result import VerifierResult
 from harbor.trial.regrade import local_task_name
 
-from assistant_bench.arena.d1 import SQLiteDatabase
 from assistant_bench.arena.publication import (
     CaseFacts,
     Inventory,
@@ -56,6 +55,7 @@ from assistant_bench.arena.publication import (
 )
 from assistant_bench.arena.votes import Cut, Snapshot, TaggedDefects, Vote
 from assistant_bench.catalog import Price, System, SystemConfig
+from assistant_bench.database import SQLiteDatabase
 from assistant_bench.families import (
     Case,
     CaseSource,

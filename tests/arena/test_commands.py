@@ -8,9 +8,9 @@ from typer.testing import CliRunner, Result
 
 from assistant_bench import cli, collection, jobs
 from assistant_bench.arena import commands, local, publication
-from assistant_bench.arena.d1 import D1Error, SQLiteDatabase
 from assistant_bench.catalog import System
 from assistant_bench.collection import Collection
+from assistant_bench.database import D1Error, SQLiteDatabase
 from assistant_bench.families import (
     Case,
     Family,

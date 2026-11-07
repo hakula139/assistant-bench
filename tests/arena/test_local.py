@@ -12,6 +12,7 @@ from typing import Any, Literal
 import pytest
 
 from assistant_bench.arena import d1, local, stores
+from assistant_bench.database import Database
 from assistant_bench.messages import InputError
 
 
@@ -235,7 +236,7 @@ class TestConnect:
     def test_dispatches_local_without_creating_a_remote_client(
         self, database_file: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        def remote(target: str) -> AbstractContextManager[d1.Database]:
+        def remote(target: str) -> AbstractContextManager[Database]:
             pytest.fail(f'Local voting constructed a remote client for {target}.')
 
         monkeypatch.setattr(d1, 'connect', remote)

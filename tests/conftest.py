@@ -12,8 +12,9 @@ from anthropic import AsyncAnthropic
 from openai import AsyncOpenAI
 
 from assistant_bench import families, jobs, report
-from assistant_bench.arena.d1 import ENV_FILE_VAR, TOKEN_FILE_VAR, SQLiteDatabase
+from assistant_bench.arena.d1 import ENV_FILE_VAR, TOKEN_FILE_VAR
 from assistant_bench.catalog import EXPORT_VAR, NixosConfigExport
+from assistant_bench.database import SQLiteDatabase
 from assistant_bench.harnesses.endpoint import ENDPOINT_VARS, SDK_HEADERS_VAR, Endpoint
 from assistant_bench.paths import DATA_DIR_VAR
 from support import (
