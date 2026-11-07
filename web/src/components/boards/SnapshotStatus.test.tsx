@@ -8,7 +8,7 @@ import { SnapshotStatus } from '@/components/boards/SnapshotStatus';
 const closedAt = '2026-01-02T12:00:00Z';
 const closed = 'Closed Jan 2, 2026, 12:00 PM UTC.';
 const unknown = 'Closed Jan 2, 2026, 12:00 PM UTC. Current votes could not be checked.';
-const cutoffs = { production: { id: 337, votes: 330 }, local: null };
+const cutoffs = { production: { id: 337, votes: 330 }, private: null };
 
 function stubFetch(response: Promise<Response>) {
   const fetch = vi.fn<typeof globalThis.fetch>().mockReturnValue(response);
@@ -69,7 +69,7 @@ describe('SnapshotStatus', () => {
       <SnapshotStatus
         family="writing-zh"
         closedAt={closedAt}
-        cutoffs={{ ...cutoffs, local: { id: 20, votes: 15 } }}
+        cutoffs={{ ...cutoffs, private: { id: 20, votes: 15 } }}
       />,
     );
 

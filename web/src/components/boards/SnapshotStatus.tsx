@@ -51,7 +51,7 @@ export function SnapshotStatus({ family, closedAt, cutoffs }: SnapshotStatusProp
       {status !== null && ` ${messages[status]}`}
       {status !== null &&
         cutoffs.production !== null &&
-        cutoffs.local !== null &&
+        cutoffs.private !== null &&
         ' The round also includes votes from another source, which has not been checked.'}
     </p>
   );
