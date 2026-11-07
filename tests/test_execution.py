@@ -101,6 +101,7 @@ class TestExecute:
         )
         fresh = RunContext(
             root=root,
+            public_root=run_context.public_root,
             private_root=private_root,
             case_revision=run_context.case_revision,
             code_revision=run_context.code_revision,

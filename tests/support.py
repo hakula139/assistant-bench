@@ -547,9 +547,12 @@ def run_host_job(
     *,
     log: Path | None = None,
     plugin_context: Path | None = None,
+    source_root: Path | None = None,
 ) -> Path:
     """Replace only the Harbor subprocess, retaining its job and cloud plugin."""
     assert plugin_context is not None
+    if source_root is not None:
+        assert (source_root / 'src' / 'assistant_bench').is_dir()
 
     async def run() -> None:
         job = await Job.create(config)
