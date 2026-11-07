@@ -21,6 +21,27 @@ describe('OutputPane', () => {
     expect(frame.hasAttribute('srcdoc')).toBe(false);
   });
 
+  test('preserves task markers and whitespace when Markdown is switched off again', () => {
+    const text = '- [x]  Finished.\n- [ ] Pending.\n\n`- [ ] Literal.`\n';
+    const { rerender } = render(
+      <OutputPane side="A" render="text" text={text} asMarkdown={false} controls={null} />,
+    );
+
+    expect(screen.queryByRole('checkbox')).toBeNull();
+    expect(screen.getByRole('region', { name: 'Output A contents' }).textContent).toBe(text);
+    rerender(<OutputPane side="A" render="text" text={text} asMarkdown controls={null} />);
+    expect(screen.getByRole<HTMLInputElement>('checkbox', { name: 'Finished.' }).checked).toBe(
+      true,
+    );
+    expect(screen.getByRole<HTMLInputElement>('checkbox', { name: 'Pending.' }).checked).toBe(
+      false,
+    );
+    rerender(<OutputPane side="A" render="text" text={text} asMarkdown={false} controls={null} />);
+
+    expect(screen.queryByRole('checkbox')).toBeNull();
+    expect(screen.getByRole('region', { name: 'Output A contents' }).textContent).toBe(text);
+  });
+
   test('shows raw HTML and images in Markdown as text, without loading them', () => {
     const text = '<b>bold</b> ![logo](http://example.com/logo.png)';
 

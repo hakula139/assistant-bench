@@ -75,6 +75,7 @@ Logit
 lucide
 marsidev
 McNemar
+mdit
 mypy
 NFKC
 nixfmt

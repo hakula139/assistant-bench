@@ -1,3 +1,4 @@
+import { tasklist } from '@mdit/plugin-tasklist';
 import MarkdownIt from 'markdown-it';
 import type { StateCore, Token } from 'markdown-it';
 
@@ -46,7 +47,15 @@ function keepTail(state: StateCore, children: Token[]) {
 function keepTails(state: StateCore) {
   for (const token of state.tokens) {
     if (token.type === 'inline' && token.children) {
-      keepTail(state, token.children);
+      const first = token.children.at(0);
+      const last = token.children.at(-1);
+      if (first?.type === 'label_open' && last?.type === 'label_close') {
+        const children = token.children.slice(1, -1);
+        keepTail(state, children);
+        token.children = [first, ...children, last];
+      } else {
+        keepTail(state, token.children);
+      }
     }
   }
 }
@@ -65,7 +74,13 @@ function markInlineCode(state: StateCore) {
 }
 
 /** Raw HTML is escaped and remote images are disabled. */
-export const markdown = new MarkdownIt({ html: false, linkify: false }).disable('image');
+export const markdown = new MarkdownIt({ html: false, linkify: false })
+  .disable('image')
+  .use(tasklist, {
+    itemClass: 'task-list-item list-none',
+    labelClass: 'relative block',
+    checkboxClass: 'not-prose absolute top-[0.375em] -left-6 m-0 size-4 accent-primary',
+  });
 markdown.core.ruler.push('keep_tails', keepTails);
 markdown.core.ruler.push('mark_inline_code', markInlineCode);
 markdown.renderer.rules.tail_open = () => `<span class="${TAIL_CLASS}">`;

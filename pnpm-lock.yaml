@@ -46,6 +46,9 @@ importers:
       '@marsidev/react-turnstile':
         specifier: ^1.6.3
         version: 1.6.3(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      '@mdit/plugin-tasklist':
+        specifier: ^1.2.0
+        version: 1.2.0(markdown-it@15.0.3)
       '@observablehq/plot':
         specifier: ^0.6.19
         version: 0.6.19
@@ -1326,6 +1329,24 @@ packages:
     peerDependencies:
       react: ^17.0.2 || ^18.0.0 || ^19.0
       react-dom: ^17.0.2 || ^18.0.0 || ^19.0
+
+  '@mdit/helper@1.2.0':
+    resolution: {integrity: sha512-+Lh3nitlVclyxjD0LnOKPCyogVqL1W416FKOYjJSGDVlVKq9/jasQNOsUbjAvRwc+imgnFq1lsnat4q69UibIg==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      markdown-it: ^15.0.3
+    peerDependenciesMeta:
+      markdown-it:
+        optional: true
+
+  '@mdit/plugin-tasklist@1.2.0':
+    resolution: {integrity: sha512-i6E8Cm5UQ6wvn/8s85LcNA1cKpO/m3pxGMGJaxTI3klHgOtfMTSMUqLKHCEZjrnm/jGL/X2pcOybROGPeFXnZQ==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      markdown-it: ^15.0.3
+    peerDependenciesMeta:
+      markdown-it:
+        optional: true
 
   '@modelcontextprotocol/core@2.4.0':
     resolution: {integrity: sha512-z8QBKqdfXLPzkLQuG4xp8hrVEMm1PZ1IgxMN2sMbJiFiAKOWXnAzogXn2W4aqIBlP1ea6U5yiqVquvUNM1Cj6Q==}
@@ -6371,6 +6392,16 @@ snapshots:
     dependencies:
       react: 19.3.1
       react-dom: 19.3.1(react@19.3.1)
+
+  '@mdit/helper@1.2.0(markdown-it@15.0.3)':
+    optionalDependencies:
+      markdown-it: 15.0.3
+
+  '@mdit/plugin-tasklist@1.2.0(markdown-it@15.0.3)':
+    dependencies:
+      '@mdit/helper': 1.2.0(markdown-it@15.0.3)
+    optionalDependencies:
+      markdown-it: 15.0.3
 
   '@modelcontextprotocol/core@2.4.0':
     dependencies:
