@@ -42,12 +42,10 @@ NOW = datetime(2026, 10, 29, 12, tzinfo=UTC)
 FAMILY = make_votes_family()
 
 
-def publish(
+def stage_and_activate(
     database: SQLiteDatabase,
     published: publication.Publication,
     now: datetime,
-    *,
-    target: str,
 ) -> bool:
     publication.stage(database, published, now)
     return publication.activate(database, published.id, now)
@@ -79,7 +77,7 @@ def published_store(
         ARENA_NAMES,
         target='production',
     )
-    publish(arena_store, published, NOW - timedelta(days=1), target='production')
+    stage_and_activate(arena_store, published, NOW - timedelta(days=1))
     return arena_store, published
 
 
@@ -341,7 +339,7 @@ class TestPairVoteCounts:
                 if path.name[:4] > '0004':
                     connection.executescript(path.read_text())
             database = SQLiteDatabase(connection)
-            publish(database, published, NOW, target='production')
+            stage_and_activate(database, published, NOW)
             first = record_vote(
                 database, published, NOW, actor='first', age=timedelta(hours=1)
             )
@@ -926,17 +924,25 @@ class TestSnapshots:
 
         assert votes.read_snapshot(private_store, identity) == saved
 
+    @pytest.mark.parametrize('change', ['digest', 'count'])
     def test_read_reverifies_count_and_digest_after_external_corruption(
-        self, private_store: SQLiteDatabase
+        self, private_store: SQLiteDatabase, change: str
     ) -> None:
         a, b = fact('a', 'c', 'acme-large'), fact('b', 'c', 'acme-small')
         saved = snapshot((a, b), (vote(1, a, b),))
         identity = votes.save_snapshot(private_store, saved)
-        private_store.execute('DROP TRIGGER snapshot_outputs_keep_content')
-        private_store.execute(
-            'UPDATE vote_snapshot_outputs SET facts_json = '
-            "json_set(facts_json, '$.length', 999)"
-        )
+        if change == 'digest':
+            private_store.execute('DROP TRIGGER snapshot_outputs_keep_content')
+            private_store.execute(
+                'UPDATE vote_snapshot_outputs SET facts_json = '
+                "json_set(facts_json, '$.length', 999)"
+            )
+        else:
+            private_store.execute('DROP TRIGGER snapshots_keep_identity')
+            private_store.execute(
+                'UPDATE vote_snapshots SET expected_output_count = '
+                'expected_output_count + 1'
+            )
 
         with pytest.raises(InputError, match='incomplete or conflicting facts'):
             votes.read_snapshot(private_store, identity)
@@ -985,8 +991,8 @@ class TestVotingInput:
         a, b = fact('a', 'public', 'acme-large'), fact('b', 'public', 'acme-small')
         c, d = fact('c', 'held', 'acme-large'), fact('d', 'held', 'acme-pro')
         production = snapshot((a, b), (vote(1, a, b),)).production
-        local = snapshot((c, d), (vote(1, c, d),)).production
-        assert production is not None and local is not None
+        private = snapshot((c, d), (vote(1, c, d),)).production
+        assert production is not None and private is not None
         production = production.model_copy(
             update={
                 'inventory': production.inventory.model_copy(
@@ -999,9 +1005,9 @@ class TestVotingInput:
                 )
             }
         )
-        local = local.model_copy(
+        private = private.model_copy(
             update={
-                'inventory': local.inventory.model_copy(
+                'inventory': private.inventory.model_copy(
                     update={
                         'systems': {
                             system: ARENA_NAMES[system]
@@ -1018,7 +1024,7 @@ class TestVotingInput:
             category_order=('docs',),
             closing_revision=None,
             production=production,
-            private=local,
+            private=private,
         )
 
         analysis = votes.voting_input(merged, {})
@@ -1038,11 +1044,11 @@ class TestVotingInput:
         production = snapshot(
             (a, b), tuple(vote(index, a, b) for index in range(1, 102))
         )
-        local = snapshot((c, d), (vote(1, c, d), vote(2, a, b))).production
-        assert local is not None
-        local = local.model_copy(
+        private = snapshot((c, d), (vote(1, c, d), vote(2, a, b))).production
+        assert private is not None
+        private = private.model_copy(
             update={
-                'inventory': local.inventory.model_copy(
+                'inventory': private.inventory.model_copy(
                     update={
                         'cases': (
                             CaseFacts(key='held', category='docs', split='held-out'),
@@ -1058,7 +1064,7 @@ class TestVotingInput:
             category_order=('docs',),
             closing_revision=None,
             production=production.production,
-            private=local,
+            private=private,
         )
 
         analysis = votes.voting_input(merged, {})
@@ -1093,8 +1099,8 @@ class TestVotingInput:
         a, b = fact('a', 'public', 'acme-large'), fact('b', 'public', 'acme-small')
         c, d = fact('c', 'held', 'acme-large'), fact('d', 'held', 'acme-small')
         production = snapshot((a, b), (vote(1, a, b),)).production
-        local = snapshot((c, d), (vote(1, c, d),)).production
-        assert production is not None and local is not None
+        private = snapshot((c, d), (vote(1, c, d),)).production
+        assert production is not None and private is not None
         variants: dict[str, dict[str, object]] = {
             'cases': {'cases': production.inventory.cases},
             'outputs': {'outputs': (a, d)},
@@ -1107,10 +1113,10 @@ class TestVotingInput:
             },
         }
         changes = variants.get(mismatch, {})
-        local = local.model_copy(
+        private = private.model_copy(
             update={'cutoff': 0}
             if mismatch == 'cutoff'
-            else {'inventory': local.inventory.model_copy(update=changes)}
+            else {'inventory': private.inventory.model_copy(update=changes)}
         )
 
         with pytest.raises(ValueError):
@@ -1121,7 +1127,7 @@ class TestVotingInput:
                 category_order=('docs',),
                 closing_revision=None,
                 production=production,
-                private=local,
+                private=private,
             )
 
     def test_counts_votes_both_of_whose_outputs_still_pass_distinctly(self) -> None:
