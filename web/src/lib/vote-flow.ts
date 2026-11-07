@@ -121,7 +121,7 @@ const draftSchema = z.strictObject({
   defects: taggedDefects,
   markdown: z.boolean(),
   collapsed: z.boolean(),
-  scroll: z.strictObject({ window: offset, a: offset, b: offset }),
+  scroll: z.strictObject({ window: offset, prompt: offset, a: offset, b: offset }),
 });
 
 /** What this tab shows of one pair, kept so a reload shows it again. */
@@ -134,7 +134,7 @@ export const emptyDraft = (family: string, pair: string | null): Draft => ({
   defects: { a: [], b: [] },
   markdown: false,
   collapsed: false,
-  scroll: { window: 0, a: 0, b: 0 },
+  scroll: { window: 0, prompt: 0, a: 0, b: 0 },
 });
 
 /** The tab's draft, or null after removing one that no longer parses. */

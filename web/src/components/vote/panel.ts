@@ -6,4 +6,5 @@ export const panel = 'gap-0 py-0';
  */
 export const band = 'flex flex-wrap content-start items-center gap-x-4 gap-y-2 p-(--card-spacing)';
 
-export const scroll = 'min-h-0 flex-1 overflow-y-auto py-(--card-spacing)';
+export const scroll =
+  'min-h-0 flex-1 overflow-y-auto py-(--card-spacing) focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset';

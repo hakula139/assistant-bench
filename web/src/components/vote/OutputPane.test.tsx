@@ -34,7 +34,9 @@ describe('OutputPane', () => {
 
     render(<OutputPane side="A" render="diff" text={text} asMarkdown controls={null} />);
 
-    const lines = [...screen.getByRole('region').querySelectorAll('[data-diff]')];
+    const lines = [
+      ...screen.getByRole('region', { name: 'Output A' }).querySelectorAll('[data-diff]'),
+    ];
     expect(lines.map((line) => [line.getAttribute('data-diff'), line.textContent])).toEqual([
       ['file', 'diff --git a/q.sql b/q.sql'],
       ['file', '--- a/q.sql'],
