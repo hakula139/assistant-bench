@@ -26,6 +26,7 @@ from assistant_bench.state import (
     RequestAdmission,
     Run,
     State,
+    TrialArtifact,
 )
 from support import START, make_output, make_system
 
@@ -278,7 +279,7 @@ class TestState:
             assert not state.begin_attempt(start(owner))
             assert state.claim_state(owner.id) == 'cancelled'
             assert state.entries(parent.scope) == []
-            assert state.artifacts(parent.scope) == []
+            assert state.artifact_generation(parent.scope).artifacts == ()
             assert state.requests(parent.scope) == []
             assert state.source_revision(parent.scope) == 0
             assert state.complete_run(parent.id)
@@ -570,10 +571,12 @@ class TestState:
             artifact = state.trial_artifact(parent.id, 'regraded-trial')
             assert artifact['source_trial_id'] == reference[2]
             assert artifact['commit_sha'] == COMMIT
-            assert state.artifacts(parent.scope) == [artifact]
+            assert state.artifact_generation(parent.scope).artifacts == (
+                TrialArtifact(*reference),
+            )
             assert state.entries(parent.scope) == []
             assert state.requests(parent.scope) == []
-            assert state.source_revision(parent.scope) == 0
+            assert state.source_revision(parent.scope) == 1
             assert state.complete_run(parent.id)
 
         @pytest.mark.parametrize('operation', ['UPDATE', 'DELETE'])
@@ -665,7 +668,7 @@ class TestState:
                 state.settle_claim(owner.id)
 
             assert state.claim_state(owner.id) == original_state
-            assert state.source_revision(parent.scope) == 0
+            assert state.source_revision(parent.scope) == 1
             assert not state.claim_attempt(claim(parent, 'competing'))
             assert not state.complete_run(parent.id)
             state.record_receipt(second.id, '{"usage":null}')
@@ -689,7 +692,7 @@ class TestState:
                 state.settle_claim(owner.id)
 
             assert state.claim_state(owner.id) == 'claimed'
-            assert state.source_revision(parent.scope) == 0
+            assert state.source_revision(parent.scope) == 1
             assert state.trial_artifact(parent.id, owner.trial)['commit_sha'] == COMMIT
             assert not state.complete_run(parent.id)
 
@@ -703,10 +706,10 @@ class TestState:
 
             assert state.claim_state(owner.id) == 'settled'
             assert state.source_revision(parent.scope) == 1
-            (reference,) = state.artifacts(parent.scope)
-            assert reference['commit_sha'] == COMMIT
-            assert reference['path'] == 'runs/run-a/claim-a'
-            assert reference['manifest_digest'] == DIGEST
+            (reference,) = state.artifact_generation(parent.scope).artifacts
+            assert reference.commit_sha == COMMIT
+            assert reference.path == 'runs/run-a/claim-a'
+            assert reference.manifest_digest == DIGEST
             assert state.complete_run(parent.id)
             assert state.run_status(parent.id) == 'complete'
 
@@ -715,7 +718,7 @@ class TestState:
         ) -> None:
             parent, owner = claimed(state)
             settled(state, parent, owner)
-            before = state.artifacts(parent.scope)
+            before = state.artifact_generation(parent.scope)
 
             with pytest.raises(InputError):
                 state.record_trial_artifact(
@@ -727,7 +730,7 @@ class TestState:
                     'c' * 64,
                 )
 
-            assert state.artifacts(parent.scope) == before
+            assert state.artifact_generation(parent.scope) == before
             assert state.source_revision(parent.scope) == 1
 
         def test_failed_source_advance_rolls_back_the_artifact_and_claim_together(
@@ -737,8 +740,7 @@ class TestState:
             original = entry(parent, owner)
             assert state.begin_attempt(start(owner))
             state.record_entry(owner.id, original.model_dump_json())
-            register(state, parent, owner)
-            before = state.artifacts(parent.scope)
+            before = state.artifact_generation(parent.scope)
             with closing(
                 sqlite3.connect(tmp_path / 'state.sqlite', autocommit=True)
             ) as other:
@@ -751,10 +753,10 @@ class TestState:
             with pytest.raises(
                 sqlite3.IntegrityError, match='Synthetic storage failure'
             ):
-                state.settle_claim(owner.id)
+                register(state, parent, owner)
 
             assert state.claim_state(owner.id) == 'claimed'
-            assert state.artifacts(parent.scope) == before
+            assert state.artifact_generation(parent.scope) == before
             assert state.source_revision(parent.scope) == 0
             assert state.entries(parent.scope) == [original.model_dump_json()]
             assert not state.complete_run(parent.id)
@@ -977,13 +979,13 @@ class TestState:
             other = run('run-b', scope='canaries')
             state.create_run(other)
             state.append_canary(other.id, failure.model_dump_json())
-            assert state.establish_baseline('model-a', parent.id)
-            assert not state.establish_baseline('model-a', other.id)
-            assert state.baseline('model-a') == success.model_dump_json()
+            assert state.establish_baseline('model-a', 'context-a', parent.id)
+            assert not state.establish_baseline('model-a', 'context-a', other.id)
+            assert state.baseline('model-a', 'context-a') == success.model_dump_json()
 
             state.reset_baseline('model-a')
 
-            assert state.baseline('model-a') is None
+            assert state.baseline('model-a', 'context-a') is None
             assert [
                 Record.model_validate_json(item) for item in state.records('model-a')
             ] == [
