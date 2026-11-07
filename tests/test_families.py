@@ -400,7 +400,7 @@ class TestLoadFamily:
                 True,
                 False,
                 'Family `f`: a `cases.toml` family yields replies, so set `render` '
-                'to `"text"`.',
+                'to `"text"` or `"html"`.',
                 id='cases-with-diffs',
             ),
             pytest.param(

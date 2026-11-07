@@ -397,7 +397,7 @@ def _check_source_settings(family: Family) -> None:
         if isinstance(settings, VotesSettings) and settings.render == 'diff':
             raise InputError(
                 f'{prefix}: a `cases.toml` family yields replies, so set `render` '
-                'to `"text"`.'
+                'to `"text"` or `"html"`.'
             )
         return
 
