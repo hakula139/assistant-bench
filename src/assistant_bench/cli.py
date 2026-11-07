@@ -259,6 +259,7 @@ def _run_families(
 
     for family, selected, job in prepared:
         run_id = str(uuid4())
+        failure: BaseException | None = None
         try:
             execution.execute(
                 context,
@@ -269,15 +270,31 @@ def _run_families(
                 expected_source_revision=context.source_revision(family),
             )
         except subprocess.CalledProcessError as error:
+            failure = error
             typer.echo(
                 f'Harbor exited with code {error.returncode} for run `{run_id}`. '
                 'Inspect its cloud records and trial artifacts.',
                 err=True,
             )
             raise typer.Exit(error.returncode) from error
+        except BaseException as error:
+            failure = error
+            raise
         finally:
-            context.refresh_sources(family)
-            _echo_conflicts(family, _collect(family, systems, export, context).outputs)
+            try:
+                context.refresh_sources(family)
+                _echo_conflicts(
+                    family, _collect(family, systems, export, context).outputs
+                )
+            except Exception:
+                if failure is None:
+                    raise
+                typer.echo(
+                    f'Run `{run_id}` could not be collected. '
+                    f'Retry `bench collect {family.name}` '
+                    'after inspecting its cloud state.',
+                    err=True,
+                )
 
 
 @app.command()

@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict
 from pydantic_core import to_jsonable_python
 
 from assistant_bench import execution, jobs
+from assistant_bench.artifacts import ArtifactRef
 from assistant_bench.catalog import System, SystemIdentity
 from assistant_bench.harnesses import fingerprint
 from assistant_bench.harnesses.accounting import RequestReceipt
@@ -181,7 +182,7 @@ def run(probes: list[Probe], context: RunContext) -> list[Record]:
             run_error = type(error).__name__
         finally:
             context.state.run(run_id)
-            outcomes = _outcomes(probe, run_error, context.state, run_id)
+            outcomes = _outcomes(probe, run_error, context, run_id)
             if len(outcomes) != 1:
                 raise InputError('A canary execution produced more than one outcome.')
             context.state.append_canary(run_id, outcomes[0].model_dump_json())
@@ -221,7 +222,7 @@ def read_records(system: str, state: State) -> list[Record]:
 
 
 def _outcomes(
-    probe: Probe, run_error: str | None, state: State, run_id: str
+    probe: Probe, run_error: str | None, context: RunContext, run_id: str
 ) -> list[Record]:
     directory = jobs.job_path(probe.config)
     results = [
@@ -229,9 +230,9 @@ def _outcomes(
         for path in sorted(directory.glob('*/result.json'))
     ]
     return (
-        [_record(probe, result, run_error, state, run_id) for result in results]
+        [_record(probe, result, run_error, context, run_id) for result in results]
         if results
-        else [_record(probe, None, run_error or 'MissingTrialResult', state, run_id)]
+        else [_record(probe, None, run_error or 'MissingTrialResult', context, run_id)]
     )
 
 
@@ -239,14 +240,40 @@ def _record(
     probe: Probe,
     result: TrialResult | None,
     run_error: str | None,
-    state: State,
+    context: RunContext,
     run_id: str,
 ) -> Record:
     directory = jobs.job_path(probe.config)
+    state = context.state
     trial = result.trial_name if result else None
     audited = result is not None and state.trial_registered(
         run_id, result.trial_name, str(result.id)
     )
+    if audited and result is not None:
+        row = state.trial_artifact(run_id, result.trial_name)
+        archive = context.artifacts.materialize(
+            ArtifactRef(
+                commit_sha=cast(str, row['commit_sha']),
+                path=cast(str, row['path']),
+                manifest_digest=cast(str, row['manifest_digest']),
+            ),
+            context.root / 'canary-records' / run_id / str(result.id),
+        )
+        if (
+            archive.manifest.run_id != run_id
+            or archive.manifest.trial_name != result.trial_name
+            or archive.manifest.trial_id != str(result.id)
+        ):
+            raise InputError(
+                'The canary artifact has a conflicting execution identity.'
+            )
+        frozen = TrialResult.model_validate_json(
+            (archive.job / result.trial_name / 'result.json').read_text()
+        )
+        if frozen.id != result.id or frozen.trial_name != result.trial_name:
+            raise InputError('The canary result differs from its registered identity.')
+        result = frozen
+        directory = archive.job
     receipts = (
         [
             RequestReceipt.model_validate_json(cast(str, row['receipt_json']))
@@ -257,8 +284,8 @@ def _record(
         if trial is not None
         else []
     )
-    context = result.agent_result if result is not None and audited else None
-    metadata = (context.metadata or {}) if context else {}
+    agent = result.agent_result if result is not None and audited else None
+    metadata = (agent.metadata or {}) if agent else {}
     output = directory / trial / 'agent' / OUTPUT_FILE if trial and audited else None
     exception = result.exception_info if result is not None and audited else None
     return Record(
