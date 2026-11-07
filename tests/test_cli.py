@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
 import tomli_w
@@ -22,7 +23,7 @@ from harbor.models.trial.result import TrialResult
 from rich.text import Text
 from typer.testing import CliRunner, Result
 
-from assistant_bench import catalog, cli, collection, jobs, report
+from assistant_bench import canaries, catalog, cli, collection, jobs, report
 from assistant_bench.arena import local, publication, votes
 from assistant_bench.arena.d1 import SQLiteDatabase
 from assistant_bench.catalog import (
@@ -158,6 +159,7 @@ def submitted(data_dir: Path, monkeypatch: pytest.MonkeyPatch) -> list[JobConfig
         return jobs.job_path(job)
 
     monkeypatch.setattr(jobs, 'run_job', run_job)
+    monkeypatch.setattr(canaries, 'prepare', Mock(return_value=[]))
     return configs
 
 
@@ -777,6 +779,103 @@ class TestCheck:
 
 
 class TestRun:
+    @pytest.mark.parametrize('scenario', ['priced', 'unpriced', 'refused'])
+    def test_checks_the_pending_union_once_before_any_family_job(
+        self,
+        families_dir: Path,
+        resolved: dict[str, System],
+        monkeypatch: pytest.MonkeyPatch,
+        scenario: str,
+    ) -> None:
+        write_votes_family(families_dir, ['large'], {'c1': 'message'}, name='f')
+        write_votes_family(
+            families_dir, ['large', 'small'], {'c1': 'message'}, name='g'
+        )
+        for name in ('large', 'small'):
+            system = make_system(name=name, max_output_tokens=4096)
+            resolved[name] = (
+                system.model_copy(update={'price': None})
+                if scenario == 'unpriced'
+                else system
+            )
+        events: list[str] = []
+        probes: list[canaries.Probe] = []
+
+        def check(selected: list[canaries.Probe]) -> list[canaries.Record]:
+            probes.extend(selected)
+            events.append('canaries')
+            if scenario == 'refused':
+                raise InputError('Canary refused the run.')
+            return []
+
+        def run_job(config: JobConfig) -> Path:
+            events.append(config.jobs_dir.name)
+            return jobs.job_path(config)
+
+        monkeypatch.setattr(canaries, 'run', check)
+        monkeypatch.setattr(jobs, 'run_job', run_job)
+
+        result = invoke('run')
+
+        assert result.exit_code == (1 if scenario == 'refused' else 0), result.output
+        assert [probe.original.name for probe in probes] == ['large', 'small']
+        assert events == (
+            ['canaries'] if scenario == 'refused' else ['canaries', 'f', 'g']
+        )
+        ceiling = 'unknown' if scenario == 'unpriced' else '$0.0410'
+        for name in ('large', 'small'):
+            assert (
+                f'Canary `{name}`: one request with a `2048`-token completion '
+                'allowance '
+                f'including reasoning. Full-context cost ceiling: {ceiling}.'
+                in result.stdout
+            )
+        assert 'acme/large' not in result.output
+
+    @pytest.mark.parametrize('guard', ['fingerprint', 'budget'])
+    def test_refuses_invalid_runs_before_preparing_or_sending_canaries(
+        self,
+        families_dir: Path,
+        data_dir: Path,
+        resolved: dict[str, System],
+        monkeypatch: pytest.MonkeyPatch,
+        guard: str,
+    ) -> None:
+        write_votes_family(families_dir, ['large'], {'c1': 'message'})
+        resolved['large'] = SPENDER
+        if guard == 'fingerprint':
+            write_trial(
+                data_dir / 'jobs' / 'f' / 'old-job',
+                'c1__1',
+                AgentConfig(
+                    import_path='x:Y',
+                    kwargs={'system': 'large', 'fingerprint': 'fp-old'},
+                ),
+                task='f/c1',
+            )
+        else:
+            with (families_dir / 'f' / 'family.toml').open('a') as file:
+                file.write('budget_usd = 1\n')
+            write_spent_attempt(data_dir / 'jobs' / 'f' / 'old-job')
+        prepare = Mock()
+        probe = Mock()
+        ordinary = Mock()
+        monkeypatch.setattr(canaries, 'prepare', prepare)
+        monkeypatch.setattr(canaries, 'run', probe)
+        monkeypatch.setattr(jobs, 'run_job', ordinary)
+
+        result = invoke('run', 'f')
+
+        assert result.exit_code == 1
+        assert (
+            'changed their fingerprints'
+            if guard == 'fingerprint'
+            else 'over its `budget_usd`'
+        ) in result.stderr
+        prepare.assert_not_called()
+        probe.assert_not_called()
+        ordinary.assert_not_called()
+
     def test_rejects_repeated_systems_before_submitting_a_job(
         self, families_dir: Path, submitted: list[JobConfig]
     ) -> None:
@@ -979,6 +1078,7 @@ class TestRun:
         )
         assert submitted == []
 
+    @pytest.mark.usefixtures('submitted')
     def test_collects_the_run_into_outputs(
         self, data_dir: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -1005,6 +1105,7 @@ class TestRun:
         written = (data_dir / 'outputs' / 'smoke-text.jsonl').read_text()
         assert written.count('\n') == 1
 
+    @pytest.mark.usefixtures('submitted')
     def test_stops_after_a_failed_family(
         self,
         families_dir: Path,
@@ -1026,6 +1127,7 @@ class TestRun:
         assert result.exit_code == 3
         assert [job.jobs_dir.name for job in submitted] == ['f']
 
+    @pytest.mark.usefixtures('submitted')
     def test_collects_finished_trials_and_names_the_job_when_harbor_fails(
         self, data_dir: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -1860,7 +1962,12 @@ class TestClose:
         store: Store,
         data_dir: Path,
         reports_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        prepare = Mock()
+        probe = Mock()
+        monkeypatch.setattr(canaries, 'prepare', prepare)
+        monkeypatch.setattr(canaries, 'run', probe)
         now = datetime.now(UTC)
         for case, actor in enumerate(('first', 'second')):
             record_vote(
@@ -1895,6 +2002,8 @@ class TestClose:
             display_name='Public Large', fingerprint='fp-large'
         )
         assert closed.results.standings[0].mean_cost_usd == 0.5
+        prepare.assert_not_called()
+        probe.assert_not_called()
 
     def test_recloses_a_saved_snapshot_without_reading_the_store(
         self,
