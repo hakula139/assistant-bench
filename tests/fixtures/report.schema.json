@@ -318,7 +318,7 @@
             }
           ]
         },
-        "local": {
+        "private": {
           "anyOf": [
             {
               "$ref": "#/$defs/Cutoff"
@@ -331,7 +331,7 @@
       },
       "required": [
         "production",
-        "local"
+        "private"
       ],
       "title": "Cutoffs",
       "type": "object"
