@@ -128,6 +128,54 @@ class TestConnect:
         assert received == status
         assert endpoint.requests == []
 
+    @pytest.mark.parametrize('api', ['anthropic-messages', 'openai-responses'])
+    @pytest.mark.parametrize('event_stream', [False, True], ids=['json', 'sse'])
+    def test_http_errors_are_forwarded_after_a_durable_unknown_usage_receipt(
+        self,
+        endpoint: StubEndpoint,
+        begun_trial: TrialAccounting,
+        private_state: State,
+        api: Api,
+        event_stream: bool,
+    ) -> None:
+        endpoint.status = 503
+        endpoint.response = {'error': {'message': 'Unavailable.'}}
+        if event_stream:
+            endpoint.stream = [b'Unavailable.']
+        configured = Endpoint.read(endpoint.env.get, api)
+        path = '/v1/messages' if api == 'anthropic-messages' else '/v1/responses'
+
+        async def request() -> None:
+            async with connect(
+                configured, api, 'acme/large', recorder=begun_trial
+            ) as connection:
+                url = connection.url.replace('host.docker.internal', '127.0.0.1')
+                async with httpx2.AsyncClient() as client:
+                    reply = await client.post(
+                        url + path,
+                        json={'model': 'acme/large', 'stream': True},
+                        headers={'Authorization': f'Bearer {connection.token}'},
+                    )
+                    assert reply.status_code == 503
+                    if event_stream:
+                        assert reply.content == b'Unavailable.'
+                    else:
+                        assert reply.json() == endpoint.response
+                    (stored,) = private_state.requests('sample')
+                    assert isinstance(stored['receipt_json'], str)
+                    saved = RequestReceipt.model_validate_json(stored['receipt_json'])
+                    assert (
+                        saved.api,
+                        saved.outcome,
+                        saved.http_status,
+                        saved.usage,
+                    ) == (api, 'http_error', 503, None)
+
+        asyncio.run(request())
+
+        assert len(endpoint.requests) == 1
+        assert not begun_trial.fatal
+
     @pytest.mark.parametrize(
         'ending', [b'\n', b'\r\n', b'\r'], ids=['lf', 'crlf', 'cr']
     )
