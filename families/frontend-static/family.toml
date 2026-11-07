@@ -13,8 +13,8 @@ systems = [
   "kimi-k3-high",
 ]
 reference = "gemini-3.8-flash-high"
+render = "html"
 samples = 1
 budget_usd = 50
-render = "html"
 categories = ["feature"]
 defects = ["scope", "facts", "clarity", "conventions"]
