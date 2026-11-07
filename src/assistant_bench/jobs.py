@@ -391,7 +391,7 @@ def run_job(config: JobConfig) -> Path:
         elif agent.import_path == 'assistant_bench.harnesses.installed:Codex':
             installed.add(('codex', agent.kwargs['version']))
     if installed:
-        check_local_context()
+        asyncio.run(check_local_context())
         architecture = subprocess.check_output(
             ['docker', 'info', '--format', '{{.Architecture}}'], text=True
         ).strip()

@@ -1,3 +1,4 @@
+import asyncio
 import json
 from pathlib import Path
 
@@ -136,7 +137,7 @@ class TestCheckLocalContext:
         monkeypatch.setattr(ssh, 'run_local', run_local)
 
         if accepted:
-            check_local_context()
+            asyncio.run(check_local_context())
         else:
             with pytest.raises(ValueError, match='named local Docker context'):
-                check_local_context()
+                asyncio.run(check_local_context())

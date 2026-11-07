@@ -5,7 +5,7 @@ import sys
 from collections import Counter
 from datetime import datetime, timedelta, tzinfo
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from harbor.job_diff import DiffAction, compare_job_trials, load_source_trials
@@ -521,7 +521,9 @@ class TestRunJob:
         download = Mock()
         run = Mock()
         monkeypatch.setattr(
-            jobs, 'check_local_context', Mock(side_effect=ValueError('context refused'))
+            jobs,
+            'check_local_context',
+            AsyncMock(side_effect=ValueError('context refused')),
         )
         monkeypatch.setattr(subprocess, 'check_output', engine)
         monkeypatch.setattr(jobs, 'artifact', download)

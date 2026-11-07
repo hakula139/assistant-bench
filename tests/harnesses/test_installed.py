@@ -1,7 +1,7 @@
 import asyncio
 import json
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import httpx2
 import pytest
@@ -30,6 +30,40 @@ pytestmark = pytest.mark.usefixtures('export')
 
 
 class TestInstalled:
+    @pytest.mark.parametrize(
+        'agent_type', [ClaudeCode, Codex], ids=['claude-code', 'codex']
+    )
+    def test_refuses_nonlocal_context_before_installation(
+        self,
+        logs_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        agent_type: type[ClaudeCode] | type[Codex],
+    ) -> None:
+        claude = agent_type is ClaudeCode
+        system = make_system(
+            api='anthropic-messages' if claude else 'openai-responses',
+            thinking_mode='anthropic-adaptive' if claude else None,
+            harness='claude-code' if claude else 'codex',
+            version='1.2.3',
+        )
+        agent = agent_type(logs_dir=logs_dir, **agent_kwargs(system))
+        environment = AsyncMock(spec=BaseEnvironment)
+        download = Mock()
+        monkeypatch.setattr(
+            'assistant_bench.harnesses.installed.check_local_context',
+            AsyncMock(side_effect=ValueError('context refused')),
+        )
+        monkeypatch.setattr(
+            'assistant_bench.harnesses.installed.cache.artifact', download
+        )
+
+        with pytest.raises(ValueError, match='context refused'):
+            asyncio.run(agent.install(environment))
+
+        download.assert_not_called()
+        environment.exec.assert_not_awaited()
+        environment.upload_file.assert_not_awaited()
+
     @pytest.mark.parametrize(
         ('agent_type', 'parent_type', 'api', 'harness', 'prefix'),
         [

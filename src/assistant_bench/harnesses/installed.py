@@ -26,6 +26,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from assistant_bench.catalog import load_export
 from assistant_bench.harnesses import cache, proxy
+from assistant_bench.harnesses.docker import check_local_context
 from assistant_bench.harnesses.endpoint import Endpoint, preflight
 from assistant_bench.harnesses.labels import Labels
 from assistant_bench.harnesses.usage import append_attempt, record_calls
@@ -55,6 +56,7 @@ async def _install(
     harness: cache.InstalledHarness,
     version: str,
 ) -> str:
+    await check_local_context()
     result = await environment.exec(command='uname -m')
     if result.return_code or result.stdout is None:
         raise RuntimeError('Could not determine the task container architecture.')

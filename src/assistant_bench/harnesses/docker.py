@@ -1,6 +1,5 @@
 """Docker host access for installed agents without changing task network policy."""
 
-import asyncio
 from collections.abc import Callable
 from importlib.resources import files
 from pathlib import Path
@@ -33,10 +32,10 @@ class InstalledDocker(DockerEnvironment):
             self.extra_docker_compose_paths[index] = CONTROLLED_HOST_OVERLAY
 
 
-def check_local_context() -> None:
+async def check_local_context() -> None:
     """Require Harbor's named local Docker context before downloading any CLI."""
     try:
-        asyncio.run(local_context())
+        await local_context()
     except SSHAccessError:
         raise InputError(
             'Installed agents require a named local Docker context. '
