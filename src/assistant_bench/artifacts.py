@@ -45,6 +45,8 @@ def audit_trial(root: Path, secrets: set[str]) -> None:
             content = os.fsencode(os.readlink(path))
         elif path.is_file():
             content = path.read_bytes()
+        elif path.is_dir():
+            content = b''
         else:
             continue
         location = os.fsencode(path.relative_to(root))
@@ -52,7 +54,8 @@ def audit_trial(root: Path, secrets: set[str]) -> None:
             raise InputError(
                 'A selected artifact contains a known credential. Publication refused.'
             )
-        selected.append((path.relative_to(root), content))
+        if not path.is_dir() or path.is_symlink():
+            selected.append((path.relative_to(root), content))
     environment = {
         name: value
         for name, value in os.environ.items()
@@ -138,6 +141,7 @@ class TrialManifest(_Model):
     trial_name: Component
     code_revision: Commit | None
     case_revision: Commit | None
+    directories: tuple[str, ...]
     files: tuple[FileEntry, ...]
 
     @property
@@ -153,6 +157,31 @@ class TrialManifest(_Model):
         paths = [entry.path for entry in self.files]
         if paths != sorted(set(paths)):
             raise ValueError('manifest files must be unique and sorted by path')
+        if list(self.directories) != sorted(set(self.directories)):
+            raise ValueError('manifest directories must be unique and sorted by path')
+        for directory in self.directories:
+            parts = _path_parts(directory)
+            if (
+                len(parts) < 3
+                or parts[:2] != ('job', self.trial_name)
+                or parts[2] not in TRIAL_DIRECTORIES
+            ):
+                raise ValueError(
+                    'manifest directories must belong to the selected trial'
+                )
+        file_paths = set(paths)
+        aliases: dict[str, str] = {}
+        for path in (*self.directories, *paths):
+            parts = _path_parts(path)
+            if path in self.directories and path in file_paths:
+                raise ValueError('a manifest path cannot be both a file and directory')
+            for index in range(1, len(parts) + 1):
+                ancestor = '/'.join(parts[:index])
+                if index < len(parts) and ancestor in file_paths:
+                    raise ValueError("a manifest file cannot be another path's parent")
+                previous = aliases.setdefault(ancestor.casefold(), ancestor)
+                if previous != ancestor:
+                    raise ValueError('manifest paths cannot contain case aliases')
         required = {
             'job/config.json',
             *(
@@ -188,6 +217,10 @@ class MaterializedTrial:
 def snapshot_trial(source_job_dir: Path, destination: Path, trial_name: str) -> None:
     """Freeze the selected bytes and modes once into an empty scratch job tree."""
     destination.mkdir(parents=True, exist_ok=False)
+    for directory in _selected_directories(source_job_dir, trial_name):
+        (destination / directory.removeprefix('job/')).mkdir(
+            parents=True, exist_ok=True
+        )
     for entry, content in _selected_files(source_job_dir, trial_name):
         path = destination / entry.path.removeprefix('job/')
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -226,6 +259,7 @@ def build_manifest(
             trial_name=trial_name,
             code_revision=code_revision,
             case_revision=case_revision,
+            directories=tuple(_selected_directories(source_job_dir, trial_name)),
             files=tuple(
                 entry for entry, _ in _selected_files(source_job_dir, trial_name)
             ),
@@ -309,6 +343,13 @@ class ArtifactRepository:
             if tuple(entry for entry, _ in selected) != manifest.files:
                 raise InputError(
                     'The selected trial files differ from their audited manifest.'
+                )
+            if (
+                tuple(_selected_directories(archive.job, manifest.trial_name))
+                != manifest.directories
+            ):
+                raise InputError(
+                    'The selected trial directories differ from their audited manifest.'
                 )
             content = manifest.content()
             contents[manifest.path] = content
@@ -502,7 +543,7 @@ class ArtifactRepository:
                         'An artifact file differs from its recorded mode or digest.'
                     )
                 restored[entry.path] = (mode, value)
-            _restore(destination, restored)
+            _restore(destination, restored, directories=manifest.directories)
         return MaterializedTrial(job=destination / 'job', manifest=manifest)
 
     def _metadata(self) -> _Repository:
@@ -585,6 +626,35 @@ def _selected_path(parts: tuple[str, ...], trial_name: str) -> bool:
 
 
 def _selected_files(root: Path, trial_name: str) -> Iterator[tuple[FileEntry, bytes]]:
+    for path in _selected_paths(root, trial_name):
+        mode = path.lstat().st_mode
+        if stat.S_ISDIR(mode):
+            continue
+        if stat.S_ISLNK(mode):
+            git_mode: GitMode = '120000'
+            content = os.fsencode(os.readlink(path))
+        elif stat.S_ISREG(mode):
+            git_mode = '100755' if mode & stat.S_IXUSR else '100644'
+            content = path.read_bytes()
+        else:
+            raise InputError('Trial artifacts must be regular files or symlinks.')
+        yield (
+            FileEntry(
+                path=f'job/{path.relative_to(root).as_posix()}',
+                mode=git_mode,
+                sha256=sha256(content).hexdigest(),
+            ),
+            content,
+        )
+
+
+def _selected_directories(root: Path, trial_name: str) -> Iterator[str]:
+    for path in _selected_paths(root, trial_name):
+        if not path.is_symlink() and path.is_dir():
+            yield f'job/{path.relative_to(root).as_posix()}'
+
+
+def _selected_paths(root: Path, trial_name: str) -> Iterator[Path]:
     if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]*', trial_name):
         raise InputError('A trial name must be a single path component.')
     if root.is_symlink() or not root.is_dir():
@@ -607,34 +677,17 @@ def _selected_files(root: Path, trial_name: str) -> Iterator[tuple[FileEntry, by
         if directory.is_symlink():
             raise InputError('A selected trial artifact directory cannot be a symlink.')
         if directory.exists():
+            paths.append(directory)
             paths.extend(_walk(directory))
-    for path in sorted(paths):
-        mode = path.lstat().st_mode
-        if stat.S_ISLNK(mode):
-            git_mode: GitMode = '120000'
-            content = os.fsencode(os.readlink(path))
-        elif stat.S_ISREG(mode):
-            git_mode = '100755' if mode & stat.S_IXUSR else '100644'
-            content = path.read_bytes()
-        else:
-            raise InputError('Trial artifacts must be regular files or symlinks.')
-        yield (
-            FileEntry(
-                path=f'job/{path.relative_to(root).as_posix()}',
-                mode=git_mode,
-                sha256=sha256(content).hexdigest(),
-            ),
-            content,
-        )
+    yield from sorted(paths)
 
 
 def _walk(root: Path) -> Iterator[Path]:
     for path in sorted(root.iterdir()):
         if path.name in LEFT_OUT or path.name.casefold() == '.git':
             continue
-        if path.is_symlink() or not path.is_dir():
-            yield path
-        else:
+        yield path
+        if not path.is_symlink() and path.is_dir():
             yield from _walk(path)
 
 
@@ -754,7 +807,12 @@ def _tree_files(root: Path, commit: str, path: str) -> dict[str, tuple[GitMode, 
     return files
 
 
-def _restore(destination: Path, files: dict[str, tuple[GitMode, bytes]]) -> None:
+def _restore(
+    destination: Path,
+    files: dict[str, tuple[GitMode, bytes]],
+    *,
+    directories: Sequence[str] = (),
+) -> None:
     if destination.is_symlink() or (
         destination.exists()
         and (not destination.is_dir() or any(destination.iterdir()))
@@ -771,13 +829,25 @@ def _restore(destination: Path, files: dict[str, tuple[GitMode, bytes]]) -> None
     ) as temporary:
         staged = Path(temporary) / 'contents'
         staged.mkdir(mode=0o700)
-        directories = {staged}
+        created = {staged}
+        for relative in directories:
+            directory = staged
+            for component in _path_parts(relative):
+                child = directory / component
+                if child not in created:
+                    if child.is_symlink() or child.exists():
+                        raise InputError(
+                            'Artifact paths collide on the destination filesystem.'
+                        )
+                    child.mkdir()
+                    created.add(child)
+                directory = child
         for relative, (mode, content) in sorted(files.items()):
             parts = _path_parts(relative)
             directory = staged
             for component in parts[:-1]:
                 child = directory / component
-                if child not in directories:
+                if child not in created:
                     if child.is_symlink():
                         raise InputError(
                             'An artifact directory cannot traverse a symlink.'
@@ -787,7 +857,7 @@ def _restore(destination: Path, files: dict[str, tuple[GitMode, bytes]]) -> None
                             'Artifact paths collide on the destination filesystem.'
                         )
                     child.mkdir()
-                    directories.add(child)
+                    created.add(child)
                 directory = child
             path = directory / parts[-1]
             if path.is_symlink() or path.exists():
