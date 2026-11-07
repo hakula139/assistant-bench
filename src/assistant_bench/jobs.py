@@ -402,11 +402,12 @@ def job_path(config: JobConfig) -> Path:
     return config.jobs_dir / config.job_name
 
 
-def run_job(config: JobConfig) -> Path:
+def run_job(config: JobConfig, *, log: Path | None = None) -> Path:
     """Run the job with the Harbor CLI and return the job directory.
 
     Harbor receives endpoint settings and the host tools' environment without
     the assistant's authentication, model settings, or native configuration.
+    A supplied `log` captures both streams in a private mode-0600 file.
 
     Raises
     ------
@@ -432,11 +433,20 @@ def run_job(config: JobConfig) -> Path:
     ) as file:
         file.write(config.model_dump_json())
         file.close()
-        subprocess.run(
-            [harbor, 'run', '--config', file.name, '--yes'],
-            check=True,
-            env=harbor_environment(),
-        )
+        command: list[str | Path] = [harbor, 'run', '--config', file.name, '--yes']
+        if log is None:
+            subprocess.run(command, check=True, env=harbor_environment())
+        else:
+            log.parent.mkdir(parents=True, exist_ok=True)
+            with log.open('w') as output:
+                os.fchmod(output.fileno(), 0o600)
+                subprocess.run(
+                    command,
+                    check=True,
+                    env=harbor_environment(),
+                    stdout=output,
+                    stderr=subprocess.STDOUT,
+                )
 
     return job_path(config)
 

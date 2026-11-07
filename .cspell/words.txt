@@ -36,6 +36,7 @@ evals
 exog
 expit
 fallocate
+fchmod
 fcntl
 fdatasync
 fileno

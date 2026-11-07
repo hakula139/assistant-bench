@@ -139,7 +139,10 @@ def run(probes: list[Probe]) -> list[Record]:
         previous = read_records(probe.original.name)
         run_error: str | None = 'InterruptedProbe'
         try:
-            jobs.run_job(probe.config)
+            jobs.run_job(
+                probe.config,
+                log=probe.config.jobs_dir / f'{probe.config.job_name}.log',
+            )
             run_error = None
         except subprocess.CalledProcessError as error:
             run_error = type(error).__name__
@@ -223,12 +226,9 @@ def _append(records: list[Record]) -> None:
 
 def _problem(record: Record, previous: list[Record]) -> str | None:
     if not record.success:
-        reason = record.error or record.finish_reason or 'MissingUsage'
-        if record.usage is None and record.error is None:
-            reason = 'MissingUsage'
         return (
-            f'System `{record.system}`: canary probe failed (`{reason}`). '
-            'The run was refused.'
+            f'System `{record.system}`: canary probe failed. '
+            'The run was refused. Inspect its canary records.'
         )
 
     baseline = next(
@@ -245,15 +245,15 @@ def _problem(record: Record, previous: list[Record]) -> str | None:
         return None
     assert baseline.usage is not None and record.usage is not None
     old_tokens, new_tokens = baseline.usage.input_tokens, record.usage.input_tokens
-    if abs(old_tokens - new_tokens) <= max(2, old_tokens * 0.02) and set(
-        baseline.response_models
-    ) == set(record.response_models):
+    models_changed = set(baseline.response_models) != set(record.response_models)
+    if abs(old_tokens - new_tokens) <= max(2, old_tokens * 0.02) and not models_changed:
         return None
+    model_change = 'The reported model changed. ' if models_changed else ''
     return (
         f'System `{record.system}`: canary differs from its baseline on '
         f'`{baseline.time.date()}`. Input tokens: `{old_tokens}` → `{new_tokens}`. '
-        f'Response models: `{baseline.response_models}` → `{record.response_models}`. '
-        'The run was refused. If the route changed models, delete the stale trials '
+        f'{model_change}The run was refused. Inspect its canary records. '
+        'If the route changed models, delete the stale trials '
         "and the system's canary file. For a benign template change, delete only "
         'its canary file, then rerun.'
     )

@@ -211,7 +211,7 @@ assistant-bench/
 ├── agents/<harness>/<version>/<platform>/  # Verified vendor CLI executables for installed agents
 ├── arena/                                 # Local vote database, signing keys and serve lock
 ├── canaries/<system>.jsonl                 # Every route probe, including its identities, protocol, usage and outcome
-├── canaries/jobs/<job>/                    # Probe Harbor jobs, separate from family collection
+├── canaries/jobs/<job>/                    # Probe Harbor jobs, with adjacent private CLI logs
 ├── canaries/task/                          # The fixed synthetic probe task
 ├── cases/<family>.toml                     # Local cases, appended to the committed ones
 ├── cases/<family>/<task>/                  # Local tasks, beside the committed ones
