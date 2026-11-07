@@ -20,6 +20,7 @@ export const errorMessages: Record<ErrorCode, string> = {
   not_found: 'The voting service is unavailable. Try again.',
   too_large: 'The request could not be processed. Reload and try again.',
   admission_required: 'Complete verification to vote.',
+  reload_required: 'Reload this page to resume private voting.',
   challenge_failed: 'Verification failed. Try again.',
   no_round: 'This family has no outputs available to vote on.',
   stale_pair: 'This pair changed. Review the current outputs and choose again.',

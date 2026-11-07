@@ -25,7 +25,7 @@ Every chart has a table twin with the same values, and its tooltips use values t
 
 ## The Vote Page
 
-`/vote/` is emitted in every build. The page fetches pairs from the same-origin [vote API](arena.md#vote-api) at runtime, so no vote data enters a build. A browser the Worker has not admitted solves an interaction-only Turnstile challenge in place, whose frame the `/vote/*` rule in `web/public/_headers` allows. Static previews without the API show an unavailable state.
+`/vote/` is emitted in every build. The page fetches pairs from the same-origin [vote API](arena.md#vote-api) at runtime, so no vote data enters a build. On public deployments, a browser the Worker has not admitted solves an interaction-only Turnstile challenge in place, whose frame the `/vote/*` rule in `web/public/_headers` allows. A private deployment verifies Cloudflare Access before serving any page, asset or API and admits its owner when serving `/vote/`. The owner's allowed login addresses share one persistent actor. Static previews without the API show an unavailable state.
 
 The server keeps each browser's pending pair, and the tab keeps its draft in `sessionStorage`: the choice, issues, Markdown toggle, collapsed prompt and scroll offsets of that pair. A reload restores the draft only while the server still holds the same pair and never sends a vote. `sessionStorage` keeps two tabs' drafts apart and clears when the tab closes, so a shared device keeps no unsent choices.
 
