@@ -87,18 +87,22 @@ def prepared(family: Family, store: tuple[SQLiteDatabase, list[str]]) -> str:
         target='production',
     )
     publication.stage(database, draft, NOW)
-    database.execute(
-        'INSERT INTO collections (id, family, expected_count, manifest_digest, '
-        'created_at, sealed) VALUES (?, ?, 0, ?, ?, 1)',
-        ['collection', family.name, 'unused', NOW.isoformat()],
+    generation = write_outputs(
+        family.name,
+        collected(),
+        State(database),
+        previous=None,
+        code_revision='a' * 40,
+        case_revision='b' * 40,
+        system_names={name: system.display_name for name, system in SYSTEMS.items()},
     )
     publication.record_preparation(
         database,
         publication.Preparation(
             publication_id=draft.id,
             target='production',
-            collection_id='collection',
-            case_revision=None,
+            collection_id=generation,
+            case_revision='b' * 40,
             prepared_at=NOW,
         ),
     )

@@ -773,6 +773,46 @@ class TestRestore:
 
 
 class TestSnapshots:
+    def test_persists_private_vote_facts_without_candidate_bodies(
+        self, private_store: SQLiteDatabase
+    ) -> None:
+        case = make_case('held', 'held-out').model_copy(
+            update={'instruction': 'Private instruction marker.'}
+        )
+        published = publication.prepare(
+            FAMILY,
+            [case],
+            [
+                make_trial('held', system, text=f'Private candidate marker {system}.')
+                for system in ARENA_SYSTEMS
+            ],
+            ARENA_NAMES,
+            target='private',
+        )
+        publication.stage(private_store, published, NOW)
+        publication.activate(private_store, published.id, NOW)
+        record_vote(
+            private_store, published, NOW, actor='reader', age=timedelta(hours=1)
+        )
+        cut = votes.read_cut(private_store, FAMILY.name, NOW)
+        saved = Snapshot(
+            family=FAMILY.name,
+            taken_at=NOW,
+            closed_at=NOW,
+            category_order=('docs',),
+            closing_revision=None,
+            production=None,
+            private=cut,
+        )
+
+        identity = votes.save_snapshot(private_store, saved)
+        restored = votes.read_snapshot(private_store, identity)
+
+        assert restored == saved
+        assert 'Private instruction marker' not in restored.model_dump_json()
+        assert 'Private candidate marker' not in restored.model_dump_json()
+        assert len(votes.voting_input(restored, {}).ordinary) == 1
+
     def test_replays_frozen_facts_after_moderation_and_publication_change(
         self, private_store: SQLiteDatabase
     ) -> None:
