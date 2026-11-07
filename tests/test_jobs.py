@@ -76,6 +76,20 @@ class TestCheckSystems:
                 'harness cannot send. Remove them from `systems`.',
                 id='unsent-prompt',
             ),
+            pytest.param(
+                'terminus-2',
+                make_system(harness='codex', version='1.2.3'),
+                'System `acme-large`: harness `codex` accepts '
+                '`openai-responses` (got `openai-chat-completions`).',
+                id='installed-wrong-api',
+            ),
+            pytest.param(
+                'codex',
+                make_system(api='openai-responses'),
+                'System `acme-large`: set its `harness` and pinned `version` '
+                'in `systems.toml`.',
+                id='installed-missing-version',
+            ),
         ],
     )
     def test_rejects_a_system_the_harness_cannot_run(

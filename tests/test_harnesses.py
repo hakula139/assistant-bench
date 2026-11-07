@@ -103,6 +103,12 @@ class TestFingerprint:
                 id='terminus-context',
             ),
             pytest.param({}, {'context_window': 16384}, False, id='context'),
+            pytest.param(
+                {'harness': 'codex', 'version': '1.2.3'},
+                {'version': '1.2.4'},
+                True,
+                id='installed-version',
+            ),
         ],
     )
     def test_changes_only_with_what_shapes_the_requests(

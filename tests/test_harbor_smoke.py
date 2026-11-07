@@ -291,6 +291,11 @@ def test_installed_cli_preserves_native_trace_usage_and_task_diff(
     family = load_family('f')
     task = case_task(family, 'echo')
     command = solution_commands(task).strip()
+    if cancelled:
+        task_config = task / 'task.toml'
+        task_config.write_text(
+            task_config.read_text().replace('timeout_sec = 120.0', 'timeout_sec = 15.0')
+        )
     if harness == 'claude-code':
         first = message(stop_reason='tool_use', message_id='tool')
         first['content'] = [
@@ -348,7 +353,6 @@ def test_installed_cli_preserves_native_trace_usage_and_task_diff(
     if cancelled:
         endpoint.response_gate = threading.Event()
         endpoint.response_gate_after = 1
-        config.agents[0].override_timeout_sec = 15
 
     try:
         job_dir = jobs.run_job(config)
