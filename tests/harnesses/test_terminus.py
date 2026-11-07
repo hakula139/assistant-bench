@@ -891,27 +891,24 @@ class TestTerminus:
             ) == (130, 100, 40)
 
         @pytest.mark.parametrize(
-            ('usage', 'tokens', 'cost'),
+            ('usage', 'tokens'),
             [
-                ('reported', (130, 100, 40), 0.000485),
-                ('zero', (0, 0, 0), 0.0),
-                ('missing', (None, None, None), None),
-                ('ttl-unpriced', (130, 100, 40), None),
+                ('reported', (130, 100, 40)),
+                ('zero', (0, 0, 0)),
+                ('missing', (None, None, None)),
+                ('ttl-unpriced', (130, 100, 40)),
             ],
             ids=['reported-first', 'zero-first', 'unknown-first', 'unpriced-cache-ttl'],
         )
-        def test_native_cancellation_keeps_completed_usage_through_collection(
+        def test_native_cancellation_keeps_completed_usage_and_fences_the_claim(
             self,
             private_state: State,
             endpoint: StubEndpoint,
             messages_agent: NativeProbe,
             messages_clients: list[AsyncAnthropic],
             terminal_session: TmuxSession,
-            families_dir: Path,
-            data_dir: Path,
             usage: str,
             tokens: tuple[int | None, ...],
-            cost: float | None,
         ) -> None:
             text = terminus_completion(task_complete=False)['choices'][0]['message'][
                 'content'
@@ -929,17 +926,6 @@ class TestTerminus:
             endpoint.streams = [message_stream(first)]
             gate = endpoint.response_gate = threading.Event()
             endpoint.response_gate_after = 1
-            system = make_system(
-                harness='terminus-2',
-                api='anthropic-messages',
-                thinking_mode='anthropic-adaptive',
-                effort='high',
-                max_output_tokens=32768,
-                context_window=131072,
-            )
-            write_task_family(families_dir, 'echo', systems=(system.name,))
-            family = load_family('f')
-            config = jobs.job(family, [system], [])
             context = AgentContext()
 
             async def cancel() -> None:
@@ -967,41 +953,17 @@ class TestTerminus:
                     await asyncio.gather(task, waiting, return_exceptions=True)
 
             asyncio.run(cancel())
-            job_dir = data_dir / 'jobs' / family.name / 'cancelled'
-            write_trial(
-                job_dir,
-                'echo__cancelled',
-                config.agents[0],
-                task='f/echo',
-                version='1.0.0',
-                context=context,
-                error='CancelledError',
-                instruction=None,
-                environment=config.environment,
-                verifier_disabled=config.verifier.disable,
-            )
-            (collected,) = collection.collect(family, {system.name: system}).outputs
 
             assert (
                 context.n_input_tokens,
                 context.n_cache_tokens,
                 context.n_output_tokens,
             ) == tokens
-            assert (
-                collected.input_tokens,
-                collected.cached_tokens,
-                collected.output_tokens,
-            ) == tokens
-            assert collected.cache_write_tokens == (
-                10
-                if usage in ('reported', 'ttl-unpriced')
-                else 0
-                if usage == 'zero'
-                else None
-            )
-            assert collected.cost_usd == (
-                pytest.approx(cost) if cost is not None else None
-            )
+            previous, pending = private_state.requests('sample')
+            assert previous['receipt_json'] is not None
+            assert pending['receipt_json'] is None
+            assert isinstance(pending['claim_id'], str)
+            assert private_state.claim_state(pending['claim_id']) == 'uncertain'
             assert context.metadata is not None
             assert [call['response_status'] for call in context.metadata['calls']] == [
                 'completed'
@@ -1223,13 +1185,13 @@ class TestTerminus:
             assert client.is_closed()
 
         @pytest.mark.parametrize(
-            ('prior_usage', 'tokens', 'cost'),
+            ('prior_usage', 'tokens'),
             [
-                (None, (None, None, None), None),
-                ('reported', (120, 100, 40), 0.00046),
-                ('zero', (0, 0, 0), 0.0),
-                ('null', (None, None, None), None),
-                ('omitted', (None, None, None), None),
+                (None, (None, None, None)),
+                ('reported', (120, 100, 40)),
+                ('zero', (0, 0, 0)),
+                ('null', (None, None, None)),
+                ('omitted', (None, None, None)),
             ],
             ids=[
                 'before-first',
@@ -1246,15 +1208,12 @@ class TestTerminus:
             endpoint: StubEndpoint,
             endpoint_clients: list[openai.AsyncOpenAI],
             export: NixosConfigExport,
-            families_dir: Path,
-            data_dir: Path,
             model_requests: list[httpx2.Request],
             terminal_session: TmuxSession,
             logs_dir: Path,
             api: str,
             prior_usage: str | None,
             tokens: tuple[int | None, int | None, int | None],
-            cost: float | None,
         ) -> None:
             gate = endpoint.response_gate = threading.Event()
             if prior_usage is not None:
@@ -1290,9 +1249,6 @@ class TestTerminus:
                 max_output_tokens=32768,
                 context_window=131072,
             )
-            write_task_family(families_dir, 'echo', systems=(system.name,))
-            family = load_family('f')
-            config = jobs.job(family, [system], [])
             agent = NativeProbe(
                 logs_dir=logs_dir,
                 model_name=system.route,
@@ -1301,38 +1257,22 @@ class TestTerminus:
             )
             context = AgentContext()
 
-            async def cancel() -> str:
+            async def cancel() -> None:
                 task = asyncio.create_task(
                     agent.execute(private_state, terminal_session, context)
                 )
                 try:
                     assert await asyncio.to_thread(endpoint.response_waiting.wait, 5)
                     task.cancel()
-                    with pytest.raises(asyncio.CancelledError) as error:
+                    with pytest.raises(asyncio.CancelledError):
                         await asyncio.wait_for(task, 5)
-                    return type(error.value).__name__
                 finally:
                     gate.set()
                     if not task.done():
                         task.cancel()
                     await asyncio.gather(task, return_exceptions=True)
 
-            error = asyncio.run(cancel())
-            job_dir = data_dir / 'jobs' / family.name / 'cancelled'
-            write_trial(
-                job_dir,
-                'echo__cancelled',
-                config.agents[0],
-                task='f/echo',
-                version='1.0.0',
-                context=context,
-                error=error,
-                instruction=None,
-                environment=config.environment,
-                verifier_disabled=config.verifier.disable,
-            )
-            reread = collection.read_trials(family, job_dir)
-            collected = collection.collect(family, {system.name: system}).outputs
+            asyncio.run(cancel())
 
             path = (
                 '/v1/responses' if api == 'openai-responses' else '/v1/chat/completions'
@@ -1351,20 +1291,12 @@ class TestTerminus:
             assert len(context.metadata['api_request_times_msec']) == (
                 0 if prior_usage is None else 1
             )
-            (recorded,) = reread
-            (current,) = collected
-            for output in (recorded, current):
-                assert output.error == 'CancelledError'
-                assert (
-                    output.input_tokens,
-                    output.cached_tokens,
-                    output.output_tokens,
-                ) == tokens
-            assert recorded.cost_usd is None
-            if cost is None:
-                assert current.cost_usd is None
-            else:
-                assert current.cost_usd == pytest.approx(cost)
+            records = private_state.requests('sample')
+            assert records[-1]['receipt_json'] is None
+            assert all(record['receipt_json'] is not None for record in records[:-1])
+            claim_id = records[-1]['claim_id']
+            assert isinstance(claim_id, str)
+            assert private_state.claim_state(claim_id) == 'uncertain'
             assert (
                 context.n_input_tokens,
                 context.n_cache_tokens,

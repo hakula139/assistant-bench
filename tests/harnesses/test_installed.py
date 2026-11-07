@@ -222,14 +222,14 @@ class TestJobConfiguration:
             jobs.check_systems(VOTES, [system])
 
     def test_lists_only_the_trial_proxy_in_a_mixed_harness_job(
-        self, families_dir: Path
+        self, families_dir: Path, tmp_path: Path
     ) -> None:
         family = voted_tasks(families_dir)
         system = make_system(harness='codex', version='1.2.3', api='openai-responses')
         ordinary = make_system(name='other')
 
         selected = jobs.family_systems(family, [system, ordinary])
-        config = jobs.job(family, selected, [])
+        config = jobs.job(family, selected, [], root=tmp_path, sources=[])
 
         assert [agent.import_path for agent in config.agents] == [
             'assistant_bench.harnesses.installed:Codex',
