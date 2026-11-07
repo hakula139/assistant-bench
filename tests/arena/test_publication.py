@@ -98,12 +98,10 @@ class RecordingDatabase:
         return self.database.execute(sql, params)
 
 
-def publish(
+def stage_and_activate(
     database: SQLiteDatabase | RecordingDatabase,
     published: Publication,
     now: datetime,
-    *,
-    target: str,
 ) -> bool:
     publication.stage(database, published, now)
     return publication.activate(database, published.id, now)
@@ -128,7 +126,7 @@ class TestPrepare:
         )
 
         published = prepare(family, [case], outputs)
-        publish(arena_store, published, NOW, target='production')
+        stage_and_activate(arena_store, published, NOW)
         passing = published.model_copy(
             update={
                 'outputs': tuple(
@@ -184,7 +182,7 @@ class TestPrepare:
             prepare(family, [make_case('page')], outputs)
 
     @pytest.mark.parametrize('public_voting', [True, False])
-    def test_partitions_local_cases_and_records_their_split(
+    def test_partitions_private_cases_and_records_their_split(
         self, public_voting: bool
     ) -> None:
         family = make_votes_family(public_voting=public_voting)
@@ -199,21 +197,21 @@ class TestPrepare:
         ]
         names = {publication.case_key(case): case.id for case in cases}
 
-        local = publication.prepare(
+        private = publication.prepare(
             family, cases, outputs, ARENA_NAMES, target='private'
         )
 
         expected = {'private': 'private', 'secret': 'held-out'}
         if not public_voting:
             expected |= {'open': 'public', 'quoted': 'public'}
-        assert {names[case.key]: case.split for case in local.cases} == expected
-        assert {row.case_key for row in local.outputs} == {
-            case.key for case in local.cases
+        assert {names[case.key]: case.split for case in private.cases} == expected
+        assert {row.case_key for row in private.outputs} == {
+            case.key for case in private.cases
         }
-        assert local.target == 'private'
+        assert private.target == 'private'
         assert (
-            local.identity()
-            != local.model_copy(update={'target': 'production'}).identity()
+            private.identity()
+            != private.model_copy(update={'target': 'production'}).identity()
         )
 
     def test_refuses_duplicate_cases_across_vote_stores(self) -> None:
@@ -506,6 +504,13 @@ class TestPreparation:
 
         assert publication.read_prepared(private_store, published.id) == published
         assert publication.preparation(private_store, published.id) == metadata
+        for statement in (
+            'UPDATE publication_preparations SET prepared_at = prepared_at',
+            'DELETE FROM publication_preparations',
+        ):
+            with pytest.raises(sqlite3.IntegrityError, match='immutable'):
+                private_store.execute(statement)
+        assert publication.preparation(private_store, published.id) == metadata
         with pytest.raises(InputError, match='conflicting preparation metadata'):
             publication.record_preparation(
                 private_store,
@@ -566,14 +571,14 @@ class TestPreparation:
         assert publication.preparation(private_store, published.id) is None
 
 
-class TestPublish:
+class TestStageAndActivate:
     def test_stages_and_activates_the_publication(
         self, arena_store: SQLiteDatabase
     ) -> None:
         database = arena_store
         published = text_publication()
 
-        changed = publish(database, published, NOW, target='production')
+        changed = stage_and_activate(database, published, NOW)
 
         assert changed
         assert rows(database, 'SELECT family, publication_id FROM active') == [
@@ -621,7 +626,7 @@ class TestPublish:
         )
         keys = {case.id: publication.case_key(case) for case in cases}
 
-        publish(arena_store, published, NOW, target='production')
+        stage_and_activate(arena_store, published, NOW)
 
         facts = rows(
             arena_store,
@@ -647,7 +652,7 @@ class TestPublish:
         )
         recording = RecordingDatabase(arena_store)
 
-        publish(recording, published, NOW, target='production')
+        stage_and_activate(recording, published, NOW)
 
         inserts = [sql.split()[2] for sql in recording.statements if 'VALUES' in sql]
         assert inserts.count('cases') == 2
@@ -659,7 +664,7 @@ class TestPublish:
     ) -> None:
         database = arena_store
         published = text_publication()
-        publish(database, published, NOW, target='production')
+        stage_and_activate(database, published, NOW)
         recording = RecordingDatabase(database)
 
         changed = publication.activate(recording, published.id, NOW)
@@ -683,9 +688,9 @@ class TestPublish:
         published = text_publication()
         interrupted = RecordingDatabase(database, lambda sql: statement in sql)
         with pytest.raises(Interrupted):
-            publish(interrupted, published, NOW, target='production')
+            stage_and_activate(interrupted, published, NOW)
 
-        changed = publish(database, published, NOW, target='production')
+        changed = stage_and_activate(database, published, NOW)
 
         assert changed
         assert rows(database, 'SELECT publication_id FROM active') == [(published.id,)]
@@ -711,7 +716,7 @@ class TestPublish:
         monkeypatch.setattr(arena_store, 'execute', changed)
 
         with pytest.raises(InputError, match='not completely staged'):
-            publish(arena_store, published, NOW, target='production')
+            stage_and_activate(arena_store, published, NOW)
 
         assert rows(arena_store, 'SELECT * FROM active') == []
 
@@ -736,14 +741,14 @@ class TestPublish:
     ) -> None:
         database = arena_store
         first = text_publication()
-        publish(database, first, NOW, target='production')
+        stage_and_activate(database, first, NOW)
         second = prepare(
             make_votes_family(),
             [make_case('first')],
             [make_trial('first', system) for system in ARENA_SYSTEMS],
         )
 
-        publish(database, second, NOW, target='production')
+        stage_and_activate(database, second, NOW)
 
         assert rows(database, 'SELECT publication_id FROM active') == [(second.id,)]
         assert rows(database, 'SELECT count(*) FROM publications') == [(2,)]
@@ -760,7 +765,7 @@ class TestPublish:
         private = draft.model_copy(update={'id': draft.identity()})
 
         with pytest.raises(ValueError, match='cannot enter production'):
-            publish(database, private, NOW, target='production')
+            stage_and_activate(database, private, NOW)
 
         assert rows(database, 'SELECT count(*) FROM publications') == [(0,)]
 
@@ -772,7 +777,7 @@ class TestPublish:
         database = arena_store
 
         for published in (text_publication(), diff_publication()):
-            publish(database, published, NOW, target='production')
+            stage_and_activate(database, published, NOW)
 
         dumped = dump(database.connection)
         if (
@@ -813,7 +818,7 @@ class TestPublicationPairCases:
         self, arena_store: SQLiteDatabase
     ) -> None:
         for published in (text_publication(), diff_publication()):
-            publish(arena_store, published, NOW, target='production')
+            stage_and_activate(arena_store, published, NOW)
         existing = (
             '\n'.join(
                 line
@@ -878,7 +883,7 @@ class TestPublicationPairCases:
             cases,
             [make_trial(case.id, system) for case in cases for system in ARENA_SYSTEMS],
         )
-        publish(arena_store, published, NOW, target='production')
+        stage_and_activate(arena_store, published, NOW)
         staged = '\n'.join(
             line
             for line in dump(arena_store.connection, original_schema=True).splitlines()
@@ -911,7 +916,7 @@ class TestPublicationPairCases:
                 )
             database = SQLiteDatabase(connection)
 
-            changed = publish(database, published, NOW, target='production')
+            changed = stage_and_activate(database, published, NOW)
 
             assert changed
             assert rows(database, 'SELECT publication_id FROM active') == [

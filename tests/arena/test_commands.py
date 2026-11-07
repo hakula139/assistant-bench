@@ -355,6 +355,16 @@ class TestPublish:
         assert 'has no verified preparation' in result.stderr
         assert store[1] == ['private']
 
+    def test_refuses_a_prepared_target_mismatch_before_activation(
+        self, prepared: str, store: tuple[SQLiteDatabase, list[str]]
+    ) -> None:
+        result = invoke('publish', 'private', prepared)
+
+        assert result.exit_code == 1, result.output
+        assert 'was prepared for `production`' in result.stderr
+        assert store[1] == ['private']
+        assert store[0].execute('SELECT * FROM active').rows == []
+
     def test_rejects_an_unknown_target_by_name(self, prepared: str) -> None:
         result = invoke('publish', 'prod', prepared)
 
