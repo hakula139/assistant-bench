@@ -1,5 +1,6 @@
 import asyncio
 import os
+import shutil
 import subprocess
 import sys
 import textwrap
@@ -17,14 +18,23 @@ import tomli_w
 from harbor.job_diff import DiffAction, compare_job_trials, load_source_trials
 from harbor.job_plan import JobPlan
 from harbor.models.agent.context import AgentContext
-from harbor.models.job.config import JobConfig
+from harbor.models.job.config import JobConfig, SourceJobConfig
 from harbor.models.task.config import TaskConfig
 from harbor.models.trial.config import AgentConfig
 from harbor.models.trial.result import TrialResult
 from rich.text import Text
 from typer.testing import CliRunner, Result
 
-from assistant_bench import canaries, catalog, cli, collection, execution, jobs, report
+from assistant_bench import (
+    canaries,
+    catalog,
+    cli,
+    collection,
+    execution,
+    jobs,
+    report,
+    runtime,
+)
 from assistant_bench.arena import publication, votes
 from assistant_bench.artifacts import MaterializedTrial, build_manifest
 from assistant_bench.catalog import (
@@ -109,13 +119,6 @@ class Store:
     generation: str
     targets: list[str]
     """Each target a command connected to."""
-
-
-def write_job(job_dir: Path) -> None:
-    """Write the files that mark a finished Harbor job without trials."""
-    job_dir.mkdir(parents=True)
-    (job_dir / 'config.json').touch()
-    (job_dir / 'result.json').touch()
 
 
 SPENDER = make_system(name='large', context_window=2_000_000, max_output_tokens=200_000)
@@ -315,6 +318,13 @@ def submitted(data_dir: Path, monkeypatch: pytest.MonkeyPatch) -> list[JobConfig
 @pytest.fixture
 def cloud(run_context: RunContext, monkeypatch: pytest.MonkeyPatch) -> RunContext:
     monkeypatch.setattr(cli, 'open_context', lambda: nullcontext(run_context))
+
+    def materialize(revision: str, destination: Path) -> None:
+        assert revision == run_context.code_revision
+        shutil.copytree(run_context.public_root, destination)
+
+    monkeypatch.setattr(cli, 'materialize_implementation', materialize)
+    monkeypatch.setattr(runtime, 'materialize_implementation', materialize)
     return run_context
 
 
@@ -350,7 +360,9 @@ def resolved(monkeypatch: pytest.MonkeyPatch) -> dict[str, System]:
     """Resolve `bench`'s systems to the ones a test stores here."""
     systems: dict[str, System] = {}
 
-    def load_systems(export: NixosConfigExport) -> dict[str, System]:
+    def load_systems(
+        export: NixosConfigExport, *, root: Path | None = None
+    ) -> dict[str, System]:
         return systems
 
     monkeypatch.setattr(cli, 'load_systems', load_systems)
@@ -360,7 +372,7 @@ def resolved(monkeypatch: pytest.MonkeyPatch) -> dict[str, System]:
 def planned_actions(job: JobConfig) -> dict[str, set[DiffAction]]:
     """Map each system to the actions Harbor plans against the job's one source."""
     plan = asyncio.run(JobPlan.from_config(job))
-    sources = []
+    sources: list[tuple[SourceJobConfig, Path]] = []
     for source in job.source_jobs:
         assert source.path is not None
         sources.append((source, source.path))
@@ -1894,12 +1906,13 @@ class TestCollect:
                 root=cloud.root,
                 sources=cloud.sources(family),
             )
-            (path,) = archive_job(
-                cloud, config.model_copy(update={'job_name': job}), private_store
-            ).glob('*/result.json')
+            (path,) = finish_job(config.model_copy(update={'job_name': job})).glob(
+                '*/result.json'
+            )
             trial = TrialResult.model_validate_json(path.read_text())
             trial.agent_result = AgentContext(metadata={'response_model': model})
             path.write_text(trial.model_dump_json())
+            archive_trials(cloud, path.parent.parent, 'f', private_store)
 
         result = invoke(command, 'f')
 
@@ -2415,16 +2428,14 @@ class TestClose:
         (task / 'task.toml').write_text(config.model_dump_toml())
         family = load_family('f')
         system = load_systems(load_export())['opus-5.5-high']
-        job_dir = archive_job(
-            cloud,
+        job_dir = finish_job(
             jobs.job(
                 family,
                 jobs.family_systems(family, [system]),
                 [task],
                 root=cloud.root,
                 sources=cloud.sources(family),
-            ),
-            private_store,
+            )
         )
         models = ('large-2026', 'other-2026')
         trials = sorted(job_dir.glob('*/result.json'))
@@ -2432,6 +2443,8 @@ class TestClose:
             trial = TrialResult.model_validate_json(path.read_text())
             trial.agent_result = AgentContext(metadata={'response_model': model})
             path.write_text(trial.model_dump_json())
+
+        archive_trials(cloud, job_dir, 'f', private_store)
 
         result = invoke('close', 'f')
 
