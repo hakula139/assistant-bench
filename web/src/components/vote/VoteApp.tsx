@@ -674,8 +674,9 @@ export function VoteApp() {
           <OutputPane
             key={`${key}-${pair.id}`}
             side={side}
-            render={pair.render}
-            text={pair[key]}
+            {...(pair.render === 'html'
+              ? { render: pair.render, previewUrl: `/api/previews/${pair.id}/${key}` }
+              : { render: pair.render, text: pair[key] })}
             asMarkdown={draft.markdown}
             scrollRef={(element) => {
               panes.current[key] = element;

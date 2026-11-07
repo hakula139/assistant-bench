@@ -38,6 +38,8 @@ A `family.toml` lists its fields in this order:
 | `defects`       | no                         | For `votes`, unique issue IDs in presentation order. Defaults to empty, hiding Issues buttons. [Voting](voting.md#casting-a-vote) gives their shortcuts                 |
 | `[gates]`       | no                         | A `votes` case family's `min_chars`, `max_chars`, and `script = "hans"`, defined in [Writing](../design/families/writing.md#gates)                                      |
 
+An `html` reply must be a complete self-contained document, bare or inside one complete HTML fence with no surrounding prose. Collection preserves the extracted document's bytes, requires explicit doctype, html, head, and body boundaries, and rejects resource hints, refresh or DNS-enable metadata, base elements, and navigation outside document fragments. Its isolated preview allows inline CSS, data images or fonts, and native controls, with JavaScript, external resources, forms, and persistence unavailable. HTML outputs have no text-length measurement.
+
 A new category ID updates the `Category` literal, the `categories` list in `lib/categories.ts`, and the glossary, as [TypeScript](../conventions/typescript.md#reports) describes along with new defect IDs and languages.
 
 Each `checkers` pair is `{ bare = "<system>", prompted = "<system>" }`. The bare system has no system prompt, and the prompted system has one. Their resolved generation settings must otherwise match, including model, API, effort, context, completion limit, harness and generation version. Checker families require cases and use each case's language.
