@@ -329,6 +329,43 @@ class TestArtifactRepository:
         assert (source / 'sample.toml').read_bytes() == b'cases = []\r\n'
         assert not (tmp_path / 'foreign').exists()
 
+    class TestHead:
+        def test_reads_the_current_remote_main_without_changing_pinned_sources(
+            self, repository: Repository, tmp_path: Path
+        ) -> None:
+            pinned = repository.client.head()
+            (repository.seed / 'cases' / 'sample.toml').write_text('cases = [1]\n')
+            git(repository.seed, 'add', '.')
+            git(repository.seed, 'commit', '--quiet', '-m', 'Change synthetic source')
+            git(repository.seed, 'push', '--quiet', 'origin', 'main')
+
+            current = repository.client.head()
+            source = repository.client.source(pinned, tmp_path / 'pinned')
+
+            assert pinned == repository.revision
+            assert current == git(repository.remote, 'rev-parse', 'main')
+            assert current != pinned
+            assert (source / 'sample.toml').read_bytes() == b'cases = []\r\n'
+
+        @pytest.mark.parametrize('failure', ['public', 'unreadable', 'missing-main'])
+        def test_refuses_an_unavailable_private_main(
+            self,
+            repository: Repository,
+            monkeypatch: pytest.MonkeyPatch,
+            failure: str,
+        ) -> None:
+            if failure == 'public':
+                metadata = json.loads(repository.metadata.read_text())
+                metadata['private'] = False
+                repository.metadata.write_text(json.dumps(metadata))
+            elif failure == 'unreadable':
+                monkeypatch.setenv('TEST_GH_STATUS', '1')
+            else:
+                git(repository.remote, 'update-ref', '-d', 'refs/heads/main')
+
+            with pytest.raises(InputError):
+                repository.client.head()
+
     class TestSource:
         def test_materializes_only_case_sources_at_the_requested_revision(
             self, repository: Repository, tmp_path: Path
