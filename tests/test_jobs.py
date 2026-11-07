@@ -523,9 +523,9 @@ class TestRunJob:
         monkeypatch.setattr(
             jobs, 'check_local_context', Mock(side_effect=ValueError('context refused'))
         )
-        monkeypatch.setattr(jobs.subprocess, 'check_output', engine)
+        monkeypatch.setattr(subprocess, 'check_output', engine)
         monkeypatch.setattr(jobs, 'artifact', download)
-        monkeypatch.setattr(jobs.subprocess, 'run', run)
+        monkeypatch.setattr(subprocess, 'run', run)
 
         with pytest.raises(ValueError, match='context refused'):
             jobs.run_job(config)
