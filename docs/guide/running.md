@@ -130,9 +130,9 @@ A canary refusal happens before new family trials start. For a failed probe, cor
 
 ## Voting
 
-Follow the site's Vote link and choose an available family. [Arena](../design/arena.md#vote-store) describes the production and staging vote stores.
+Follow the site's Vote link and choose an available family. [Arena](../design/arena.md#vote-store) describes the production, staging and private vote stores.
 
-Publishing a family's outputs for voting needs `public_voting = true` in its `family.toml` and a Cloudflare API token with D1 Edit. Set exactly one credential source in `.env`: `BENCH_D1_TOKEN_FILE` names a file holding the token, or `BENCH_D1_ENV_FILE` names an existing dotenv file containing `CLOUDFLARE_API_TOKEN`. The dotenv source reads that token without expanding variables or changing the process environment.
+Publishing a family's outputs for production voting needs `public_voting = true` in its `family.toml`. Cloud commands need a Cloudflare API token with D1 Edit. Set exactly one credential source in `.env`: `BENCH_D1_TOKEN_FILE` names a file holding the token, or `BENCH_D1_ENV_FILE` names an existing dotenv file containing `CLOUDFLARE_API_TOKEN`. The dotenv source reads that token without expanding variables or changing the process environment.
 
 ```bash
 uv run bench arena prepare writing-zh production
