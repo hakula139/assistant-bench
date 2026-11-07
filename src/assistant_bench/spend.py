@@ -6,10 +6,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Self
 
+from pydantic import BaseModel, ConfigDict
+
 from assistant_bench.catalog import Price, System
 from assistant_bench.families import Family
 from assistant_bench.harnesses.usage import ATTEMPTS_FILE, Attempt, MeasuredUsage
 from assistant_bench.jobs import jobs_dir
+from assistant_bench.messages import InputError
 from assistant_bench.paths import data_dir
 
 
@@ -21,7 +24,7 @@ class Entry(Attempt):
 
     job: str
     price: Price | None
-    """The system's catalog price when the ledger added the attempt."""
+    """The price frozen when the attempt entered the ledger or its probe started."""
 
     ceiling_usd: float | None
     """The cost of one response at a full context window and completion allowance,
@@ -52,19 +55,60 @@ def update_ledger(family: Family, systems: Mapping[str, System]) -> list[Entry]:
     its system's current price, so a later price change or a system leaving the
     catalog leaves its cost as it was.
     """
-    path = _ledger_file(family.name)
+    return _update_ledger(
+        _ledger_file(family.name),
+        (
+            entry
+            for path in sorted(jobs_dir(family).glob(f'*/{ATTEMPTS_FILE}'))
+            for entry in _read_attempts(path, systems)
+        ),
+    )
+
+
+class CanaryAccounting(BaseModel):
+    """The immutable price and actual response ceiling saved before a probe starts."""
+
+    model_config = ConfigDict(extra='forbid', frozen=True)
+
+    system: str
+    price: Price | None
+    ceiling_usd: float | None
+
+
+def write_canary_accounting(
+    job: Path, system: System, ceiling_usd: float | None
+) -> None:
+    """Create the probe's accounting snapshot without creating its Harbor job."""
+    snapshot = CanaryAccounting(
+        system=system.name, price=system.price, ceiling_usd=ceiling_usd
+    )
+    job.parent.mkdir(parents=True, exist_ok=True)
+    with _canary_accounting_file(job).open('x') as file:
+        file.write(snapshot.model_dump_json() + '\n')
+
+
+def update_canary_ledger() -> list[Entry]:
+    """Reconcile every retained probe attempt at its immutable accounting snapshot."""
+    return _update_ledger(
+        _ledger_file('canaries'),
+        (
+            entry
+            for path in sorted(
+                (data_dir() / 'canaries' / 'jobs').glob(f'*/{ATTEMPTS_FILE}')
+            )
+            for entry in _read_canary_attempts(path)
+        ),
+    )
+
+
+def _update_ledger(path: Path, additions: Iterable[Entry]) -> list[Entry]:
     entries = _unique(
         [Entry.model_validate_json(line) for line in path.read_text().splitlines()]
         if path.exists()
         else []
     )
     seen = {_key(entry) for entry in entries}
-    added = [
-        entry
-        for attempts in sorted(jobs_dir(family).glob(f'*/{ATTEMPTS_FILE}'))
-        for entry in _read_attempts(attempts, systems)
-        if _key(entry) not in seen
-    ]
+    added = [entry for entry in _unique(additions) if _key(entry) not in seen]
     if added:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open('a') as file:
@@ -83,6 +127,33 @@ def _read_attempts(path: Path, systems: Mapping[str, System]) -> list[Entry]:
     ]
     return [
         Entry.of(attempt, path.parent.name, systems.get(attempt.system))
+        for attempt in attempts
+    ]
+
+
+def _canary_accounting_file(job: Path) -> Path:
+    return job.parent / f'{job.name}.accounting.json'
+
+
+def _read_canary_attempts(path: Path) -> list[Entry]:
+    snapshot = _canary_accounting_file(path.parent)
+    if not snapshot.exists():
+        raise InputError(
+            'A canary accounting snapshot is missing. The run was refused.'
+        )
+    accounting = CanaryAccounting.model_validate_json(snapshot.read_text())
+    attempts = [
+        Attempt.model_validate_json(line) for line in path.read_text().splitlines()
+    ]
+    if any(attempt.system != accounting.system for attempt in attempts):
+        raise InputError('A canary accounting system differs. The run was refused.')
+    return [
+        Entry(
+            **attempt.model_dump(),
+            job=path.parent.name,
+            price=accounting.price,
+            ceiling_usd=accounting.ceiling_usd,
+        )
         for attempt in attempts
     ]
 

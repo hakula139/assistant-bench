@@ -15,7 +15,7 @@ from dotenv import find_dotenv, load_dotenv
 from harbor.models.job.config import JobConfig
 from typer.core import TyperGroup
 
-from assistant_bench import collection, jobs, report
+from assistant_bench import canaries, collection, jobs, report
 from assistant_bench.arena import commands, local, votes
 from assistant_bench.arena.commands import app as arena_app
 from assistant_bench.arena.d1 import D1Error, connect
@@ -188,6 +188,17 @@ def run(families: FamilyArguments = None, names: SystemOptions = None) -> None:
             problems.append(problem)
     if problems:
         raise InputError('\n'.join(problems))
+
+    probes = canaries.prepare((job for _, _, job in prepared), systems)
+    for probe in probes:
+        ceiling = probe.ceiling_usd
+        cost = f'${ceiling:.4f}' if ceiling is not None else 'unknown'
+        typer.echo(
+            f'Canary `{probe.original.name}`: one request with a '
+            f'`{probe.actual.max_output_tokens}`-token completion allowance '
+            f'including reasoning. Full-context cost ceiling: {cost}.'
+        )
+    canaries.run(probes)
 
     for family, _, job in prepared:
         try:

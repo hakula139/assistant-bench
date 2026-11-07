@@ -11,6 +11,7 @@ binomtest
 blas
 Cachix
 cafile
+capfd
 capsys
 cedict
 chatcmpl
@@ -36,6 +37,7 @@ evals
 exog
 expit
 fallocate
+fchmod
 fcntl
 fdatasync
 fileno
@@ -56,6 +58,7 @@ isinstance
 isort
 jobq
 journalctl
+jsonable
 katex
 killpg
 kimi

@@ -3,6 +3,7 @@ import shutil
 import subprocess
 import sys
 from collections import Counter
+from contextlib import nullcontext
 from datetime import datetime, timedelta, tzinfo
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock
@@ -583,3 +584,45 @@ class TestRunJob:
             jobs.run_job(job)
 
         assert error.value.returncode == 3
+
+    @pytest.mark.parametrize('captured', [False, True], ids=['terminal', 'private-log'])
+    @pytest.mark.parametrize('exit_code', [0, 3], ids=['success', 'failure'])
+    def test_captures_both_streams_only_when_a_private_log_is_requested(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capfd: pytest.CaptureFixture[str],
+        captured: bool,
+        exit_code: int,
+    ) -> None:
+        harbor = self.stub_harbor(tmp_path, monkeypatch, exit_code)
+        harbor.write_text(
+            harbor.read_text().replace(
+                'exit "$STUB_HARBOR_EXIT_CODE"',
+                "printf 'backend-private-47\\n'\n"
+                "printf 'private-error-53\\n' >&2\n"
+                'exit "$STUB_HARBOR_EXIT_CODE"',
+            )
+        )
+        family = load_family('smoke')
+        job = jobs.check_job(family, [case_task(family, 'echo')])
+        log = job.jobs_dir / f'{job.job_name}.log' if captured else None
+        run = Mock(wraps=subprocess.run)
+        monkeypatch.setattr(subprocess, 'run', run)
+
+        with (
+            pytest.raises(subprocess.CalledProcessError) if exit_code else nullcontext()
+        ):
+            jobs.run_job(job, log=log)
+
+        terminal = capfd.readouterr()
+        if log is None:
+            assert terminal.out == 'backend-private-47\n'
+            assert terminal.err == 'private-error-53\n'
+            assert 'stdout' not in run.call_args.kwargs
+        else:
+            assert terminal.out == terminal.err == ''
+            assert log.read_text() == 'backend-private-47\nprivate-error-53\n'
+            assert log.stat().st_mode & 0o777 == 0o600
+            assert run.call_args.kwargs['stdout'].closed
+        assert not jobs.job_path(job).exists()
