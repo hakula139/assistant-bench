@@ -2,6 +2,8 @@ import os
 import shutil
 import subprocess
 import sys
+from collections.abc import Generator
+from contextlib import contextmanager
 from dataclasses import replace
 from importlib.resources import files
 from pathlib import Path
@@ -19,7 +21,7 @@ from assistant_bench.harnesses import HOST_ENVIRONMENT, agent_kwargs, fingerprin
 from assistant_bench.messages import InputError
 from assistant_bench.runtime import RunContext
 from assistant_bench.spend import Entry, read_ledger
-from assistant_bench.state import Run
+from assistant_bench.state import ArtifactGeneration, Run, State
 from assistant_bench.tasks import render_tasks
 from support import (
     FIXTURES,
@@ -31,6 +33,7 @@ from support import (
     make_system,
     message,
     message_stream,
+    private_database,
     response,
     run_host_job,
     voted_tasks,
@@ -80,11 +83,17 @@ def host_jobs(
         *,
         log: Path | None = None,
         plugin_context: Path | None = None,
+        source_root: Path | None = None,
     ) -> Path:
         assert log == config.jobs_dir / f'{config.job_name}.log'
         assert plugin_context is not None
         configs.append(config)
-        return run_host_job(config, log=log, plugin_context=plugin_context)
+        return run_host_job(
+            config,
+            log=log,
+            plugin_context=plugin_context,
+            source_root=source_root,
+        )
 
     monkeypatch.setattr(jobs, 'run_job', run_job)
     return configs
@@ -378,6 +387,52 @@ class TestPrepare:
 
 
 class TestRun:
+    @pytest.mark.parametrize('echo', ['output', 'model', 'finish-reason', 'request-id'])
+    def test_an_unaudited_probe_retains_only_sanitized_durable_accounting(
+        self,
+        endpoint: StubEndpoint,
+        host_jobs: list[JobConfig],
+        run_context: RunContext,
+        tmp_path: Path,
+        echo: str,
+    ) -> None:
+        secret = endpoint.key_file.read_text().strip()
+        payload = completion('READY')
+        if echo == 'output':
+            payload['choices'][0]['message']['content'] = f'Provider echoed {secret}.'
+        elif echo == 'model':
+            payload['model'] = f'provider-{secret}'
+        elif echo == 'finish-reason':
+            payload['choices'][0]['finish_reason'] = f'provider-{secret}'
+        else:
+            endpoint.response_headers['x-request-id'] = secret
+        endpoint.response = payload
+        probe = prepare_probe(make_system(), tmp_path)
+
+        with pytest.raises((ExceptionGroup, InputError)):
+            canaries.run([probe], run_context)
+
+        (record,) = canaries.read_records(probe.original.name, run_context.state)
+        (entry,) = read_ledger('canaries', run_context.state)
+        assert isinstance(entry, Entry)
+        assert record.usage == entry.responses[0]
+        assert record.usage is not None
+        assert (record.usage.input_tokens, record.usage.output_tokens) == (120, 40)
+        assert record.response_models == ([] if echo == 'model' else ['large-2026'])
+        assert record.output == ''
+        assert record.finish_reason is None
+        assert record.latency_sec is None
+        assert record.error is not None
+        assert not record.success
+        assert secret not in record.model_dump_json()
+        assert secret not in entry.model_dump_json()
+        assert (
+            run_context.state.baseline(probe.original.name, canaries.context_key(probe))
+            is None
+        )
+        assert run_context.state.artifact_generation('canaries').artifacts == ()
+        assert len(endpoint.requests) == len(host_jobs) == 1
+
     def test_refuses_before_paid_execution_when_the_run_cannot_be_recorded(
         self, tmp_path: Path, run_context: RunContext, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -831,3 +886,64 @@ class TestRun:
         assert len(endpoint.requests) == len(host_jobs) == 2
         entries = read_ledger('canaries', run_context.state)
         assert {entry.system for entry in entries} == {'large', 'small'}
+
+    def test_concurrent_first_probes_compare_with_the_canonical_baseline_winner(
+        self,
+        endpoint: StubEndpoint,
+        host_jobs: list[JobConfig],
+        run_context: RunContext,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        path = tmp_path / 'shared.sqlite'
+
+        @contextmanager
+        def connect(
+            target: str, *, credential: str | None = None
+        ) -> Generator[SQLiteDatabase]:
+            assert target == 'private'
+            assert credential is not None
+            with private_database(path) as database:
+                yield database
+
+        monkeypatch.setattr(execution, 'connect', connect)
+        with (
+            private_database(path) as first_store,
+            private_database(path) as second_store,
+        ):
+            first = replace(run_context, state=State(first_store))
+            second_root = tmp_path / 'second-context'
+            second_root.mkdir()
+            second = replace(run_context, root=second_root, state=State(second_store))
+            system = make_system()
+            first_probe = prepare_probe(system, tmp_path / 'first')
+            second_probe = prepare_probe(system, tmp_path / 'second')
+            key = canaries.context_key(first_probe)
+            assert first.state.baseline(system.name, key) is None
+            assert second.state.baseline(system.name, key) is None
+            generation = State.artifact_generation
+            raced = False
+
+            def publish_winner(state: State, scope: str) -> ArtifactGeneration:
+                nonlocal raced
+                if state is second.state and scope == 'canaries' and not raced:
+                    raced = True
+                    endpoint.response = completion('READY') | {'model': 'first-2026'}
+                    canaries.run([first_probe], first)
+                    endpoint.response = completion('READY') | {'model': 'second-2026'}
+                return generation(state, scope)
+
+            monkeypatch.setattr(State, 'artifact_generation', publish_winner)
+
+            with pytest.raises(InputError, match='differs from its baseline'):
+                canaries.run([second_probe], second)
+
+            winner, contender = canaries.read_records(system.name, second.state)
+            assert winner.response_models == ['first-2026']
+            assert contender.response_models == ['second-2026']
+            assert winner.success and contender.success
+            assert second.state.baseline(system.name, key) == winner.model_dump_json()
+            assert len(endpoint.requests) == len(host_jobs) == 2
+            assert [
+                entry.responses for entry in read_ledger('canaries', second.state)
+            ] == [[winner.usage], [contender.usage]]
