@@ -815,8 +815,8 @@ class TestArtifactRepository:
                 assert (
                     f'job/{trial.result.trial_name}/{relative}' in manifest.directories
                 )
-            for directory in manifest.directories:
-                assert (restored.job / Path(directory).relative_to('job')).is_dir()
+            for relative in manifest.directories:
+                assert (restored.job / Path(relative).relative_to('job')).is_dir()
             assert {
                 path.relative_to(restored.job).as_posix()
                 for path in restored.job.rglob('*')
