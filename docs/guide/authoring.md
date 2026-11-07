@@ -29,7 +29,7 @@ A `family.toml` lists its fields in this order:
 | `systems`       | no                         | The `systems.toml` tables to run. Defaults to empty                                                                                                                     |
 | `pairs`         | `checkers`                 | Bare / prompted system pairs. Every listed system appears in exactly one pair                                                                                           |
 | `reference`     | `votes`                    | One of `systems`, anchored at 1,000 when the round ranks it                                                                                                             |
-| `render`        | `votes` task families      | `text` (default) for cases. Tasks require `diff`, showing each solution against `environment/app/`                                                                      |
+| `render`        | `votes` task families      | `text` (default) or `html` for cases. Tasks require `diff`, showing each solution against `environment/app/`                                                            |
 | `language`      | no                         | `zh` or `en` for a `votes` case family's language gate                                                                                                                  |
 | `samples`       | yes                        | Harbor attempts per task and system. `checkers` requires exactly 1. Other scorers allow at least 1, and raising it runs only the extra attempts                         |
 | `harness`       | task families with systems | The default agent for systems without an explicit harness, normally `terminus-2`. Changing it replaces those systems' trials. Case families use `generate` and set none |
@@ -37,6 +37,8 @@ A `family.toml` lists its fields in this order:
 | `categories`    | no                         | The case category IDs, in board order, that its cases and task metadata may use. Reports publish the IDs, and the site labels them from its glossary                    |
 | `defects`       | no                         | For `votes`, unique issue IDs in presentation order. Defaults to empty, hiding Issues buttons. [Voting](voting.md#casting-a-vote) gives their shortcuts                 |
 | `[gates]`       | no                         | A `votes` case family's `min_chars`, `max_chars`, and `script = "hans"`, defined in [Writing](../design/families/writing.md#gates)                                      |
+
+An `html` reply must be a complete self-contained document, bare or inside one complete HTML fence with no surrounding prose. Collection preserves the extracted document's bytes, requires explicit doctype, html, head, and body boundaries, and rejects resource hints, refresh or DNS-enable metadata, base elements, SVG animation elements, and navigation outside document fragments. Its isolated preview allows inline CSS, data images or fonts, native controls, static SVG, and CSS animation, with JavaScript, external resources, form submission, and persistence unavailable. HTML outputs have no text-length measurement.
 
 A new category ID updates the `Category` literal, the `categories` list in `lib/categories.ts`, and the glossary, as [TypeScript](../conventions/typescript.md#reports) describes along with new defect IDs and languages.
 

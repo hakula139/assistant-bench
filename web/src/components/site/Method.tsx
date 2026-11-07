@@ -6,6 +6,7 @@ import {
   FileText,
   FlaskConical,
   ListChecks,
+  PanelsTopLeft,
   PenLine,
   Percent,
   Play,
@@ -24,6 +25,7 @@ import { methodSteps, scorers, type MethodStep } from '@/lib/method';
 const stepIcons: Record<MethodStep['step'], LucideIcon> = {
   text: FileText,
   diff: FileDiff,
+  html: PanelsTopLeft,
   trial: Play,
   gates: ShieldCheck,
   pairs: Columns2,
@@ -41,6 +43,7 @@ const scorerIcons: Record<Scorer, LucideIcon> = {
 const aspectIcons: Record<Aspect, LucideIcon> = {
   writing: PenLine,
   coding: SquareTerminal,
+  frontend: PanelsTopLeft,
   instructions: ListChecks,
 };
 

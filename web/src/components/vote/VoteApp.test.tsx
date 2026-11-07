@@ -13,6 +13,7 @@ import {
   voteRequest,
   type FamilyView,
   type PairState,
+  type PairView,
   type VoteRequest,
 } from '@/lib/arena';
 import type { Defect } from '@/lib/defects';
@@ -50,7 +51,7 @@ interface StubOptions {
   prior?: number;
   admitted?: boolean;
   brief?: { instruction: string; checklist: string[] };
-  render?: 'text' | 'diff';
+  render?: PairView['render'];
   defects?: Defect[];
   /** Answers a skip with the same pair, as for a system pair with one case. */
   alone?: boolean;
@@ -76,19 +77,19 @@ function stubApi({
   let open: string | null = null;
 
   const votes = () => prior + casts.length - undone.length;
-  const pairOf = (id: string) => {
+  const pairOf = (id: string): PairView => {
     const index = Number(id.slice(-12));
-    return {
+    const base = {
       id,
       instruction: `Instruction ${index}`,
       checklist: [],
       category: 'message' as const,
       ...brief,
-      render,
-      a: `Output A${index}`,
-      b: `Output B${index}`,
       defects,
     };
+    return render === 'html'
+      ? { ...base, render }
+      : { ...base, render, a: `Output A${index}`, b: `Output B${index}` };
   };
   const view = (): PairState => {
     if (votes() >= cases) {
@@ -750,6 +751,37 @@ describe('VoteApp', () => {
     expect(screen.getByRole('status').textContent).toBe('Vote withdrawn.');
     expect(api.undone.map((vote) => vote.pair)).toEqual([pairId(1)]);
     expect(screen.getByRole('button', { name: /Undo/ })).toHaveProperty('disabled', true);
+  });
+
+  test('uses pair-specific preview URLs through voting and undo without a Markdown control', async () => {
+    const api = stubApi({ render: 'html' });
+    const user = userEvent.setup();
+    render(<VoteApp />);
+    await user.click(await screen.findByRole('button', { name: FAMILY.display_name }));
+    const frame = await screen.findByTitle('Output A preview');
+    expect(frame.getAttribute('src')).toBe(`/api/previews/${pairId(1)}/a`);
+    expect(screen.getByTitle('Output B preview').getAttribute('src')).toBe(
+      `/api/previews/${pairId(1)}/b`,
+    );
+    expect(screen.queryByRole('button', { name: 'Render Markdown' })).toBeNull();
+
+    await user.keyboard('a{Enter}');
+
+    await waitFor(() => {
+      expect(screen.getByTitle('Output A preview').getAttribute('src')).toBe(
+        `/api/previews/${pairId(2)}/a`,
+      );
+    });
+    expect(api.casts.map(({ pair }) => pair)).toEqual([pairId(1)]);
+
+    await user.click(screen.getByRole('button', { name: /Undo/ }));
+
+    await waitFor(() => {
+      expect(screen.getByTitle('Output A preview').getAttribute('src')).toBe(
+        `/api/previews/${pairId(1)}/a`,
+      );
+    });
+    expect(api.undone.map(({ pair }) => pair)).toEqual([pairId(1)]);
   });
 
   test('explains an undo the server refuses once the window has passed', async () => {

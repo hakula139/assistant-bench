@@ -188,7 +188,11 @@ describe('GET /api/pair', () => {
         a_output: (swapped ? expected.b : expected.a).output_key,
         b_output: (swapped ? expected.a : expected.b).output_key,
       });
-      expect(state.pair?.a).not.toBe(state.pair?.b);
+      expect(state.pair?.render).toBe('text');
+      if (state.pair?.render !== 'text') {
+        throw new Error('Expected a text pair.');
+      }
+      expect(state.pair.a).not.toBe(state.pair.b);
     },
   );
 

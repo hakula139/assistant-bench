@@ -1267,12 +1267,13 @@ class TestVotesResults:
     def test_scales_length_with_inherited_weights_in_the_ranked_component(self) -> None:
         analysis = make_capped_analysis()
         connected = tuple(row for row in analysis.ordinary if row.systems == ('a', 'b'))
-        differences = np.array(
-            [
+        raw_differences: list[float] = []
+        for row in connected:
+            assert row.length_a is not None and row.length_b is not None
+            raw_differences.append(
                 (row.length_a - row.length_b) / (row.length_a + row.length_b)
-                for row in connected
-            ]
-        )
+            )
+        differences = np.array(raw_differences)
         weights = np.array([row.comparison.weight for row in connected])
         mean = float(np.dot(differences, weights) / weights.sum())
         variance = float(np.dot((differences - mean) ** 2, weights) / weights.sum())
@@ -1285,6 +1286,66 @@ class TestVotesResults:
         results = report.votes_results(analysis)
 
         assert results.length == pytest.approx(expected * ranking.ELO_PER_LOGIT)
+
+    def test_uses_only_measured_lengths_for_the_diagnostic_and_all_votes_to_rank(
+        self,
+    ) -> None:
+        known = tuple(
+            make_evidence(
+                index,
+                choice='a' if index % 3 else 'b',
+                weight=0.2 if index % 2 else 1.0,
+                length_a=6 + index % 7,
+                length_b=10,
+            )
+            for index in range(30)
+        )
+        unknown = tuple(
+            replace(
+                make_evidence(30 + index, choice='b', weight=0.7),
+                length_a=None if index % 3 != 1 else 12,
+                length_b=None if index % 3 != 0 else 8,
+            )
+            for index in range(12)
+        )
+        known_results = report.votes_results(make_analysis(known))
+        analysis = make_analysis(known + unknown)
+        expected = ranking.rate_root(
+            [row.comparison for row in analysis.ordinary],
+            analysis.systems,
+            analysis.reference,
+        ).ratings
+
+        results = report.votes_results(analysis)
+
+        assert known_results.length is not None
+        assert results.length == pytest.approx(known_results.length)
+        assert results.votes == 42
+        assert results.effective_votes == pytest.approx(
+            sum(row.comparison.weight for row in known + unknown)
+        )
+        assert {row.system: row.score for row in results.standings} == pytest.approx(
+            dict(zip(expected.systems, expected.score, strict=True))
+        )
+        assert next(row.score for row in results.standings if row.system == 'b') != (
+            pytest.approx(
+                next(row.score for row in known_results.standings if row.system == 'b')
+            )
+        )
+
+    def test_ranks_html_votes_without_inventing_a_length_diagnostic(self) -> None:
+        ordinary = tuple(
+            replace(make_evidence(index), length_a=None, length_b=None)
+            for index in range(4)
+        )
+
+        results = report.votes_results(make_analysis(ordinary))
+
+        assert results.length is None
+        assert results.votes == 4
+        assert {
+            (row.system, row.opponent): row.wins for row in results.head_to_head
+        } == {('a', 'b'): 4, ('b', 'a'): 0}
 
     def test_splits_alternate_votes_under_their_family_weights(self) -> None:
         rows = tuple(

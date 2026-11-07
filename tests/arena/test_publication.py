@@ -2,13 +2,13 @@ import json
 import sqlite3
 from collections.abc import Callable, Sequence
 from contextlib import closing
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from assistant_bench.arena import publication
+from assistant_bench.arena import publication, votes
 from assistant_bench.arena.publication import Publication
 from assistant_bench.database import Param, Result, SQLiteDatabase
 from assistant_bench.families import (
@@ -27,6 +27,8 @@ from support import (
     make_case,
     make_trial,
     make_votes_family,
+    record_vote,
+    with_settings,
 )
 
 
@@ -95,6 +97,74 @@ class RecordingDatabase:
 
 
 class TestPrepare:
+    def test_preserves_html_content_and_unknown_lengths_through_the_vote_snapshot(
+        self, arena_store: SQLiteDatabase
+    ) -> None:
+        family = with_settings(make_votes_family(), render='html')
+        case = make_case('page')
+        source = (FIXTURES / 'html' / 'community-event.html').read_text()
+        outputs = [
+            make_trial('page', system, text=source.replace('Welcome', system))
+            for system in ARENA_SYSTEMS[:2]
+        ]
+        outputs[1] = outputs[1].model_copy(
+            update={'text': source.replace('Saturday', 'Sunday')}
+        )
+        outputs.append(
+            make_trial('page', ARENA_SYSTEMS[2], [Gate.HTML], text='raw failure')
+        )
+
+        published = prepare(family, [case], outputs)
+        publication.publish(arena_store, published, NOW, target='production')
+        passing = published.model_copy(
+            update={
+                'outputs': tuple(
+                    row for row in published.outputs if row.verdict == 'pass'
+                )
+            }
+        )
+        record_vote(arena_store, passing, NOW, actor='reader', age=timedelta(hours=1))
+        cut = votes.read_cut(arena_store, family.name, NOW)
+
+        assert published.render == 'html'
+        expected = {output.system: output.text for output in outputs}
+        for output in published.outputs:
+            assert output.length is None
+            assert output.content == (
+                expected[output.system] if output.verdict == 'pass' else None
+            )
+        assert cut is not None
+        assert cut.inventory.outputs == tuple(
+            publication.OutputFacts.model_validate(
+                output.model_dump(exclude={'content'})
+            )
+            for output in published.outputs
+        )
+        analysis = votes.voting_input(
+            votes.Snapshot(
+                family=family.name, taken_at=NOW, production=cut, local=None
+            ),
+            family,
+            outputs,
+        )
+        assert [(row.length_a, row.length_b) for row in analysis.ordinary] == [
+            (None, None)
+        ]
+
+    @pytest.mark.parametrize(
+        'fenced', [False, True], ids=['ineligible', 'uncollected-fence']
+    )
+    def test_refuses_passing_html_that_collection_has_not_made_eligible(
+        self, fenced: bool
+    ) -> None:
+        family = with_settings(make_votes_family(), render='html')
+        source = (FIXTURES / 'html' / 'community-event.html').read_text()
+        reply = f'```html\n{source}```\n' if fenced else source.replace('</body>', '')
+        outputs = [make_trial('page', system, text=reply) for system in ARENA_SYSTEMS]
+
+        with pytest.raises(InputError, match='not a collected eligible document'):
+            prepare(family, [make_case('page')], outputs)
+
     @pytest.mark.parametrize('public_voting', [True, False])
     def test_partitions_local_cases_and_records_their_split(
         self, public_voting: bool
@@ -386,6 +456,44 @@ class TestWrite:
 
 
 class TestRead:
+    @pytest.mark.parametrize('invalid', ['length', 'ineligible', 'fenced'])
+    def test_refuses_self_consistent_html_files_that_break_the_document_contract(
+        self, tmp_path: Path, invalid: str
+    ) -> None:
+        source = (FIXTURES / 'html' / 'community-event.html').read_text()
+        published = prepare(
+            with_settings(make_votes_family(), render='html'),
+            [make_case('page')],
+            [
+                make_trial(
+                    'page', system, text=source.replace('<title>', f'<title>{index} ')
+                )
+                for index, system in enumerate(ARENA_SYSTEMS)
+            ],
+        )
+        first = published.outputs[0]
+        assert first.content is not None
+        if invalid == 'length':
+            changed = first.model_copy(update={'length': 10})
+            message = 'HTML outputs have no text length'
+        else:
+            content = (
+                f'```html\n{first.content}```\n'
+                if invalid == 'fenced'
+                else first.content.replace('</body>', '')
+            )
+            changed = first.model_copy(update={'content': content})
+            message = 'a passing HTML output must be an eligible document'
+        draft = published.model_copy(
+            update={'outputs': (changed, *published.outputs[1:])}
+        )
+        invalid_file = draft.model_copy(update={'id': draft.identity()})
+        path = tmp_path / 'publication.json'
+        path.write_text(invalid_file.model_dump_json())
+
+        with pytest.raises(ValueError, match=message):
+            publication.read(path)
+
     def test_refuses_an_edited_file_naming_both_ids(self, tmp_path: Path) -> None:
         published = text_publication()
         payload = json.loads(published.model_dump_json())
@@ -703,15 +811,20 @@ class TestPublicationPairCases:
                 )
                 == expected
             )
-            assert (
-                '\n'.join(
-                    line
-                    for line in dump(connection).splitlines()
-                    if not line.startswith('INSERT INTO publication_pair_cases')
+            for table, order in (
+                ('publications', 'id'),
+                ('cases', 'publication_id, case_key'),
+                ('outputs', 'publication_id, output_key'),
+                ('active', 'family'),
+            ):
+                current = arena_store.connection.execute(
+                    f'SELECT * FROM {table} ORDER BY {order}'
                 )
-                + '\n'
-                == existing
-            )
+                columns = ', '.join(column[0] for column in current.description)
+                preserved = connection.execute(
+                    f'SELECT {columns} FROM {table} ORDER BY {order}'
+                )
+                assert preserved.fetchall() == current.fetchall(), table
 
     def test_completes_staging_after_backfilling_a_partial_inactive_publication(
         self, arena_store: SQLiteDatabase

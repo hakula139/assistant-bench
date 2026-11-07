@@ -1,7 +1,7 @@
 import { env, exports } from 'cloudflare:workers';
 import { vi } from 'vitest';
 
-import type { PairState } from '@/lib/arena';
+import type { PairState, PairView } from '@/lib/arena';
 
 export const ORIGIN = 'http://localhost:8790';
 export const WRITING = 'writing-fixture';
@@ -112,20 +112,21 @@ export async function vote(from: Browser, pair: string, choice = 'a') {
 }
 
 /**
- * Publishes and activates a text family whose outputs `cases` lists per case and system, with
+ * Publishes and activates a family whose outputs `cases` lists per case and system, with
  * null for a failing output. Equal strings are identical content.
  */
 export async function publish(
   family: string,
   cases: Record<string, Record<string, (string | null)[]>>,
   id = `${family}-publication`,
+  render: PairView['render'] = 'text',
 ): Promise<void> {
   const statements = [
     env.DB.prepare(
       `INSERT INTO publications (id, family, display_name, aspect, render, defects, reference,
          systems, case_count, output_count, created_at)
-       VALUES (?, ?, 'Synthetic', 'writing', 'text', '["facts", "tone"]', 'acme-large', '{}', 0, 0, 0)`,
-    ).bind(id, family),
+       VALUES (?, ?, 'Synthetic', 'writing', ?, '["facts", "tone"]', 'acme-large', '{}', 0, 0, 0)`,
+    ).bind(id, family, render),
   ];
   for (const [caseKey, systems] of Object.entries(cases)) {
     statements.push(
@@ -140,7 +141,7 @@ export async function publish(
           env.DB.prepare(
             `INSERT INTO outputs (publication_id, output_key, case_key, system, fingerprint,
                verdict, errored, length, content_digest, content)
-             VALUES (?, ?, ?, ?, ?, ?, 0, 1, ?, ?)`,
+             VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
           ).bind(
             id,
             `${caseKey}/${system}/${index}`,
@@ -148,6 +149,7 @@ export async function publish(
             system,
             `fp-${system}`,
             content === null ? 'fail' : 'pass',
+            render === 'html' ? null : 1,
             content ?? `failed ${caseKey}/${system}/${index}`,
             content,
           ),

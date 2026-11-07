@@ -1,0 +1,20 @@
+scorer = "votes"
+aspect = "frontend"
+display_name = "Static"
+public = false
+public_voting = true
+systems = [
+  "opus-5.5-high",
+  "gpt-6-astra-high",
+  "gpt-6.1-sol-high",
+  "gemini-4-argon-high",
+  "gemini-3.8-flash-high",
+  "deepseek-v4.1-flash-1017-high",
+  "kimi-k3-high",
+]
+reference = "gemini-3.8-flash-high"
+render = "html"
+samples = 1
+budget_usd = 50
+categories = ["feature"]
+defects = ["scope", "facts", "clarity", "conventions"]

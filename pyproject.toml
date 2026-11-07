@@ -12,6 +12,7 @@ dependencies = [
   "harbor==0.25.0",
   "httpx>=0.28.1",
   "httpx2>=2.16.0",
+  "justhtml>=3.16.0",
   "markdown-it-py>=4.2.0",
   "numpy>=2.5.4",
   "openai>=3.46.0",

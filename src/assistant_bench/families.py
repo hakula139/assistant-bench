@@ -117,6 +117,8 @@ class Gate(StrEnum):
     """The output's prose and code comments are mostly in another language."""
     SCRIPT = 'script'
     """The output holds Traditional-only characters that the instruction lacks."""
+    HTML = 'html'
+    """The output violates the complete document or preview isolation contract."""
     TESTS = 'tests'
     """The task's verifier did not pass."""
 
@@ -157,7 +159,7 @@ class VotesSettings(_Settings):
     The most-voted system anchors when the reference does not rank.
     """
 
-    render: Literal['text', 'diff'] = 'text'
+    render: Literal['text', 'diff', 'html'] = 'text'
     """Output presentation. Only task families yield diffs."""
 
     language: Language | None = None
@@ -395,7 +397,7 @@ def _check_source_settings(family: Family) -> None:
         if isinstance(settings, VotesSettings) and settings.render == 'diff':
             raise InputError(
                 f'{prefix}: a `cases.toml` family yields replies, so set `render` '
-                'to `"text"`.'
+                'to `"text"` or `"html"`.'
             )
         return
 

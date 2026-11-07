@@ -59,6 +59,7 @@ isort
 jobq
 journalctl
 jsonable
+justhtml
 katex
 killpg
 kimi
@@ -79,6 +80,7 @@ NFKC
 nixfmt
 nixos
 Nixpkgs
+noscript
 npmjs
 numpy
 numtide
@@ -150,6 +152,7 @@ writingf
 writingzh
 WRONLY
 xdist
+xlink
 zhon
 zhuyin
 zstd
