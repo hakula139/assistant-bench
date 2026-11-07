@@ -106,6 +106,18 @@ class TrialAccounting:
         """Confirm terminal usage before returning terminal bytes to a caller."""
         if request_id not in self._requests or self._apis[request_id] != receipt.api:
             self._fail('The model receipt does not match an admitted request.')
+        receipt = receipt.model_copy(
+            update={
+                name: None
+                for name, value in (
+                    ('response_id', receipt.response_id),
+                    ('response_model', receipt.response_model),
+                    ('provider_request_id', receipt.provider_request_id),
+                )
+                if value is not None
+                and any(secret in value for secret in self._secrets)
+            }
+        )
         previous = self._requests[request_id]
         if previous is not None and previous != receipt:
             self._fail('The model request already has a different receipt.')

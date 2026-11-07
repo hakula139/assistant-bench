@@ -207,6 +207,7 @@ class ExecutionPlugin(BaseJobPlugin):
         ):
             raise InputError('A trial no longer owns its original paid claim.')
         recorder = TrialAccounting(self._state, claim)
+        recorder.remember_secret(self._credential)
         self._recorders[event.trial_id] = (recorder, bind_trial(recorder))
 
     async def _ended(self, event: TrialHookEvent) -> None:
