@@ -5,6 +5,7 @@ import sys
 from collections import Counter
 from datetime import datetime, timedelta, tzinfo
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 from harbor.job_diff import DiffAction, compare_job_trials, load_source_trials
@@ -504,6 +505,34 @@ class TestRunJob:
         )
         monkeypatch.setattr(sys, 'executable', str(directory / 'python'))
         return harbor
+
+    def test_checks_installed_context_before_downloads_or_harbor(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        config = JobConfig(
+            agents=[
+                trial_config.AgentConfig(
+                    import_path='assistant_bench.harnesses.installed:Codex',
+                    kwargs={'version': '1.2.3'},
+                )
+            ]
+        )
+        engine = Mock()
+        download = Mock()
+        run = Mock()
+        monkeypatch.setattr(
+            jobs, 'check_local_context', Mock(side_effect=ValueError('context refused'))
+        )
+        monkeypatch.setattr(jobs.subprocess, 'check_output', engine)
+        monkeypatch.setattr(jobs, 'artifact', download)
+        monkeypatch.setattr(jobs.subprocess, 'run', run)
+
+        with pytest.raises(ValueError, match='context refused'):
+            jobs.run_job(config)
+
+        engine.assert_not_called()
+        download.assert_not_called()
+        run.assert_not_called()
 
     def test_runs_harbor_on_the_config(
         self, data_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

@@ -198,6 +198,10 @@ class TestJobConfiguration:
             'assistant_bench.harnesses.terminus:Terminus',
         ]
         assert config.agents[0].model_name == 'openai/acme/large'
+        assert (
+            config.environment.import_path
+            == 'assistant_bench.harnesses.docker:InstalledDocker'
+        )
         assert config.agents[0].extra_allowed_hosts == ['host.docker.internal']
         assert config.agents[1].extra_allowed_hosts == []
         assert system.harness == 'codex'

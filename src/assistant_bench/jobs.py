@@ -31,6 +31,7 @@ from assistant_bench.harnesses import (
     fingerprint,
 )
 from assistant_bench.harnesses.cache import InstalledHarness, artifact
+from assistant_bench.harnesses.docker import HOST_OVERLAY, check_local_context
 from assistant_bench.harnesses.endpoint import ENDPOINT_VARS
 from assistant_bench.harnesses.native import NativeCompletionError
 from assistant_bench.messages import InputError, code
@@ -229,6 +230,11 @@ def _environment(systems: list[System]) -> trial_config.EnvironmentConfig:
         return trial_config.EnvironmentConfig(
             import_path=HOST_ENVIRONMENT, kwargs={'auto_mounting': True}
         )
+    if any(system.version for system in systems):
+        return trial_config.EnvironmentConfig(
+            import_path='assistant_bench.harnesses.docker:InstalledDocker',
+            extra_docker_compose=[HOST_OVERLAY],
+        )
     return trial_config.EnvironmentConfig(type=EnvironmentType.DOCKER)
 
 
@@ -385,6 +391,7 @@ def run_job(config: JobConfig) -> Path:
         elif agent.import_path == 'assistant_bench.harnesses.installed:Codex':
             installed.add(('codex', agent.kwargs['version']))
     if installed:
+        check_local_context()
         architecture = subprocess.check_output(
             ['docker', 'info', '--format', '{{.Architecture}}'], text=True
         ).strip()

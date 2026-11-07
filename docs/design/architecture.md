@@ -24,6 +24,7 @@ src/assistant_bench/
 ├── harnesses/
 │   ├── __init__.py                         # System harnesses, their agent kwargs, and fingerprints
 │   ├── cache.py                            # Verified, pinned vendor CLI downloads
+│   ├── docker.py                           # Installed-agent host access within Harbor's network policy
 │   ├── endpoint.py                         # Endpoint variables and native SDK transports
 │   ├── generate.py                         # The single-call agent
 │   ├── host.py                             # The Harbor environment for single-call jobs, which starts no container

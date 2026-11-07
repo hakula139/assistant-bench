@@ -34,14 +34,16 @@ A fingerprint hashes a system's route, so it cannot see an endpoint that serves 
 
 `System.harness` names an entry in `harnesses.HARNESSES`, a frozen `Harness` that pairs a Harbor agent's import path with how the bench configures it. Its `options` builder consumes the resolved system, and the job sends the system's route as the model name.
 
-| Harness       | Agent                                            | Environment                                      |
-| ------------- | ------------------------------------------------ | ------------------------------------------------ |
-| `generate`    | `assistant_bench.harnesses.generate:Generate`    | `assistant_bench.harnesses.host:HostEnvironment` |
-| `terminus-2`  | `assistant_bench.harnesses.terminus:Terminus`    | Harbor's Docker environment                      |
-| `claude-code` | `assistant_bench.harnesses.installed:ClaudeCode` | Harbor's Docker environment                      |
-| `codex`       | `assistant_bench.harnesses.installed:Codex`      | Harbor's Docker environment                      |
+| Harness       | Agent                                            | Environment                                        |
+| ------------- | ------------------------------------------------ | -------------------------------------------------- |
+| `generate`    | `assistant_bench.harnesses.generate:Generate`    | `assistant_bench.harnesses.host:HostEnvironment`   |
+| `terminus-2`  | `assistant_bench.harnesses.terminus:Terminus`    | Harbor's Docker environment                        |
+| `claude-code` | `assistant_bench.harnesses.installed:ClaudeCode` | `assistant_bench.harnesses.docker:InstalledDocker` |
+| `codex`       | `assistant_bench.harnesses.installed:Codex`      | `assistant_bench.harnesses.docker:InstalledDocker` |
 
 Harbor gives every trial of a job the same environment. A job whose harnesses are all `single_call` runs in `HostEnvironment`, which starts no container and refuses every command and file transfer, and any other job runs in Harbor's Docker environment. `bench check`'s oracle and nop jobs run in Docker, since both act in the task's container.
+
+A job containing an installed agent uses `InstalledDocker` for every trial, including any Terminus trials in that job. It adds Docker's `host-gateway` mapping to the service that owns the network namespace: Harbor's sidecar under controlled egress, or the main service under public networking. Containers sharing the sidecar namespace inherit its hosts file. Harbor retains the task's network policy and clears these overlays for a separate verifier.
 
 Systems without an explicit harness run as `generate` in case families and inherit a task family's [`harness`](../guide/authoring.md#families). An installed agent's per-system `harness` and pinned `version` override that default. Claude Code requires native Messages, and Codex requires Responses. Both require task families. Only `generate` accepts a system prompt, and `bench check` and `bench run` refuse unsupported combinations before a job starts. `bench check` builds Harbor's `oracle` and `nop` agents directly, so only the system harnesses live in the registry.
 
