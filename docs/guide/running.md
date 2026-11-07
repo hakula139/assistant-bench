@@ -31,6 +31,8 @@ uv run bench check coding-repo --task <task>
 
 `bench check` validates each named family, or every family when none is named, and `--task` limits one task family to the named tasks. It validates `family.toml` and its systems. For a `cases.toml` family, it validates the cases and renders them into Harbor tasks, which needs neither Docker nor an endpoint. For a `tasks/` family, it also runs each task's reference solution and a do-nothing agent, as [Authoring](authoring.md#tasks) describes, which needs Docker but no endpoint.
 
+Checks use committed sources by default and need no cloud credentials. Add `--private` to include cases from the pinned private repository, which requires GitHub authentication but no D1 access.
+
 ## Running a Family
 
 ```bash
@@ -49,13 +51,15 @@ On a task family, the harness runs until completion or the task's operational ti
 
 Installed agents require a named local Docker context using a Unix socket or Docker Desktop. Select it with `DOCKER_CONTEXT`. A standalone `DOCKER_HOST` and contexts using SSH or TCP endpoints are unsupported, since the model proxy runs on the client host. This is checked before CLI downloads or model calls.
 
-When Harbor exits, `bench run` collects the family's trials into `outputs/<family>.jsonl` and prints the summary that [Collecting Outputs](#collecting-outputs) describes, also when Harbor fails, so finished trials land before the command exits.
+Runs require a clean checkout, an authenticated `BENCH_DATA_REPOSITORY` and the private D1 [credential source](#voting). The command pins the checkout and private case revisions before execution and refuses missing cloud authentication. Tasks and containers run locally in a disposable command workspace.
+
+When Harbor exits, `bench run` stores completed trial artifacts in the private repository, seals the family's collected output generation in private D1 and prints the summary that [Collecting Outputs](#collecting-outputs) describes, also when Harbor fails.
 
 Because a rerun generates only the trials that no earlier job of the family finished, adding a system to `family.toml` and rerunning sends requests for that system alone.
 
 An edited task reruns, regrades, or reuses its trials by its version bump, as [Authoring](authoring.md#tasks) lists, and an edited case [reruns](../design/architecture.md#reruns) on every system. Publication proves the selected source and output identities. Earlier releases and saved evidence retain their frozen content.
 
-Moving `jobs/<family>/` out of the data directory makes the next run regenerate that family's trials. Publishing the resulting outputs requires a new reviewed release.
+Deleting a local workspace does not reset completed trials. Reruns restore their immutable artifacts from the private repository.
 
 Removing a system from the family's `systems` stops new trials and current collection. Closed reports keep their frozen identities, and a removed `reference` needs a replacement for later rounds.
 
@@ -72,7 +76,7 @@ uv run bench collect smoke-text
 
 `bench run` collects its own trials, and closing a `tests` family re-collects its trials. `bench collect` re-collects on demand for every family with at least one job, or for the named families, and prints the summary. Voted reports read the measurements from these records.
 
-It reads the family's trials into `outputs/<family>.jsonl`, keeping at most `samples` records per case, system, and fingerprint. Which trial fills each slot follows [Architecture](../design/architecture.md#reruns).
+It restores the family's trial artifacts and seals a new output generation in private D1, keeping at most `samples` records per case, system, and fingerprint. Each generation pins its cases, collection revision and public system labels. Which trial fills each slot follows [Architecture](../design/architecture.md#reruns).
 
 The summary counts the records, the errors by type, the gate failures by gate for a `votes` family, and the mean reward when the family has one. For a task family it also names the tasks that no system solved, which are suspects for a wrong specification or a task too hard to rank by, and the Harbor versions when the outputs span several.
 
@@ -106,7 +110,7 @@ uv run bench spend
 uv run bench spend coding-repo --system <name>
 ```
 
-Every agent attempt, including one that Harbor retries or that a later deletion removes, appends its responses' token counts to its job's `attempts.jsonl`. Collection adds each new attempt to the family's ledger, `spend/<family>.jsonl`, which outlives the jobs. An attempt whose process dies without unwinding leaves no record, so the ledger is then a lower bound.
+Private D1 records request admissions before dispatch and receipts after responses, including attempts Harbor retries. Collection reconciles receipts with the family's ledger, which outlives local jobs. An interrupted request can leave its final usage unknown.
 
 Each ledger entry keeps the price its system had when collection added it, so a later price change or a system leaving the catalog leaves recorded spend as it was. A response has no known cost when its usage is invalid, when a Messages stream broke before its final usage, or when its price cannot cost it, as when its cache write has no declared price. Each system's spend line imputes those responses from the system's own mean tokens per measured response at the entry's price, with its cache reads and writes counted as plain input when that price cannot cost them. Only a system without measured usage of its own borrows, from the costliest mean of the family's other systems, with their cache reads and writes priced as plain input since another system's caching says nothing about this one's. When no system has measured usage, a response counts at its ceiling, a full context window at the dearest declared input rate plus a full completion allowance. The line names that share for information, and the budget leaves it out until a later run measures usage to impute from. The tokens that projections draw on, and that an unpriced system reports alone, leave out those responses.
 
@@ -114,15 +118,15 @@ Before Harbor starts, `bench run` prints each system's pending trials, the trial
 
 A terminal agent's trajectory `final_metrics` counts only responses with valid usage.
 
-Before adding family trials, a run also sends the [route canaries](../design/systems.md#model-swaps) for systems with pending work. Its printed full-context cost ceiling includes the resolved system prompt and API framing within the context allowance, plus the probe's completion allowance including reasoning. An unknown price or cache-write rate leaves that ceiling unknown. Actual probe spend is recorded separately in `spend/canaries.jsonl` and does not consume family budgets.
+Before adding family trials, a run also sends the [route canaries](../design/systems.md#model-swaps) for systems with pending work. Its printed full-context cost ceiling includes the resolved system prompt and API framing within the context allowance, plus the probe's completion allowance including reasoning. An unknown price or cache-write rate leaves that ceiling unknown. Private D1 records probe spend separately from family budgets.
 
 ### Model Swaps
 
 A fingerprint hashes a system's route, so an endpoint that starts serving another model under an unchanged route keeps the fingerprint. The summary names each system whose pool shows a swap by the signals [Systems](../design/systems.md#model-swaps) defines, with the jobs behind each signal. `bench arena prepare` and `bench close` on a `tests` family refuse such a family, since publishing would start votes on the mixed pool and closing would freeze it.
 
-When the route serves another model, delete the minority job's trials of that system under `jobs/<family>/` and rerun them, or give the system a new name once its route is fixed, as [Authoring](authoring.md#systems) describes.
+When the route serves another model, give the system a new name once its route is fixed, as [Authoring](authoring.md#systems) describes.
 
-A canary refusal happens before new family trials start. If the route changed models, remove that system's stale trials and `canaries/<system-hash>.jsonl`, then rerun. The filename uses the SHA-256 digest of the UTF-8 system name, which each record also keeps. For a benign template change, remove only the canary file to establish a new baseline. For a failed probe, correct the reported failure and rerun. Keep `spend/canaries.jsonl` so resetting a baseline preserves past costs.
+A canary refusal happens before new family trials start. For a failed probe, correct the reported failure and rerun. Canary baselines and past probe costs remain in private D1.
 
 ## Voting
 
@@ -131,25 +135,28 @@ Follow the site's Vote link and choose an available family. [Arena](../design/ar
 Publishing a family's outputs for voting needs `public_voting = true` in its `family.toml` and a Cloudflare API token with D1 Edit. Set exactly one credential source in `.env`: `BENCH_D1_TOKEN_FILE` names a file holding the token, or `BENCH_D1_ENV_FILE` names an existing dotenv file containing `CLOUDFLARE_API_TOKEN`. The dotenv source reads that token without expanding variables or changing the process environment.
 
 ```bash
-uv run bench arena prepare writing-zh
-uv run bench arena publish staging <publication>.json
-uv run bench arena publish production <publication>.json
+uv run bench arena prepare writing-zh production
+uv run bench arena inspect <publication-id>
+uv run bench arena publish staging <publication-id>
+uv run bench arena publish production <publication-id>
 uv run bench arena status production writing-zh
 ```
 
-`prepare` writes the publication of the family's current outputs and a Markdown listing beside it, and prints both paths. Review the listing, since publishing that exact file approves it. Publishing again with the same file changes nothing, and an interrupted publish completes when rerun. [Arena](../design/arena.md#publication-and-closing) describes what a publication holds and which cases production votes on.
+`prepare` pins an existing sealed output generation and saves the publication in private D1, returning its ID. Run `bench collect` first when outputs are missing or stale. Review `inspect` before publishing that ID. Publishing again with the same ID changes nothing, and an interrupted publish completes when rerun. [Arena](../design/arena.md#publication-and-closing) describes what a publication holds and which cases production votes on.
 
 A family ends for a voter once no comparison is left, and each vote saves as you submit it. [Voting](voting.md) covers eligibility, keys, and issues, and [Arena](../design/arena.md) covers how pairs are chosen.
 
-### Voting Locally
+### Private Voting
 
 ```bash
-uv run bench serve
+uv run bench arena prepare writing-zh private
+uv run bench arena inspect <publication-id>
+uv run bench arena publish private <publication-id>
 ```
 
-Open [localhost:8790/vote/](http://localhost:8790/vote/) to vote on held-out and transcript-derived cases, and on every case of a family without `public_voting`. The command collects current trials, builds the site and publishes only to the local SQLite store. It makes no model requests. Run `bench run` first when those cases lack generated outputs.
+Open the Access-protected private vote page to vote on held-out and transcript-derived cases, and on families without `public_voting`. Preparing and publishing make no model requests. Run `bench run` and `bench collect` first when those cases lack collected outputs.
 
-Ctrl-C stops the server. Stop it before inspecting or moderating the local store with `bench arena status local`, `bench arena votes local <family>` or the other arena commands. The local store and its browser signing keys persist under `arena/` in the data directory, so a restart preserves votes and cookies.
+Use `bench arena status private` and `bench arena votes private <family>` to inspect this store. Votes persist in its D1 database independently of the client checkout.
 
 ### Setting Up a Vote Store
 
@@ -197,33 +204,18 @@ A summary row shows the votes, the browsers behind a tag or the tags a browser u
 
 ```bash
 uv run bench close writing-zh
-uv run bench close writing-zh --snapshot <snapshot-path>
+uv run bench close writing-zh --snapshot <snapshot-id>
 ```
 
-For a voted family, stop `bench serve` before closing. `bench close` saves the available production and local votes that can no longer be undone under `votes/<family>/` in the data directory, combines them, and writes `reports/<family>/<round>.json`, dated by the UTC day. Families without `public_voting` read only the local store. `--snapshot` recloses a saved file without reading either store. For a `tests` family, `bench close <family>` collects its trials and aggregates rewards. Commit the report through a PR. [Reports](../design/reports.md) describes its contents.
+For a voted family, `bench close` seals the available production and private votes that can no longer be undone in private D1, combines them, and writes `reports/<family>/<round>.json`. Families without `public_voting` read only the private store. `--snapshot` replays a sealed snapshot by ID, preserving its close time, category order and each store's pinned outputs without reading the current family, catalog or private repository. For a `tests` or `checkers` family, closing uses the collected generation's pinned cases, code revision and public system labels. Commit the report through a PR. [Reports](../design/reports.md) describes its contents.
 
 ## The Data Directory
 
-Everything a run produces stays out of Git in the [data directory](../conventions/data.md#the-data-directory):
+The [data directory](../conventions/data.md#the-data-directory) contains only disposable vendor CLI downloads:
 
 ```text
 assistant-bench/
-├── agents/<harness>/<version>/<platform>/  # Verified vendor CLI executables for installed agents
-├── arena/                                  # Local vote database, signing keys and serve lock
-├── canaries/<system-hash>.jsonl            # Every route probe, including its identities, protocol, usage and outcome
-├── canaries/jobs/<job>.accounting.json     # Probe prices and response ceilings frozen before execution
-├── canaries/jobs/<job>/                    # Probe Harbor jobs, with adjacent private CLI logs
-├── canaries/task/                          # The fixed synthetic probe task
-├── cases/<family>.toml                     # Local cases, appended to the committed ones
-├── cases/<family>/<task>/                  # Local tasks, beside the committed ones
-├── checks/<family>/<job>/                  # Oracle and nop jobs from `bench check`
-├── jobs/<family>/<job>/                    # Harbor job directories, each with its config.json, attempts.jsonl, and one directory per trial
-├── outputs/<family>.jsonl                  # Collected Harbor trial records
-├── publications/<family>/<id>.json         # Publications from `bench arena prepare`, each with its .md listing
-├── spend/<family>.jsonl                    # The family's ledger of agent attempts
-├── spend/canaries.jsonl                    # Probe attempts outside family budgets
-├── tasks/<family>/<case>/                  # Harbor tasks rendered from the cases
-└── votes/<family>/<taken-at>.json          # Vote cuts that `bench close` saved
+└── agents/<harness>/<version>/<platform>/  # Verified vendor CLI executables for installed agents
 ```
 
-Run `harbor view` on a family's job directory to browse its trials.
+Completed trial artifacts live in the private repository, while collected outputs and runtime records live in private D1.

@@ -17,12 +17,16 @@ A `transcript` case or task passes gitleaks before it enters the private reposit
 
 ## The Data Directory
 
-Run artifacts live in the data directory, which `BENCH_DATA_DIR` names and which defaults to `$XDG_DATA_HOME/assistant-bench/`, or `~/.local/share/assistant-bench/`, and code reaches it only through `paths.data_dir()`. Rendered tasks, Harbor jobs, collected outputs and the spend ledger stay there regardless of their cases' source, since outputs of committed cases still carry routes, request IDs and endpoint metadata. [Running](../guide/running.md#the-data-directory) lists its layout.
+The private repository holds private case sources and immutable Harbor trial artifacts. `BENCH_DATA_REPOSITORY` names its `owner/repository`, authenticated through GitHub CLI and Git. Runs pin the private source revision before loading cases. Outputs of committed cases also remain private, since they carry routes, request IDs and endpoint metadata.
+
+Private D1 holds runs, request admissions and receipts, the spend ledger, collected output generations, canary records, prepared publications and sealed vote snapshots. Prices and source revisions are frozen with their records. Historical records retain unknown provenance when the original revision is unavailable.
+
+Rendered tasks, restored artifacts and Harbor jobs exist in a temporary workspace for the command's lifetime. Docker execution stays on the client host. Removing local directories preserves completed cloud records, but deleting an active workspace interrupts execution and can lose unfinished output.
 
 `bench check` validates committed sources without cloud authentication. `bench check --private` also authenticates the configured private repository, pins its `main` revision and validates the combined sources. It refuses each visible entry under the private `cases/` tree that no family reads. Hidden files and directories are ignored. The pinned private files exist only for the command's lifetime.
 
-`bench arena publish` refuses a transcript-derived or held-out case before anything leaves the machine, as [Arena](../design/arena.md#publication-and-closing) describes. `bench serve` publishes those cases only to the local SQLite store under `arena/`. A publication holds the reviewed cases, each passing output's content, and for every output its system, fingerprint, verdict, length and content digest, along with the family's display labels, defects and reference. The vote cuts that `bench close` saves under `votes/` omit network tags and output content.
+Production publications exclude transcript-derived and held-out cases. The Access-protected private arena accepts them, as [Arena](../design/arena.md#publication-and-closing) describes. Prepared publications pin cases, outputs and public system labels. Sealed vote snapshots pin each store's output generation, category order, closing revision and close time, so replay needs no current family or catalog.
 
-Point a single run at a scratch data directory with `BENCH_DATA_DIR=<dir>`. Leave `XDG_DATA_HOME` alone, since uv keeps its managed interpreters under it and would install a new CPython in `<dir>` and relink `.venv` to it, which breaks once `<dir>` is removed.
+`BENCH_DATA_DIR` names only the disposable vendor CLI cache. It defaults to `$XDG_DATA_HOME/assistant-bench/`, or `~/.local/share/assistant-bench/`, and code reaches it through `paths.data_dir()`. Downloads are verified before use. Deleting this directory requires downloading those tools again.
 
-Canary tasks, jobs and per-system baseline records live under `canaries/`, apart from family trials and collection. Their attempt ledger is `spend/canaries.jsonl`, outside family budgets. Each job's adjacent accounting snapshot freezes its price and response ceiling before execution, so later runs can recover interrupted bookkeeping without current catalog prices. Preserve this ledger when resetting a canary baseline so the probe's spend survives.
+Canary records and accounting live in private D1, apart from family trials and budgets. Resetting a baseline preserves recorded probe costs.
