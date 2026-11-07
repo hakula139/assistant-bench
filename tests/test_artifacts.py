@@ -399,6 +399,57 @@ class TestArtifactRepository:
             assert '/.git/' not in tree
             assert '/__pycache__/' not in tree
 
+        @pytest.mark.parametrize('ancestor', ['runs', 'runs/run-a/trials'])
+        def test_remote_ancestor_symlinks_cannot_write_outside_the_clone(
+            self,
+            repository: Repository,
+            trial: Trial,
+            tmp_path: Path,
+            ancestor: str,
+        ) -> None:
+            outside = tmp_path / 'outside'
+            outside.mkdir()
+            sentinel = outside / 'sentinel.txt'
+            sentinel.write_bytes(b'Leave this external tree unchanged.\n')
+            link = repository.seed / ancestor
+            link.parent.mkdir(parents=True, exist_ok=True)
+            link.symlink_to(outside, target_is_directory=True)
+            git(repository.seed, 'add', ancestor)
+            git(
+                repository.seed,
+                'commit',
+                '--quiet',
+                '-m',
+                'Add synthetic ancestor link',
+            )
+            git(repository.seed, 'push', '--quiet', 'origin', 'main')
+            before = git(repository.remote, 'rev-parse', 'main')
+
+            with pytest.raises(InputError):
+                publish(repository, trial)
+
+            assert sentinel.read_bytes() == b'Leave this external tree unchanged.\n'
+            assert sorted(
+                path.relative_to(outside).as_posix() for path in outside.rglob('*')
+            ) == ['sentinel.txt']
+            assert git(repository.remote, 'rev-parse', 'main') == before
+
+        def test_workspace_git_attributes_cannot_normalize_archived_bytes(
+            self, repository: Repository, trial: Trial, tmp_path: Path
+        ) -> None:
+            workspace = trial.job / trial.result.trial_name / 'artifacts' / 'app'
+            (workspace / '.gitattributes').write_text('* text eol=lf\n')
+            manifest = snapshot(trial)
+
+            reference = repository.client.publish_trial(
+                manifest.run_id, manifest.claim_id, trial.job, manifest
+            )
+            restored = repository.client.materialize(reference, tmp_path / 'restored')
+
+            archived = restored / trial.result.trial_name / 'artifacts' / 'app'
+            assert (archived / 'answer.txt').read_bytes() == b'Answer.\r\n'
+            assert (archived / '.gitattributes').read_bytes() == b'* text eol=lf\n'
+
         def test_does_not_return_a_durable_reference_when_the_push_is_rejected(
             self, repository: Repository, trial: Trial
         ) -> None:
