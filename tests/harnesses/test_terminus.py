@@ -41,6 +41,7 @@ from assistant_bench.harnesses import HARNESSES, agent_kwargs
 from assistant_bench.harnesses.accounting import TrialAccounting
 from assistant_bench.harnesses.endpoint import (
     CA_FILE_VAR,
+    HEADERS_VAR,
     KEY_FILE_VAR,
     LOCAL_ADDRESS_VAR,
 )
@@ -226,6 +227,9 @@ def run_and_collect(
     task = case_task(family, 'echo', private_root=run_context.private_root)
     config = jobs.job(family, [system], [task], root=run_context.root, sources=[])
     config.n_attempts = 1
+    endpoint_env = endpoint.env | {
+        HEADERS_VAR: '{"x-trace": "synthetic-endpoint-trace"}'
+    }
     context: AgentContext | None = None
     logs_dir: Path | None = None
 
@@ -240,16 +244,19 @@ def run_and_collect(
             agent = NativeProbe(
                 logs_dir=logs_dir,
                 model_name=system.route,
-                extra_env=endpoint.env,
+                extra_env=endpoint_env,
                 **agent_kwargs(system),
             )
             await agent.execute_trial(terminal_session, context)
 
-    if error is None:
-        asyncio.run(execute())
-    else:
-        with pytest.raises(error):
+    with pytest.MonkeyPatch.context() as environment:
+        for name, value in endpoint_env.items():
+            environment.setenv(name, value)
+        if error is None:
             asyncio.run(execute())
+        else:
+            with pytest.raises(error):
+                asyncio.run(execute())
     assert context is not None and logs_dir is not None
     run_context.refresh_sources(family)
     (collected,) = collection.collect(
