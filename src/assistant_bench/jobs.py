@@ -404,19 +404,29 @@ def materialize_sources(
     }
     directory = root / 'sources' / family.name
     directory.mkdir(parents=True, exist_ok=True)
+    runs = {
+        run_id: state.run(run_id)
+        for run_id in dict.fromkeys(row.run_id for row in generation.artifacts)
+    }
+    restorations = [
+        (
+            ArtifactRef(
+                commit_sha=row.commit_sha,
+                path=row.path,
+                manifest_digest=row.manifest_digest,
+            ),
+            Path(tempfile.mkdtemp(prefix='raw-', dir=directory)),
+        )
+        for row in generation.artifacts
+    ]
+    archives = repository.materialize_trials(restorations)
     views: dict[UUID, _SourceView] = {}
     references: dict[UUID, ArtifactRef] = {}
     jobs: dict[Path, list[Path]] = {}
-    for row in generation.artifacts:
-        run = state.run(row.run_id)
-        reference = ArtifactRef(
-            commit_sha=row.commit_sha,
-            path=row.path,
-            manifest_digest=row.manifest_digest,
-        )
-        archive = repository.materialize(
-            reference, Path(tempfile.mkdtemp(prefix='raw-', dir=directory))
-        )
+    for row, (reference, _), archive in zip(
+        generation.artifacts, restorations, archives, strict=True
+    ):
+        run = runs[row.run_id]
         manifest = archive.manifest
         job = JobConfig.model_validate_json((archive.job / 'config.json').read_text())
         result = TrialResult.model_validate_json(
