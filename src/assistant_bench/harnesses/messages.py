@@ -23,7 +23,7 @@ from assistant_bench.harnesses.native import (
     NativeLLM,
     NativeSettings,
 )
-from assistant_bench.harnesses.usage import measure
+from assistant_bench.harnesses.usage import measure, merge_messages_usage
 
 
 _input = TypeAdapter(list[MessageParam])
@@ -160,8 +160,9 @@ async def request_messages(
                 if result.message is not None:
                     result.message = stream.current_message_snapshot
                 if event.type == 'message_delta':
-                    result.usage.update(
-                        event.usage.model_dump(mode='json', exclude_unset=True)
+                    result.usage = merge_messages_usage(
+                        result.usage,
+                        event.usage.model_dump(mode='json', exclude_unset=True),
                     )
                     result.final_usage = True
                 if event.type == 'message_stop':
