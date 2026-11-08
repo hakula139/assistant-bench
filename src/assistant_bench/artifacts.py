@@ -271,7 +271,7 @@ class ArtifactRepository:
         _commit(revision)
         repository = self._metadata()
         with tempfile.TemporaryDirectory(prefix='bench-artifacts-') as temporary:
-            clone = _clone(repository, Path(temporary))
+            clone = _clone(repository, Path(temporary), partial=True)
             _git(clone, ['fetch', '--no-tags', 'origin', revision])
             entries = _tree_files(clone, revision, 'cases')
             if not entries or any(not path.startswith('cases/') for path in entries):
@@ -322,7 +322,7 @@ class ArtifactRepository:
             )
         repository = self._metadata()
         with tempfile.TemporaryDirectory(prefix='bench-artifacts-') as temporary:
-            clone = _clone(repository, Path(temporary))
+            clone = _clone(repository, Path(temporary), partial=True)
             while True:
                 parent = _remote_head(clone)
                 references: dict[str, ArtifactRef] = {}
@@ -468,42 +468,21 @@ class ArtifactRepository:
         No JSON paths are rewritten. The execution layer prepares Harbor's
         concrete task and source-job locations after this raw restoration.
         """
+        return self.materialize_trials([(reference, destination)])[0]
+
+    def materialize_trials(
+        self, trials: Sequence[tuple[ArtifactRef, Path]]
+    ) -> list[MaterializedTrial]:
+        """Restore verified trials from one complete temporary repository clone."""
+        if not trials:
+            return []
         repository = self._metadata()
         with tempfile.TemporaryDirectory(prefix='bench-artifacts-') as temporary:
-            clone = _clone(repository, Path(temporary))
-            _git(clone, ['fetch', '--no-tags', 'origin', reference.commit_sha])
-            files = _tree_files(clone, reference.commit_sha, reference.path)
-            manifest_path = f'{reference.path}/manifest.json'
-            if manifest_path not in files or files[manifest_path][0] != '100644':
-                raise InputError('The artifact reference contains no regular manifest.')
-            content = files.pop(manifest_path)[1]
-            if sha256(content).hexdigest() != reference.manifest_digest:
-                raise InputError(
-                    'The artifact manifest differs from its recorded digest.'
-                )
-            try:
-                manifest = TrialManifest.model_validate_json(content)
-            except ValidationError as error:
-                raise InputError('The artifact manifest is invalid.') from error
-            if manifest.path != reference.path:
-                raise InputError('The artifact manifest names another trial path.')
-            expected = {
-                f'{reference.path}/{entry.path}': entry for entry in manifest.files
-            }
-            if files.keys() != expected.keys():
-                raise InputError(
-                    'The artifact tree differs from its manifest file list.'
-                )
-            restored: dict[str, tuple[GitMode, bytes]] = {}
-            for path, (mode, value) in files.items():
-                entry = expected[path]
-                if mode != entry.mode or sha256(value).hexdigest() != entry.sha256:
-                    raise InputError(
-                        'An artifact file differs from its recorded mode or digest.'
-                    )
-                restored[entry.path] = (mode, value)
-            _restore(destination, restored, directories=manifest.directories)
-        return MaterializedTrial(job=destination / 'job', manifest=manifest)
+            clone = _clone(repository, Path(temporary), partial=False)
+            return [
+                _materialize_trial(clone, reference, destination)
+                for reference, destination in trials
+            ]
 
     def _metadata(self) -> _Repository:
         response = _command(['gh', 'api', f'repos/{self.repository_slug}'])
@@ -551,6 +530,37 @@ class ArtifactRepository:
                 raise InputError(
                     'The remote trial manifest differs from the published manifest.'
                 )
+
+
+def _materialize_trial(
+    clone: Path, reference: ArtifactRef, destination: Path
+) -> MaterializedTrial:
+    files = _tree_files(clone, reference.commit_sha, reference.path)
+    manifest_path = f'{reference.path}/manifest.json'
+    if manifest_path not in files or files[manifest_path][0] != '100644':
+        raise InputError('The artifact reference contains no regular manifest.')
+    content = files.pop(manifest_path)[1]
+    if sha256(content).hexdigest() != reference.manifest_digest:
+        raise InputError('The artifact manifest differs from its recorded digest.')
+    try:
+        manifest = TrialManifest.model_validate_json(content)
+    except ValidationError as error:
+        raise InputError('The artifact manifest is invalid.') from error
+    if manifest.path != reference.path:
+        raise InputError('The artifact manifest names another trial path.')
+    expected = {f'{reference.path}/{entry.path}': entry for entry in manifest.files}
+    if files.keys() != expected.keys():
+        raise InputError('The artifact tree differs from its manifest file list.')
+    restored: dict[str, tuple[GitMode, bytes]] = {}
+    for path, (mode, value) in files.items():
+        entry = expected[path]
+        if mode != entry.mode or sha256(value).hexdigest() != entry.sha256:
+            raise InputError(
+                'An artifact file differs from its recorded mode or digest.'
+            )
+        restored[entry.path] = (mode, value)
+    _restore(destination, restored, directories=manifest.directories)
+    return MaterializedTrial(job=destination / 'job', manifest=manifest)
 
 
 # ── File Selection ──
@@ -702,13 +712,13 @@ def _git(
     )
 
 
-def _clone(repository: _Repository, root: Path) -> Path:
+def _clone(repository: _Repository, root: Path, *, partial: bool) -> Path:
     clone = root / 'repository'
     _git(
         root,
         [
             'clone',
-            '--filter=blob:none',
+            *(['--filter=blob:none'] if partial else []),
             '--no-checkout',
             '--',
             repository.ssh_url,
