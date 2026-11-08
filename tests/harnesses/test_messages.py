@@ -100,7 +100,7 @@ class TestMessageResult:
             parsed = Message.model_validate(payload).model_copy(
                 update={'usage': Usage.model_construct(**usage)}
             )
-            result = MessageResult(parsed, complete=True, final_usage=True)
+            result = MessageResult(parsed, complete=True, final_usage=True, usage=usage)
 
             details = result.details
 
@@ -216,11 +216,20 @@ class TestRequestMessages:
         (client,) = messages_clients
         assert client.is_closed()
 
-    @pytest.mark.parametrize('base_path', ['/anthropic', '/anthropic/v1'])
     @pytest.mark.parametrize(
-        'content_type',
-        ['text/event-stream', 'Text/Event-Stream; Charset=UTF-8'],
-        ids=['lowercase-mime', 'mixed-case-mime'],
+        ('base_path', 'content_type', 'cache_write_tokens'),
+        [
+            ('/anthropic', 'text/event-stream', 10),
+            ('/anthropic/v1', 'text/event-stream', 0),
+            ('/anthropic', 'Text/Event-Stream; Charset=UTF-8', 0),
+            ('/anthropic/v1', 'Text/Event-Stream; Charset=UTF-8', 10),
+        ],
+        ids=[
+            'root-valid-cache',
+            'versioned-invalid-cache',
+            'root-mixed-mime-invalid-cache',
+            'versioned-mixed-mime-valid-cache',
+        ],
     )
     def test_sends_the_native_contract_with_explicit_credentials_and_version(
         self,
@@ -232,8 +241,19 @@ class TestRequestMessages:
         tmp_path: Path,
         base_path: str,
         content_type: str,
+        cache_write_tokens: int,
     ) -> None:
-        endpoint.stream = message_stream(message())
+        payload = message()
+        payload['usage']['cache_creation'] = {
+            'ephemeral_5m_input_tokens': cache_write_tokens,
+            'ephemeral_1h_input_tokens': 0,
+        }
+        chunks = message_stream(payload)
+        start = json.loads(chunks[0].split(b'data: ', 1)[1])
+        start['message']['usage']['cache_creation_input_tokens'] = 0
+        start['message']['usage']['cache_creation']['ephemeral_5m_input_tokens'] = 0
+        chunks[0] = f'event: message_start\ndata: {json.dumps(start)}\n\n'.encode()
+        endpoint.stream = chunks
         endpoint.content_type = content_type
         env = endpoint.env | {
             HEADERS_VAR: '{"x-trace":"bench","anthropic-version":"wrong-version"}',
@@ -261,12 +281,25 @@ class TestRequestMessages:
                 (stored,) = private_state.requests('sample')
                 assert isinstance(stored['receipt_json'], str)
                 saved = RequestReceipt.model_validate_json(stored['receipt_json'])
-                assert saved.usage is not None
-                assert saved.usage.input_tokens == 130
-                assert saved.usage.output_tokens == 40
+                assert saved.outcome == 'completed'
+                if cache_write_tokens:
+                    assert saved.usage is not None
+                    assert saved.usage.input_tokens == 130
+                    assert saved.usage.cache_tokens == 100
+                    assert saved.usage.cache_write_tokens == 10
+                    assert saved.usage.output_tokens == 40
+                else:
+                    assert saved.usage is None
 
         asyncio.run(run())
 
+        assert result.details['reported_usage'] == payload['usage']
+        assert result.details['usage_invalid'] is (cache_write_tokens == 0)
+        stored_payload = json.loads((tmp_path / 'message.json').read_text())
+        assert stored_payload.pop('usage') == payload['usage']
+        expected_payload = Message.model_validate(payload).model_dump(mode='json')
+        expected_payload.pop('usage')
+        assert stored_payload == expected_payload
         (sent,) = endpoint.requests
         assert sent.path == f'{base_path}/v1/messages'
         assert sent.body == {
