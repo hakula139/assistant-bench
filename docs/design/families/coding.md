@@ -33,7 +33,7 @@ Every task is a synthetic Python 3.14 application using the standard library and
 | `repair-job-leases`            | Lease SQLite queue jobs atomically across processes, with fencing, expiry and backoff         |
 | `make-pipeline-incremental`    | Skip exactly the build steps whose content, declaration and code fingerprints still match     |
 
-A task's `[metadata] author` names the model that wrote it, and `author_vendor` records its vendor independently of current participants. Held-out tasks, which keep the board from being fit to the public set, belong under the data directory's `cases/coding-repo/<task>/`, as [Data](../../conventions/data.md#data-classes) describes.
+A task's `[metadata] author` names the model that wrote it, and `author_vendor` records its vendor independently of current participants. Held-out tasks, which keep the board from being fit to the public set, belong under the private repository's `cases/coding-repo/<task>/`, as [Data](../../conventions/data.md#data-classes) describes.
 
 ## Task Conventions
 
@@ -49,7 +49,7 @@ Each task follows [Authoring](../../guide/authoring.md#tasks) and adds:
 
   As root, which the verifier is in its container, `verify.py` makes `/tests` unreadable to `nobody`, so a scenario cannot read the trusted values it is checked against, and kills every process of that user after each run and test and before exiting, so the tested code cannot write the verifier or outlive verification and touch the reward after `test.sh` writes it. Since the agent works as root, every instruction tells the candidate that verification runs the code unprivileged from a copy of `/app` it may not write.
 
-  A scenario runs in the application's process, so the boundary cannot stop a solution written against the public scenarios, whether it memorizes their observations or disables their instrumentation. The held-out split under the data directory's `cases/coding-repo/` addresses that contamination.
+  A scenario runs in the application's process, so the boundary cannot stop a solution written against the public scenarios, whether it memorizes their observations or disables their instrumentation. The held-out split under the private repository's `cases/coding-repo/` addresses that contamination.
 
 - **Shared files:** author `environment/Dockerfile`, `solution/solve.sh`, `tests/test.sh`, `tests/verify.py`, `tests/runner.py`, `tests/sandbox.py`, and `tests/host.py` under `families/coding-repo/shared/`, then run `uv run python -m assistant_bench.task_assets` to copy every file there that git does not ignore into each task. It also removes each task's copy of a file that `HEAD` holds under `shared/` and the working tree no longer does. Each affected task needs a version bump after it has run.
 
