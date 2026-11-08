@@ -3,14 +3,11 @@
   "scripts": {
     "build": "pnpm --filter web build",
     "format": "prettier --check .",
-    "lint": "markdownlint-cli2 \"**/*.md\" && pnpm -r lint",
-    "spellcheck": "git ls-files | cspell --no-progress --file-list stdin",
+    "lint": "pnpm -r lint",
     "test": "pnpm --filter web test",
     "typecheck": "pnpm -r typecheck"
   },
   "devDependencies": {
-    "cspell": "^10.4.0",
-    "markdownlint-cli2": "^0.24.0",
     "prettier": "^3.9.10",
     "prettier-plugin-astro": "^1.1.1",
     "prettier-plugin-tailwindcss": "^0.8.1"

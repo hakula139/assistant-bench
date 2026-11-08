@@ -20,7 +20,7 @@ Hooks that fix files in place fail the commit if they make changes, so stage the
 
 The authored task applications, reference solutions and hidden tests follow the host code's formatting and spelling too. Deliberately wrong variants are unformatted, untyped patches, and the root verifier test requires each one to fail on an assertion.
 
-The shared devkit hooks use Nix-provided tools for spelling and Markdown checks. Prettier uses the locked Node tools for its Astro plugin, and Ruff uses the tools pinned in `uv.lock`, so `pnpm install` and `uv sync` come first in a new checkout. `nix flake check` runs the shared hooks, while [CI](ci.md#checks) also runs the locked Node and Python tools.
+The shared devkit hooks use Nix-provided tools for Ruff, spelling, and Markdown checks and formatting. Prettier uses the locked Node tools for its Astro and Tailwind plugins, so `pnpm install` comes first in a new checkout. `nix flake check` runs the shared hooks, while [CI](ci.md#checks) also runs the locked Node and Python tools.
 
 ## Where Settings Live
 
@@ -50,9 +50,9 @@ Job configs are generated per run and never committed. Harbor copies each one in
 ## Toolchain and Pins
 
 - The flake pins the stable Nixpkgs channel for Node.js, uv, and the hooks. uv installs the CPython that `.python-version` names from its python-build-standalone builds, and `python-preference = "only-managed"` in `[tool.uv]` keeps it from using any other Python on `PATH`. A host's first install takes the newest patch release the pinned uv knows, while an existing install stays on its patch until `uv python upgrade`.
-- On NixOS, that interpreter and the Ruff binary from its wheel are generic Linux executables, so they run through `programs.nix-ld`, which also provides the C++ runtime and zlib that Linux wheels link.
+- On NixOS, that interpreter is a generic Linux executable, so it runs through `programs.nix-ld`, which also provides the C++ runtime and zlib that Linux wheels link.
 - Renovate follows the shared preset, which automerges lock file maintenance, including the flake lock update that moves the nixos-config input. When such a bump moves a fingerprint, the stale `fingerprints.json` fails its test, so the PR waits until someone rewrites the manifest and applies the rule in [Systems](../design/systems.md#fingerprints). Likewise, when it moves Nixpkgs' pnpm, the `pages-pnpm` flake check fails, and the PR waits until someone sets `BENCH_PNPM_VERSION` in `.gitlab/ci/pages.yml` to the new version.
-- `uv.lock` pins the Python dependencies and `pnpm-lock.yaml` pins the Node tools, with Dependabot opening security updates for both.
+- `uv.lock` pins the Python dependencies and `pnpm-lock.yaml` pins the Node tools, with Renovate managing both.
 
 ## The nixos-config Input
 

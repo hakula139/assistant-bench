@@ -66,20 +66,17 @@ The tree lists only the top-level entries whose names leave their purpose unclea
 Run after implementation and before review:
 
 ```bash
-uv run ruff check                                     # Lint
-uv run ruff format --check                            # Check formatting
 uv run mypy                                           # Type check (strict)
 uv run basedpyright                                   # Check the shared editor type policy
 uv run pytest                                         # Run the tests that need no Docker, with coverage
 uv run bench fingerprints                             # Check fingerprints against the closed reports
 uv run pytest -m docker                               # Run the Harbor trials under Docker, which need no secrets
-pnpm format                                           # Check formatting of the site, JSON, Markdown, and YAML
-pnpm lint                                             # Lint Markdown and the site
-pnpm spellcheck                                       # Spell check
+pnpm format                                           # Check formatting of the site, JSON, and YAML
+pnpm lint                                             # Lint the site
 pnpm typecheck                                        # Type check the site and the voting Worker
 pnpm test                                             # Test the site and the voting Worker, with coverage: schema, charts, pages, the vote page and API, and accessibility
 pnpm build                                            # Build the site from reports/
-nix flake check                                       # After a flake or GitLab Pages job change, run the Nix checks
+nix flake check                                       # Run shared formatting, spelling, and lint checks and Pages pin checks
 ```
 
 [CI](docs/conventions/ci.md#checks) lists which job runs each check.

@@ -1,6 +1,6 @@
 variables:
   BENCH_NODE_IMAGE: node:26-bookworm
-  BENCH_PNPM_VERSION: 11.27.0
+  BENCH_PNPM_VERSION: 12.9.0
 
 pages:
   image: $BENCH_NODE_IMAGE

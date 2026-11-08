@@ -16,7 +16,6 @@ RUNTIME_FILES = {
     'uv.lock',
 }
 RUNTIME_DIRS = (
-    '.github/actions/setup-nix/',
     'families/coding-repo/shared/',
     'src/',
 )

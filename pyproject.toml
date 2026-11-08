@@ -38,7 +38,6 @@ dev = [
   "pytest>=9.1.1",
   "pytest-cov>=7.1.0",
   "pytest-xdist>=3.8.0",
-  "ruff>=0.17.1",
   "scipy-stubs>=1.18.1.1",
   "statsmodels>=0.15.0",
   "tomli-w>=1.2.0",

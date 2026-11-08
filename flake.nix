@@ -11,8 +11,6 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
 
-    flake-utils.url = "github:numtide/flake-utils";
-
     devkit = {
       url = "github:hakula139/devkit/v1";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -31,20 +29,17 @@
   outputs =
     {
       nixpkgs,
-      flake-utils,
       devkit,
       nixos-config,
       ...
     }:
     let
-      # git-hooks.nix has dropped x86_64-darwin, which Nixpkgs supports only through 26.05.
       systems = [
         "aarch64-darwin"
-        "aarch64-linux"
         "x86_64-linux"
       ];
     in
-    flake-utils.lib.eachSystem systems (
+    devkit.lib.eachSystem systems (
       system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
@@ -69,8 +64,8 @@
         # Node Toolchain
         # ------------------------------------------------------------------------------------------
         nodeMajor = "26";
-        nodejs = pkgs."nodejs_${nodeMajor}";
-        pnpm = pkgs.pnpm.override { nodejs-slim = pkgs."nodejs-slim_${nodeMajor}"; };
+        nodejs = pkgs.nodejs_26;
+        pnpm = pkgs.pnpm_12;
         nodeTools = [
           nodejs
           pnpm
@@ -92,8 +87,9 @@
           check-yaml.enable = true;
           cspell.enable = true;
           deadnix.enable = true;
-          dprint.enable = false;
+          dprint.enable = true;
           editorconfig-checker.enable = true;
+          lychee.enable = true;
           markdownlint-cli2.enable = true;
           nixfmt.enable = true;
           shellcheck.enable = true;
@@ -102,17 +98,8 @@
           statix.enable = true;
           taplo.enable = true;
 
-          lychee = {
-            enable = true;
-            extraPackages = [ pkgs.cacert ];
-          };
-        };
-
-        uvHooks = {
           ruff = {
             enable = true;
-            package = null;
-            entry = "${pkgs.lib.getExe (dk.uvTool "ruff")} check --fix";
             types = [ "file" ];
             types_or = [
               "python"
@@ -122,8 +109,6 @@
 
           ruff-format = {
             enable = true;
-            package = null;
-            entry = "${pkgs.lib.getExe (dk.uvTool "ruff")} format";
             types = [ "file" ];
             types_or = [
               "python"
@@ -135,12 +120,11 @@
         preCommit = dk.preCommit {
           src = ./.;
           inherit hooks;
-          devHooks = uvHooks // {
+          devHooks = {
             prettier = {
               enable = true;
-              package = null;
-              entry = "${pkgs.lib.getExe (dk.nodeTool "prettier")} --write --ignore-unknown";
-              files = "\\.(astro|css|js|json|jsonc|md|mdx|ts|tsx|ya?ml)$";
+              package = dk.nodeTool "prettier";
+              files = "\\.(astro|css|js|json|jsonc|ts|tsx|ya?ml)$";
             };
           };
         };
@@ -167,13 +151,13 @@
         # ------------------------------------------------------------------------------------------
         devShells.python = pkgs.mkShell (pythonEnvironment // { name = "assistant-bench-python"; });
 
-        devShells.default = pkgs.mkShell {
-          name = "assistant-bench-dev";
-          inherit (pythonEnvironment) env;
-
-          inherit (pythonEnvironment) packages;
-          inputsFrom = [ preCommit.shell ];
-        };
+        devShells.default = pkgs.mkShell (
+          pythonEnvironment
+          // {
+            name = "assistant-bench-dev";
+            inputsFrom = [ preCommit.shell ];
+          }
+        );
 
         # ------------------------------------------------------------------------------------------
         # Packages
