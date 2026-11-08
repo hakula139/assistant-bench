@@ -660,6 +660,8 @@ def harbor_environment() -> dict[str, str]:
         'USER',
         'TMPDIR',
         'LANG',
+        'GH_TOKEN',
+        'GITHUB_TOKEN',
         'BENCH_NIXOS_CONFIG',
         'BENCH_DATA_DIR',
         'BENCH_DATA_REPOSITORY',

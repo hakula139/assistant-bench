@@ -2,6 +2,7 @@
 
 import hashlib
 import io
+import os
 import re
 import tarfile
 from pathlib import Path
@@ -59,7 +60,13 @@ def _download(
         else:
             target = f'codex-{architecture}-unknown-linux-musl'
             name = f'{target}.tar.gz'
-            release = client.get(f'{CODEX_RELEASES}/rust-v{version}')
+            token = os.environ.get('GH_TOKEN') or os.environ.get('GITHUB_TOKEN')
+            headers = {'Authorization': f'Bearer {token}'} if token else {}
+            release = client.get(
+                f'{CODEX_RELEASES}/rust-v{version}',
+                headers=headers,
+                follow_redirects=False,
+            )
             release.raise_for_status()
             asset = next(
                 asset for asset in release.json()['assets'] if asset['name'] == name
