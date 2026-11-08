@@ -1,7 +1,8 @@
 import asyncio
 import json
 import shutil
-from collections.abc import Coroutine
+import threading
+from collections.abc import Coroutine, Sequence
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -13,7 +14,7 @@ from harbor.models.trial.result import TrialResult
 from harbor.trial.queue import TrialQueue
 
 from assistant_bench import collection, execution, jobs
-from assistant_bench.artifacts import ArtifactRef
+from assistant_bench.artifacts import ArtifactRef, ArtifactRepository, MaterializedTrial
 from assistant_bench.catalog import System
 from assistant_bench.database import D1Error, SQLiteDatabase
 from assistant_bench.families import Family, load_cases, load_family
@@ -213,6 +214,85 @@ class TestExecute:
 
 
 class TestExecutionPlugin:
+    @pytest.mark.usefixtures('export')
+    def test_cancellation_registers_the_completed_archive_without_settling_the_claim(
+        self,
+        run_context: RunContext,
+        family: Family,
+        system: System,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        config = planned(run_context, family, system)
+        publish_trials = ArtifactRepository.publish_trials
+        release = threading.Event()
+        trial_identity: tuple[str, str] | None = None
+
+        async def finish() -> None:
+            nonlocal trial_identity
+            async with executed_trial(
+                run_context,
+                config,
+                system,
+                scope=family.name,
+                run_id='cancelled-run',
+            ) as trial:
+                trial_identity = trial.config.trial_name, str(trial.result.id)
+                trial.recorder.begin(START)
+                await trial.recorder.admit('openai-responses')
+                trial.recorder.finish(START + timedelta(seconds=1))
+
+        async def cancel() -> ArtifactRef:
+            loop = asyncio.get_running_loop()
+            published: asyncio.Future[ArtifactRef] = loop.create_future()
+
+            def publish(
+                repository: ArtifactRepository, archives: Sequence[MaterializedTrial]
+            ) -> tuple[ArtifactRef, ...]:
+                (reference,) = publish_trials(repository, archives)
+                loop.call_soon_threadsafe(published.set_result, reference)
+                release.wait()
+                return (reference,)
+
+            monkeypatch.setattr(ArtifactRepository, 'publish_trials', publish)
+            task = asyncio.create_task(finish())
+            try:
+                completed, _ = await asyncio.wait(
+                    (task, published), return_when=asyncio.FIRST_COMPLETED
+                )
+                if task in completed:
+                    await task
+                    pytest.fail('The trial exited before publishing its archive.')
+                reference = await published
+                task.cancel()
+            finally:
+                release.set()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            return reference
+
+        reference = asyncio.run(cancel())
+
+        assert trial_identity is not None
+        assert run_context.state.trial_registered('cancelled-run', *trial_identity)
+        (artifact,) = run_context.state.artifact_generation(family.name).artifacts
+        assert (
+            ArtifactRef(
+                commit_sha=artifact.commit_sha,
+                path=artifact.path,
+                manifest_digest=artifact.manifest_digest,
+            )
+            == reference
+        )
+        archive = run_context.artifacts.materialize(reference, tmp_path / 'recovered')
+        assert (
+            archive.manifest.trial_name,
+            archive.manifest.trial_id,
+        ) == trial_identity
+        (request,) = run_context.state.requests(family.name)
+        assert request['receipt_json'] is None
+        assert run_context.state.claim_state(str(request['claim_id'])) == 'uncertain'
+
     @pytest.mark.usefixtures('export')
     @pytest.mark.parametrize(
         ('harness', 'reflected'),
