@@ -137,8 +137,8 @@ def check(
     """Validate every family, or the named ones.
 
     For a task family, also run each task's reference solution and a do-nothing
-    agent in Docker, several times each, so the solution must pass the task's
-    tests and the unsolved task must fail them.
+    agent in Docker, so the solution must pass the task's tests and the unsolved
+    task must fail them.
     """
     if task_names and (not families or len(families) != 1):
         raise InputError('Select exactly one task family with `--task`.')

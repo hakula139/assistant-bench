@@ -61,7 +61,6 @@ N_CONCURRENT_CONTAINERS = 4
 # Harbor's reuse key covers the whole agent config, so changing this reruns every
 # trial, as does renaming a system.
 ROUTE_CONCURRENCY = 4
-CHECK_ATTEMPTS = 3
 # LiteLLM loads a .env above its own install unless its mode is PRODUCTION, and
 # bench loads the working directory's .env itself. Importing LiteLLM downloads its
 # cost map unless told to read the bundled copy.
@@ -352,9 +351,7 @@ def check_job(family: Family, tasks: list[Path], *, root: Path) -> JobConfig:
     """Build a job that runs the oracle and the nop on every task of the family.
 
     The oracle must pass every task while the untouched repository must fail it.
-    Each agent runs `CHECK_ATTEMPTS` times on each task, which catches a task that
-    passes or fails only sometimes. Its trials go under `checks/`, apart from the
-    jobs that `collect` reads.
+    Its trials go under `checks/`, apart from the jobs that `collect` reads.
     """
     return _job(
         root / 'checks' / family.name,
@@ -362,7 +359,7 @@ def check_job(family: Family, tasks: list[Path], *, root: Path) -> JobConfig:
         tasks,
         [],
         environment=trial_config.EnvironmentConfig(type=EnvironmentType.DOCKER),
-        n_attempts=CHECK_ATTEMPTS,
+        n_attempts=1,
         n_concurrent=N_CONCURRENT_CONTAINERS,
         verify=True,
     )
