@@ -342,8 +342,14 @@ class TestJobConfiguration:
             jobs.check_systems(VOTES, [system])
 
     def test_lists_only_the_trial_proxy_in_a_mixed_harness_job(
-        self, families_dir: Path, tmp_path: Path
+        self,
+        families_dir: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        credentials = {'GH_TOKEN': 'primary-token', 'GITHUB_TOKEN': 'fallback-token'}
+        for name, value in credentials.items():
+            monkeypatch.setenv(name, value)
         family = voted_tasks(families_dir)
         system = make_system(harness='codex', version='1.2.3', api='openai-responses')
         ordinary = make_system(name='other')
@@ -363,6 +369,9 @@ class TestJobConfiguration:
         assert config.agents[0].extra_allowed_hosts == ['host.docker.internal']
         assert config.agents[1].extra_allowed_hosts == []
         assert system.harness == 'codex'
+        assert all(
+            value not in config.model_dump_json() for value in credentials.values()
+        )
 
 
 class TestHarborEnvironment:
@@ -374,6 +383,8 @@ class TestHarborEnvironment:
             'BENCH_API_KEY_FILE': '/tmp/example-key',
             'DOCKER_HOST': 'unix:///tmp/example.sock',
             'XDG_DATA_HOME': '/tmp/example-data',
+            'GH_TOKEN': 'primary-token',
+            'GITHUB_TOKEN': 'fallback-token',
             'OPENAI_API_KEY': 'host-secret',
             'ANTHROPIC_CUSTOM_HEADERS': 'x-host: host-secret',
             'CLAUDE_CODE_MAX_TURNS': '1',
@@ -383,7 +394,14 @@ class TestHarborEnvironment:
 
         environment = jobs.harbor_environment()
 
-        for name in ('PATH', 'BENCH_API_KEY_FILE', 'DOCKER_HOST', 'XDG_DATA_HOME'):
+        for name in (
+            'PATH',
+            'BENCH_API_KEY_FILE',
+            'DOCKER_HOST',
+            'XDG_DATA_HOME',
+            'GH_TOKEN',
+            'GITHUB_TOKEN',
+        ):
             assert environment[name] == values[name]
         for name in (
             'OPENAI_API_KEY',
