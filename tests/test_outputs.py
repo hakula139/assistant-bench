@@ -1,9 +1,12 @@
 import hashlib
 import json
-from typing import Any
+import sqlite3
+from collections.abc import Sequence
+from typing import Any, cast
 
 import pytest
 
+from assistant_bench.database import Param, Result, SQLiteDatabase
 from assistant_bench.families import Family
 from assistant_bench.messages import InputError
 from assistant_bench.outputs import pool_conflicts, read_outputs, write_outputs
@@ -146,7 +149,7 @@ class TestReadOutputs:
                 system_names_json=None,
             )
         )
-        private_state.stage_output('stored', 0, value)
+        private_state.stage_outputs('stored', [(0, value)])
         private_state.seal_collection('stored')
         assert private_state.activate_collection('stored', None)
 
@@ -160,6 +163,91 @@ class TestReadOutputs:
 
 
 class TestWriteOutputs:
+    def test_stages_a_complete_generation_in_bounded_sql_chunks(
+        self,
+        private_state: State,
+        private_store: SQLiteDatabase,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        outputs = [make_output(case=f'case-{position}') for position in range(26)]
+        statements: list[tuple[str, int]] = []
+        execute = private_store.execute
+
+        def record(sql: str, params: Sequence[Param] = ()) -> Result:
+            if 'collection_outputs' in sql and 'output_key' in sql:
+                operation = 'insert' if 'INSERT INTO' in sql else 'select'
+                statements.append((operation, len(params)))
+            return execute(sql, params)
+
+        monkeypatch.setattr(private_store, 'execute', record)
+
+        generation = write_outputs(
+            'f',
+            outputs,
+            private_state,
+            previous=None,
+            code_revision='a' * 40,
+            case_revision='b' * 40,
+            system_names={'s': 'System S'},
+        )
+
+        assert read_outputs('f', private_state) == outputs
+        assert private_state.output_generation('f').id == generation
+        assert private_state.collection_generation(generation).outputs == tuple(
+            output.model_dump_json() for output in outputs
+        )
+        assert statements == [
+            ('insert', 100),
+            ('select', 26),
+            ('insert', 4),
+            ('select', 2),
+        ]
+
+    def test_a_failed_chunk_keeps_the_previous_generation_active(
+        self,
+        private_state: State,
+        private_store: SQLiteDatabase,
+    ) -> None:
+        original = make_output(text='Original answer.\r\n')
+        previous = write_outputs(
+            'f',
+            [original],
+            private_state,
+            previous=None,
+            code_revision='a' * 40,
+            case_revision='b' * 40,
+            system_names={'s': 'System S'},
+        )
+        pinned = private_state.output_generation('f')
+        following = [make_output(case=f'case-{position}') for position in range(26)]
+        following.append(following[0])
+
+        with pytest.raises(sqlite3.IntegrityError, match='UNIQUE constraint failed'):
+            write_outputs(
+                'f',
+                following,
+                private_state,
+                previous=previous,
+                code_revision='a' * 40,
+                case_revision='b' * 40,
+                system_names={'s': 'System S'},
+            )
+
+        assert private_state.output_generation('f') == pinned
+        assert read_outputs('f', private_state) == [original]
+        pending = private_store.execute(
+            'SELECT id, sealed FROM collections WHERE id != ?', (previous,)
+        ).rows
+        assert len(pending) == 1 and pending[0]['sealed'] == 0
+        staged = private_store.execute(
+            'SELECT output_json FROM collection_outputs '
+            'WHERE collection_id = ? ORDER BY position',
+            (cast(str, pending[0]['id']),),
+        ).rows
+        assert [row['output_json'] for row in staged] == [
+            output.model_dump_json() for output in following[:25]
+        ]
+
     def test_preserves_pinned_outputs_and_refuses_a_stale_writer(
         self, private_state: State
     ) -> None:

@@ -169,8 +169,7 @@ def collection(identifier: str, outputs: list[str]) -> Collection:
 
 def sealed(state: State, identifier: str, *outputs: str) -> None:
     state.begin_collection(collection(identifier, list(outputs)))
-    for position, item in enumerate(outputs):
-        state.stage_output(identifier, position, item)
+    state.stage_outputs(identifier, list(enumerate(outputs)))
     state.seal_collection(identifier)
 
 
@@ -786,19 +785,23 @@ class TestState:
             assert state.claim_attempt(fresh)
             assert state.get_claim(fresh.id) == fresh
 
-    class TestStageOutput:
+    class TestStageOutputs:
+        @pytest.mark.parametrize('sealed', [False, True], ids=['staging', 'sealed'])
         def test_retries_do_not_replace_or_duplicate_the_original_output(
-            self, state: State
+            self, state: State, sealed: bool
         ) -> None:
             original = output('first')
             state.begin_collection(collection('next', [original]))
-            state.stage_output('next', 0, original)
-            state.stage_output('next', 0, json.dumps(json.loads(original)))
-            changed = json.loads(original)
-            changed['text'] = 'Changed answer.'
+            state.stage_outputs('next', [(0, original)])
+            if sealed:
+                state.seal_collection('next')
 
-            with pytest.raises(InputError):
-                state.stage_output('next', 0, json.dumps(changed))
+            state.stage_outputs('next', [(0, json.dumps(json.loads(original)))])
+            for field in ['text', 'case']:
+                changed = json.loads(original)
+                changed[field] = 'Changed answer.'
+                with pytest.raises(InputError):
+                    state.stage_outputs('next', [(0, json.dumps(changed))])
 
             state.seal_collection('next')
             assert state.activate_collection('next', None)
@@ -814,9 +817,9 @@ class TestState:
             pinned = state.output_generation('sample')
             first, second = output('first'), output('second')
             state.begin_collection(collection('next', [first, second]))
-            state.stage_output('next', 1, second)
+            state.stage_outputs('next', [(1, second)])
             assert state.output_generation('sample') == pinned
-            state.stage_output('next', 0, first)
+            state.stage_outputs('next', [(0, first)])
 
             state.seal_collection('next')
             assert state.activate_collection('next', 'old')
@@ -835,9 +838,11 @@ class TestState:
             if failure == 'digest':
                 pending = replace(pending, manifest_digest='0' * 64)
             state.begin_collection(pending)
-            state.stage_output('next', 0, first)
+            state.stage_outputs('next', [(0, first)])
             if failure != 'missing':
-                state.stage_output('next', 2 if failure == 'position' else 1, second)
+                state.stage_outputs(
+                    'next', [(2 if failure == 'position' else 1, second)]
+                )
 
             with pytest.raises(InputError):
                 state.seal_collection('next')
@@ -954,7 +959,7 @@ class TestState:
             if status == 'unsealed':
                 original = output('first')
                 state.begin_collection(collection('next', [original]))
-                state.stage_output('next', 0, original)
+                state.stage_outputs('next', [(0, original)])
 
             with pytest.raises(InputError, match='not sealed'):
                 state.collection_generation('next')

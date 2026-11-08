@@ -2,17 +2,21 @@
 
 import hashlib
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from typing import Literal, cast
 
 from pydantic import JsonValue
 
-from assistant_bench.database import Database, Row
+from assistant_bench.database import Database, Param, Row
 from assistant_bench.messages import InputError
 
 
 type ClaimState = Literal['claimed', 'uncertain', 'settled', 'cancelled']
 type RunStatus = Literal['prepared', 'running', 'complete', 'uncertain']
+
+OUTPUTS_PER_STATEMENT = 25
+"""Four parameters per output fit D1's 100-bound-parameter limit."""
 
 
 @dataclass(frozen=True)
@@ -633,38 +637,59 @@ class State:
                 f'Collection `{collection.id}` already has different metadata.'
             )
 
-    def stage_output(self, collection: str, position: int, output_json: str) -> None:
-        output = _object(output_json)
-        key = json.dumps(
-            [output[name] for name in ('case', 'system', 'job', 'trial')],
-            ensure_ascii=False,
-            separators=(',', ':'),
-        )
-        self._database.execute(
-            """
-            INSERT INTO collection_outputs (
-                collection_id, position, output_key, output_json
+    def stage_outputs(
+        self, collection: str, outputs: Sequence[tuple[int, str]]
+    ) -> None:
+        for start in range(0, len(outputs), OUTPUTS_PER_STATEMENT):
+            batch: list[tuple[int, str, str]] = []
+            for position, output_json in outputs[start : start + OUTPUTS_PER_STATEMENT]:
+                output = _object(output_json)
+                key = json.dumps(
+                    [output[name] for name in ('case', 'system', 'job', 'trial')],
+                    ensure_ascii=False,
+                    separators=(',', ':'),
+                )
+                batch.append((position, key, output_json))
+            values = ', '.join('(?, ?, ?, ?)' for _ in batch)
+            params: list[Param] = [
+                value
+                for position, key, output_json in batch
+                for value in (collection, position, key, output_json)
+            ]
+            self._database.execute(
+                f"""
+                WITH incoming(collection_id, position, output_key, output_json)
+                AS (VALUES {values})
+                INSERT INTO collection_outputs (
+                    collection_id, position, output_key, output_json
+                )
+                SELECT collection_id, position, output_key, output_json FROM incoming
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM collection_outputs AS existing
+                    WHERE existing.collection_id = incoming.collection_id
+                        AND existing.position = incoming.position
+                )
+                """,
+                params,
             )
-            SELECT ?, ?, ?, ? WHERE NOT EXISTS (
-                SELECT 1 FROM collection_outputs
-                WHERE collection_id = ? AND position = ?
-            )
-            """,
-            (collection, position, key, output_json, collection, position),
-        )
-        rows = self._database.execute(
-            """
-            SELECT output_key, output_json FROM collection_outputs
-            WHERE collection_id = ? AND position = ?
-            """,
-            (collection, position),
-        ).rows
-        if rows[0]['output_key'] != key or not _same_json(
-            cast(str, rows[0]['output_json']), output_json
-        ):
-            raise InputError(
-                f'Collection `{collection}` already has a different output there.'
-            )
+            positions = ', '.join('?' for _ in batch)
+            rows = self._database.execute(
+                f"""
+                SELECT position, output_key, output_json FROM collection_outputs
+                WHERE collection_id = ? AND position IN ({positions})
+                """,
+                (collection, *(position for position, _, _ in batch)),
+            ).rows
+            existing = {cast(int, row['position']): row for row in rows}
+            for position, key, output_json in batch:
+                row = existing[position]
+                if row['output_key'] != key or not _same_json(
+                    cast(str, row['output_json']), output_json
+                ):
+                    raise InputError(
+                        f'Collection `{collection}` already has '
+                        'a different output there.'
+                    )
 
     def seal_collection(self, collection: str) -> None:
         row = self._collection_row(collection)

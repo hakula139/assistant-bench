@@ -253,8 +253,7 @@ def write_outputs(
             ),
         )
     )
-    for position, value in enumerate(values):
-        state.stage_output(generation, position, value)
+    state.stage_outputs(generation, list(enumerate(values)))
     state.seal_collection(generation)
     if not state.activate_collection(generation, previous):
         raise InputError(
