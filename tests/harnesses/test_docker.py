@@ -1,6 +1,9 @@
 import asyncio
+import importlib.resources
 import json
+import runpy
 from pathlib import Path
+from typing import cast
 
 import pytest
 from harbor.environments.docker import ssh
@@ -8,8 +11,8 @@ from harbor.environments.docker.docker import DockerEnvironment
 from harbor.models.task.config import EnvironmentConfig, NetworkMode, NetworkPolicy
 from harbor.models.trial.paths import TrialPaths
 
+from assistant_bench.harnesses import docker
 from assistant_bench.harnesses.docker import (
-    CONTROLLED_HOST_OVERLAY,
     HOST_OVERLAY,
     InstalledDocker,
     check_local_context,
@@ -32,31 +35,52 @@ class TestInstalledDocker:
         mode: NetworkMode,
         owner: str,
     ) -> None:
+        resources = tmp_path / 'resources'
+        resources.mkdir()
+        for name in ['docker-public.json', 'docker-controlled.json']:
+            (resources / name).write_bytes((HOST_OVERLAY.parent / name).read_bytes())
+        linked = tmp_path / 'resource-link'
+        linked.symlink_to(resources, target_is_directory=True)
+
+        def linked_resources(_package: str) -> Path:
+            return linked
+
+        with monkeypatch.context() as resource_patch:
+            resource_patch.setattr(importlib.resources, 'files', linked_resources)
+            loaded = runpy.run_path(str(docker.__file__))
+        installed = cast(type[InstalledDocker], loaded['InstalledDocker'])
+        host_overlay = cast(Path, loaded['HOST_OVERLAY'])
+
         def supported(cls: type[DockerEnvironment]) -> bool:
             return True
 
         monkeypatch.setattr(
-            InstalledDocker, '_egress_control_kernel_support', classmethod(supported)
+            installed, '_egress_control_kernel_support', classmethod(supported)
         )
         existing = tmp_path / 'task.yaml'
         existing.write_text('services: {}\n')
         policy = NetworkPolicy(network_mode=mode)
-        environment = InstalledDocker(
+        environment = installed(
             environment_dir=tmp_path,
             environment_name='example',
             session_id='example',
             trial_paths=TrialPaths(tmp_path / 'trial'),
             task_env_config=EnvironmentConfig(docker_image='debian:trixie-slim'),
             network_policy=policy,
-            extra_docker_compose=[existing, HOST_OVERLAY, existing],
+            extra_docker_compose=[existing, host_overlay, existing],
         )
 
         overlays = environment.extra_docker_compose_paths
+        overlay_name = (
+            'docker-controlled.json'
+            if mode == NetworkMode.NO_NETWORK
+            else 'docker-public.json'
+        )
 
         assert overlays == [
-            existing,
-            CONTROLLED_HOST_OVERLAY if mode == NetworkMode.NO_NETWORK else HOST_OVERLAY,
-            existing,
+            existing.resolve(),
+            (resources / overlay_name).resolve(),
+            existing.resolve(),
         ]
         assert json.loads(overlays[1].read_text()) == {
             'services': {
