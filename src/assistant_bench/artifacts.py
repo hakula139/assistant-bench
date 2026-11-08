@@ -37,9 +37,8 @@ GIT_MODES: tuple[str, ...] = ('100644', '100755', '120000')
 
 
 def audit_trial(root: Path, secrets: set[str]) -> None:
-    """Refuse frozen artifacts containing known credentials or scanner findings."""
+    """Refuse known credentials in artifact bytes, paths and symlink targets."""
     known = [value.encode() for value in secrets if value]
-    selected: list[tuple[Path, bytes]] = []
     for path in root.rglob('*'):
         if path.is_symlink():
             content = os.fsencode(os.readlink(path))
@@ -54,49 +53,6 @@ def audit_trial(root: Path, secrets: set[str]) -> None:
             raise InputError(
                 'A selected artifact contains a known credential. Publication refused.'
             )
-        if not path.is_dir() or path.is_symlink():
-            selected.append((path.relative_to(root), content))
-    environment = {
-        name: value
-        for name, value in os.environ.items()
-        if name not in ('GITLEAKS_CONFIG', 'GITLEAKS_CONFIG_TOML')
-    }
-    try:
-        with tempfile.TemporaryDirectory(prefix='bench-audit-') as temporary:
-            directory = Path(temporary)
-            audit = directory / 'files'
-            audit.mkdir()
-            for relative, content in selected:
-                path = audit / relative
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_bytes(content)
-            result = subprocess.run(
-                [
-                    'gitleaks',
-                    'dir',
-                    '--redact=100',
-                    '--no-banner',
-                    '--no-color',
-                    '--ignore-gitleaks-allow',
-                    '--exit-code=42',
-                    '--max-target-megabytes=0',
-                    str(audit),
-                ],
-                cwd=directory,
-                env=environment,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=300,
-                check=False,
-            )
-    except (OSError, subprocess.TimeoutExpired) as error:
-        raise InputError(
-            'The artifact audit could not run `gitleaks` from the development shell.'
-        ) from error
-    if result.returncode:
-        raise InputError(
-            'The artifact credential scan did not pass. Publication refused.'
-        )
 
 
 # ── Models ──

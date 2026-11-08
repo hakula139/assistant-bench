@@ -154,6 +154,21 @@ def contents(path: Path) -> bytes:
 
 
 class TestAuditTrial:
+    def test_preserves_unknown_token_shaped_output_but_refuses_a_known_credential(
+        self, tmp_path: Path
+    ) -> None:
+        marker = 'ghs_7qFm9K2wR4dX8cN1vP5sH6zB3tL0yJ9aE2uV'
+        output = tmp_path / 'response.json'
+        content = json.dumps({'output': marker}).encode()
+        output.write_bytes(content)
+
+        audit_trial(tmp_path, set())
+
+        assert output.read_bytes() == content
+        with pytest.raises(InputError, match='known credential'):
+            audit_trial(tmp_path, {marker})
+        assert output.read_bytes() == content
+
     def test_refuses_a_known_credential_in_an_empty_directory_name(
         self, tmp_path: Path
     ) -> None:
