@@ -463,11 +463,20 @@ class TestEndpoint:
             ('api', 'name', 'value', 'expected'),
             [
                 ('openai-responses', 'Authorization', 'bEaReR seed', 'seed'),
+                ('openai-responses', 'Authorization', 'Bearer   seed', 'seed'),
                 ('openai-responses', 'Proxy-Authorization', 'Bearer seed', 'seed'),
+                ('openai-responses', 'Proxy-Authorization', 'Bearer   seed', 'seed'),
                 ('anthropic-messages', 'x-api-key', 'seed', 'seed'),
                 ('openai-responses', 'X-Session-Token', 'seed', 'seed'),
             ],
-            ids=['sdk-authorization', 'proxy-authorization', 'sdk-api-key', 'custom'],
+            ids=[
+                'sdk-authorization',
+                'sdk-multiple-spaces',
+                'proxy-authorization',
+                'proxy-multiple-spaces',
+                'sdk-api-key',
+                'custom',
+            ],
         )
         def test_remembers_actual_wire_overrides_instead_of_unused_configuration(
             self,
@@ -506,6 +515,12 @@ class TestEndpoint:
                     'configured-but-not-sent' in begun_trial.secrets()
                 )
                 assert not unused_credential_remembered
+            echo = tmp_path / 'echo'
+            echo.mkdir()
+            (echo / 'trace.txt').write_text(expected)
+
+            with pytest.raises(InputError, match='known credential'):
+                audit_trial(echo, set(begun_trial.secrets()))
 
         def test_configured_header_copy_cannot_change_the_client_snapshot(
             self,

@@ -246,7 +246,7 @@ class _Client(httpx2.AsyncClient):
                 if name in ('authorization', 'proxy-authorization'):
                     scheme, separator, credential = value.partition(' ')
                     if separator and scheme.lower() == 'bearer':
-                        recorder.remember_secret(credential)
+                        recorder.remember_secret(credential.lstrip(' '))
         if request.method != 'POST' or request.url.path.endswith('/count_tokens'):
             return
         request.extensions[REQUEST_ID] = await recorder.admit(self._api)
