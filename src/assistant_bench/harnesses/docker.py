@@ -14,10 +14,10 @@ from assistant_bench.messages import InputError
 
 HOST_OVERLAY = Path(
     str(files('assistant_bench.harnesses').joinpath('docker-public.json'))
-)
+).resolve()
 CONTROLLED_HOST_OVERLAY = Path(
     str(files('assistant_bench.harnesses').joinpath('docker-controlled.json'))
-)
+).resolve()
 
 
 class InstalledDocker(DockerEnvironment):
