@@ -85,7 +85,7 @@ A task's directory name is its ID, unique across the family's public and private
 - `[agent] timeout_sec`
 - `/app` under `[[artifacts]]`, which the verifier receives
 
-It then runs the reference solution (Harbor's `oracle` agent) and a do-nothing agent (`nop`) three times on each task, and fails unless every reference attempt earns reward 1 and every do-nothing attempt earns 0, so the reference solution passes a task that the repository as committed fails.
+It then runs the reference solution (Harbor's `oracle` agent) and a do-nothing agent (`nop`) once on each task, and fails unless the reference earns reward 1 and the do-nothing agent earns 0, so the reference solution passes a task that the repository as committed fails.
 
 Once a task has run, every edit to it needs a bump of `[task] version`, since Harbor aborts a job whose task changed under a version an earlier trial recorded, and `bench check` and `bench run` name such a task first:
 

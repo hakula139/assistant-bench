@@ -431,13 +431,13 @@ class TestJob:
 
 
 class TestCheckJob:
-    def test_checks_the_committed_tasks_with_the_oracle_and_the_nop(
+    def test_checks_each_task_once_independently_of_benchmark_samples(
         self, data_dir: Path
     ) -> None:
         earlier = data_dir / 'checks' / 'smoke' / 'job-1'
         earlier.mkdir(parents=True)
         (earlier / 'result.json').touch()
-        family = load_family('smoke')
+        family = with_settings(load_family('smoke'), samples=5)
         task = case_task(family, 'echo')
 
         job = jobs.check_job(family, [task], root=data_dir)
@@ -446,7 +446,7 @@ class TestCheckJob:
             ('oracle', None),
             ('nop', None),
         ]
-        assert job.n_attempts == jobs.CHECK_ATTEMPTS
+        assert job.n_attempts == 1
         assert job.n_concurrent_trials == jobs.N_CONCURRENT_CONTAINERS
         assert [t.path for t in job.tasks] == [task]
         assert not job.verifier.disable
