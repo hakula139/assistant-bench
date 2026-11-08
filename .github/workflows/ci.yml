@@ -26,10 +26,6 @@ jobs:
 
       - name: Set up Nix
         uses: hakula139/devkit/.github/actions/setup-nix@v1
-        with:
-          extra_nix_config: |
-            sandbox = true
-            sandbox-fallback = false
 
       - name: Run flake check
         run: nix flake check --print-build-logs
@@ -49,10 +45,6 @@ jobs:
 
       - name: Set up Nix
         uses: hakula139/devkit/.github/actions/setup-nix@v1
-        with:
-          extra_nix_config: |
-            sandbox = true
-            sandbox-fallback = false
 
       - name: Install dependencies
         run: nix develop -c pnpm install
@@ -95,10 +87,6 @@ jobs:
 
       - name: Set up Nix
         uses: hakula139/devkit/.github/actions/setup-nix@v1
-        with:
-          extra_nix_config: |
-            sandbox = true
-            sandbox-fallback = false
 
       - name: Install dependencies
         run: nix develop -c pnpm install
@@ -132,10 +120,6 @@ jobs:
 
       - name: Set up Nix
         uses: hakula139/devkit/.github/actions/setup-nix@v1
-        with:
-          extra_nix_config: |
-            sandbox = true
-            sandbox-fallback = false
 
       - name: Install dependencies
         run: nix develop .#python -c uv sync --locked
@@ -179,10 +163,6 @@ jobs:
 
       - name: Set up Nix
         uses: hakula139/devkit/.github/actions/setup-nix@v1
-        with:
-          extra_nix_config: |
-            sandbox = true
-            sandbox-fallback = false
 
       - name: Install dependencies
         run: nix develop .#python -c uv sync --locked
@@ -277,10 +257,6 @@ jobs:
       - name: Set up Nix
         if: steps.pr.outputs.open
         uses: hakula139/devkit/.github/actions/setup-nix@v1
-        with:
-          extra_nix_config: |
-            sandbox = true
-            sandbox-fallback = false
 
       - name: Install dependencies
         if: steps.pr.outputs.open
@@ -388,10 +364,6 @@ jobs:
       - name: Set up Nix
         if: steps.head.outputs.current
         uses: hakula139/devkit/.github/actions/setup-nix@v1
-        with:
-          extra_nix_config: |
-            sandbox = true
-            sandbox-fallback = false
 
       - name: Install dependencies
         if: steps.head.outputs.current
