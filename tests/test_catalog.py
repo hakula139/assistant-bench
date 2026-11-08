@@ -201,6 +201,8 @@ class TestLoadSystems:
                 'DeepSeek V4.1 Flash 1017 · High · Instructions'
             ),
             'kimi-k3-high-nixos': 'Kimi K3 · High · Instructions',
+            'opus-5.5-claude-code-high': 'Claude Opus 5.5 · Claude Code · High',
+            'gemini-3.8-flash-codex-high': 'Gemini 3.8 Flash · Codex · High',
         }
         assert {system.effort for system in systems.values()} == {'high'}
         assert {
@@ -210,6 +212,7 @@ class TestLoadSystems:
             'gpt-6.1-sol-high',
             'gpt-6-astra-high-nixos',
             'gpt-6.1-sol-high-nixos',
+            'gemini-3.8-flash-codex-high',
         }
         native = systems['opus-5.5-high']
         assert (
