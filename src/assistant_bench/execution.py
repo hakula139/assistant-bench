@@ -289,10 +289,14 @@ class ExecutionPlugin(BaseJobPlugin):
             )
             return reference.commit_sha, reference.path, reference.manifest_digest
 
-        commit, path, digest = await asyncio.to_thread(publish)
-        self._state.record_trial_artifact(
-            run.id, event.trial_name, str(event.trial_id), commit, path, digest
-        )
+        publication = asyncio.create_task(asyncio.to_thread(publish))
+        try:
+            await asyncio.shield(publication)
+        finally:
+            commit, path, digest = await publication
+            self._state.record_trial_artifact(
+                run.id, event.trial_name, str(event.trial_id), commit, path, digest
+            )
 
     async def on_job_end(self, job_result: JobResult) -> None:
         self._stack.close()
