@@ -128,18 +128,18 @@ def test_check_passes_the_oracle_and_fails_the_nop_on_every_smoke_task(
     tmp_path: Path,
 ) -> None:
     family = load_family('smoke')
-    tasks = [case_task(family, case.id) for case in load_cases(family)]
+    cases = load_cases(family)
+    tasks = [case_task(family, case.id) for case in cases]
 
     job_dir = jobs.run_job(jobs.check_job(family, tasks, root=tmp_path))
 
     outputs = collection.read_trials(family, job_dir)
     assert Counter(
-        (output.system, output.error, output.reward) for output in outputs
+        (output.case, output.system, output.error, output.reward) for output in outputs
     ) == Counter(
-        {
-            ('oracle', None, 1.0): jobs.CHECK_ATTEMPTS,
-            ('nop', None, 0.0): jobs.CHECK_ATTEMPTS,
-        }
+        (case.id, agent, None, reward)
+        for case in cases
+        for agent, reward in [('oracle', 1.0), ('nop', 0.0)]
     )
 
 

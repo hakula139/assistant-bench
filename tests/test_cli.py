@@ -98,16 +98,6 @@ def invoke(*args: str) -> Result:
     return runner.invoke(app, list(args), env={'COLUMNS': '200'})
 
 
-def trials(
-    case: str, system: str, reward: float | None, *, error: str | None = None
-) -> list[Output]:
-    """Return one output per check attempt for a task and agent."""
-    return [
-        make_output(case=case, system=system, reward=reward, error=error)
-        for _ in range(jobs.CHECK_ATTEMPTS)
-    ]
-
-
 CLOSE_CASES: dict[str, Category] = {'c1': 'reply', 'c2': 'docs'}
 
 
@@ -470,10 +460,10 @@ class TestCheck:
     ) -> None:
         write_task_family(families_dir, 'a', 'b', 'c')
         check_trials['f'] = [
-            *trials('b', 'oracle', reward),
-            *trials('b', 'nop', 0.0),
-            *trials('c', 'oracle', 1.0),
-            *trials('c', 'nop', 0.0),
+            make_output(case='b', system='oracle', reward=reward),
+            make_output(case='b', system='nop', reward=0.0),
+            make_output(case='c', system='oracle', reward=1.0),
+            make_output(case='c', system='nop', reward=0.0),
         ]
 
         result = invoke('check', 'f', 'f', '--task', 'c', '--task', 'b', '--task', 'b')
@@ -543,7 +533,10 @@ class TestCheck:
         [
             pytest.param(
                 ('a',),
-                [*trials('a', 'oracle', 1.0), *trials('a', 'nop', 0.0)],
+                [
+                    make_output(case='a', system='oracle', reward=1.0),
+                    make_output(case='a', system='nop', reward=0.0),
+                ],
                 0,
                 'Family `f`: every reference solution passed its tests, and the '
                 'do-nothing agent failed every task.\n',
@@ -551,42 +544,54 @@ class TestCheck:
             ),
             pytest.param(
                 ('a',),
-                [*trials('a', 'oracle', 0.0), *trials('a', 'nop', 0.0)],
+                [
+                    make_output(case='a', system='oracle', reward=0.0),
+                    make_output(case='a', system='nop', reward=0.0),
+                ],
                 1,
                 'Family `f`: the reference solution failed the tests of `a`.\n',
                 id='oracle-failed',
             ),
             pytest.param(
                 ('a',),
-                [*trials('a', 'nop', 0.0)],
+                [make_output(case='a', system='nop', reward=0.0)],
                 1,
                 'Family `f`: the reference solution left no trial of `a`.\n',
                 id='oracle-left-no-trial',
             ),
             pytest.param(
                 ('a',),
-                [*trials('a', 'oracle', 1.0), *trials('a', 'nop', 1.0)],
+                [
+                    make_output(case='a', system='oracle', reward=1.0),
+                    make_output(case='a', system='nop', reward=1.0),
+                ],
                 1,
                 'Family `f`: the do-nothing agent passed the tests of `a`.\n',
                 id='nop-passed',
             ),
             pytest.param(
                 ('a',),
-                [*trials('a', 'oracle', 1.0)],
+                [make_output(case='a', system='oracle', reward=1.0)],
                 1,
                 'Family `f`: the do-nothing agent left no trial of `a`.\n',
                 id='nop-left-no-trial',
             ),
             pytest.param(
                 ('a',),
-                [*trials('a', 'oracle', None), *trials('a', 'nop', 0.0)],
+                [
+                    make_output(case='a', system='oracle', reward=None),
+                    make_output(case='a', system='nop', reward=0.0),
+                ],
                 1,
                 'Family `f`: the reference solution left no verdict on `a`.\n',
                 id='oracle-without-a-verdict',
             ),
             pytest.param(
                 ('a',),
-                [*trials('a', 'oracle', 1.0), *trials('a', 'nop', None)],
+                [
+                    make_output(case='a', system='oracle', reward=1.0),
+                    make_output(case='a', system='nop', reward=None),
+                ],
                 1,
                 'Family `f`: the do-nothing agent left no verdict on `a`.\n',
                 id='nop-without-a-verdict',
@@ -602,8 +607,10 @@ class TestCheck:
             pytest.param(
                 ('a',),
                 [
-                    *trials('a', 'oracle', 1.0, error='TimeoutError'),
-                    *trials('a', 'nop', 0.0),
+                    make_output(
+                        case='a', system='oracle', reward=1.0, error='TimeoutError'
+                    ),
+                    make_output(case='a', system='nop', reward=0.0),
                 ],
                 1,
                 'Family `f`: the reference solution errored on `a` (`TimeoutError`).\n',
@@ -612,8 +619,10 @@ class TestCheck:
             pytest.param(
                 ('a',),
                 [
-                    *trials('a', 'oracle', 1.0),
-                    *trials('a', 'nop', 0.0, error='VerifierTimeoutError'),
+                    make_output(case='a', system='oracle', reward=1.0),
+                    make_output(
+                        case='a', system='nop', reward=0.0, error='VerifierTimeoutError'
+                    ),
                 ],
                 1,
                 'Family `f`: the do-nothing agent errored on `a` '
@@ -623,10 +632,10 @@ class TestCheck:
             pytest.param(
                 ('a', 'b'),
                 [
-                    *trials('a', 'oracle', 0.0),
-                    *trials('b', 'oracle', 0.0),
-                    *trials('a', 'nop', 0.0),
-                    *trials('b', 'nop', 0.0),
+                    make_output(case='a', system='oracle', reward=0.0),
+                    make_output(case='b', system='oracle', reward=0.0),
+                    make_output(case='a', system='nop', reward=0.0),
+                    make_output(case='b', system='nop', reward=0.0),
                 ],
                 1,
                 'Family `f`: the reference solution failed the tests of `a`, `b`.\n',
@@ -635,9 +644,9 @@ class TestCheck:
             pytest.param(
                 ('a', 'b'),
                 [
-                    *trials('a', 'oracle', 0.0),
-                    *trials('a', 'nop', 0.0),
-                    *trials('b', 'nop', 0.0),
+                    make_output(case='a', system='oracle', reward=0.0),
+                    make_output(case='a', system='nop', reward=0.0),
+                    make_output(case='b', system='nop', reward=0.0),
                 ],
                 1,
                 'Family `f`: the reference solution failed the tests of `a`.\n'
@@ -670,7 +679,7 @@ class TestCheck:
             problems,
         )
         assert [agent.name for agent in job.agents] == ['oracle', 'nop']
-        assert job.n_attempts == jobs.CHECK_ATTEMPTS
+        assert job.n_attempts == 1
         assert [task.path.name for task in job.tasks if task.path] == list(tasks)
 
     def test_refuses_a_task_without_an_author_before_running_harbor(
@@ -696,8 +705,14 @@ class TestCheck:
     ) -> None:
         write_task_family(families_dir, 'a', name='f')
         write_task_family(families_dir, 'a', name='g')
-        check_trials['f'] = [*trials('a', 'oracle', 0.0), *trials('a', 'nop', 0.0)]
-        check_trials['g'] = [*trials('a', 'oracle', 1.0), *trials('a', 'nop', 0.0)]
+        check_trials['f'] = [
+            make_output(case='a', system='oracle', reward=0.0),
+            make_output(case='a', system='nop', reward=0.0),
+        ]
+        check_trials['g'] = [
+            make_output(case='a', system='oracle', reward=1.0),
+            make_output(case='a', system='nop', reward=0.0),
+        ]
 
         result = invoke('check')
 
