@@ -4,13 +4,13 @@
 
 GitHub Actions runs on pushes to `main`, pull requests, and manual dispatch:
 
-| Job               | Checks                                                                                                                                                                                                             |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Nix / Nix (Linux) | The shared Nix workflow runs `nix flake check`, including shared formatting, spelling, Ruff, and Markdown checks and the GitLab Pages pin checks.                                                                  |
-| Node Check        | `pnpm format`, `pnpm lint`, `pnpm typecheck`, Playwright's Chromium, and `pnpm test` with coverage uploaded to Codecov, then `pnpm build` and a dry-run voting Worker bundle, uploading `web/dist` as `site-dist`. |
-| Python Check      | `uv sync --locked`, mypy, basedpyright, pytest with coverage uploaded to Codecov, and the fingerprint check.                                                                                                       |
-| Harbor Smoke      | `uv run pytest -m docker` under Docker, including the oracle and nop check that `bench check smoke` runs, then `bench check coding-repo` on the coding tasks selected below                                        |
-| CI Result         | Fails when any job above fails or is cancelled                                                                                                                                                                     |
+| Job                       | Checks                                                                                                                                                                                                             |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| flake-check / Nix (Linux) | The shared Nix workflow runs `nix flake check`, including shared formatting, spelling, Ruff, and Markdown checks and the GitLab Pages pin checks.                                                                  |
+| Node Check                | `pnpm format`, `pnpm lint`, `pnpm typecheck`, Playwright's Chromium, and `pnpm test` with coverage uploaded to Codecov, then `pnpm build` and a dry-run voting Worker bundle, uploading `web/dist` as `site-dist`. |
+| Python Check              | `uv sync --locked`, mypy, basedpyright, pytest with coverage uploaded to Codecov, and the fingerprint check.                                                                                                       |
+| Harbor Smoke              | `uv run pytest -m docker` under Docker, including the oracle and nop check that `bench check smoke` runs, then `bench check coding-repo` on the coding tasks selected below                                        |
+| CI Result                 | Fails when any job above fails or is cancelled                                                                                                                                                                     |
 
 The fingerprint check runs `uv run bench fingerprints`, which enforces the rule in [Systems](../design/systems.md#fingerprints) against the fingerprints that the closed reports under `reports/` froze. It reads only the checked-out tree, so the push run on `main` catches a fingerprint change and a close that pass alone but conflict once both land.
 

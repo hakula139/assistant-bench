@@ -43,7 +43,13 @@ Write an English note summarizing a fictional orchard's opening hours: Saturday,
 '''
 [cases.checks]
 language = "en"
-rules = ["ellipsis", "curly-quotes", "paragraph-lines", "list-spacing", "forbidden-marker"]
+rules = [
+  "ellipsis",
+  "curly-quotes",
+  "paragraph-lines",
+  "list-spacing",
+  "forbidden-marker",
+]
 targets = ["forbidden-marker"]
 forbidden_marker = "ORCHARD_FILTER_731"
 
@@ -81,7 +87,13 @@ instruction = '''
 [cases.checks]
 language = "zh"
 kind = "directory-tree"
-rules = ["ellipsis", "han-punctuation", "paragraph-lines", "list-spacing", "tree-comments"]
+rules = [
+  "ellipsis",
+  "han-punctuation",
+  "paragraph-lines",
+  "list-spacing",
+  "tree-comments",
+]
 targets = ["tree-comments"]
 
 [[cases]]
@@ -167,7 +179,13 @@ Describe a fictional tide-calendar project in one short English paragraph, follo
 [cases.checks]
 language = "en"
 kind = "directory-tree"
-rules = ["ellipsis", "curly-quotes", "paragraph-lines", "list-spacing", "tree-comments"]
+rules = [
+  "ellipsis",
+  "curly-quotes",
+  "paragraph-lines",
+  "list-spacing",
+  "tree-comments",
+]
 targets = ["tree-comments"]
 
 [[cases]]
@@ -180,7 +198,13 @@ Write an English handover note for a fictional field-notes repository. Include a
 [cases.checks]
 language = "en"
 kind = "directory-tree"
-rules = ["ellipsis", "curly-quotes", "paragraph-lines", "list-spacing", "tree-comments"]
+rules = [
+  "ellipsis",
+  "curly-quotes",
+  "paragraph-lines",
+  "list-spacing",
+  "tree-comments",
+]
 targets = ["tree-comments"]
 
 [[cases]]
@@ -211,7 +235,13 @@ Turn this fictional volunteer record into a public English announcement: the riv
 '''
 [cases.checks]
 language = "en"
-rules = ["ellipsis", "curly-quotes", "paragraph-lines", "list-spacing", "forbidden-marker"]
+rules = [
+  "ellipsis",
+  "curly-quotes",
+  "paragraph-lines",
+  "list-spacing",
+  "forbidden-marker",
+]
 targets = ["forbidden-marker"]
 forbidden_marker = "RIVER_DRAFT_482"
 
@@ -224,7 +254,13 @@ Write an English summary of a fictional archive export: 120 public records were 
 '''
 [cases.checks]
 language = "en"
-rules = ["ellipsis", "curly-quotes", "paragraph-lines", "list-spacing", "forbidden-marker"]
+rules = [
+  "ellipsis",
+  "curly-quotes",
+  "paragraph-lines",
+  "list-spacing",
+  "forbidden-marker",
+]
 targets = ["forbidden-marker", "paragraph-lines"]
 forbidden_marker = "ARCHIVE_CHECK_906"
 
@@ -358,7 +394,13 @@ instruction = '''
 [cases.checks]
 language = "zh"
 kind = "directory-tree"
-rules = ["ellipsis", "han-punctuation", "paragraph-lines", "list-spacing", "tree-comments"]
+rules = [
+  "ellipsis",
+  "han-punctuation",
+  "paragraph-lines",
+  "list-spacing",
+  "tree-comments",
+]
 targets = ["tree-comments"]
 
 [[cases]]
@@ -371,7 +413,13 @@ instruction = '''
 [cases.checks]
 language = "zh"
 kind = "directory-tree"
-rules = ["ellipsis", "han-punctuation", "paragraph-lines", "list-spacing", "tree-comments"]
+rules = [
+  "ellipsis",
+  "han-punctuation",
+  "paragraph-lines",
+  "list-spacing",
+  "tree-comments",
+]
 targets = ["tree-comments"]
 
 [[cases]]
@@ -421,7 +469,13 @@ instruction = '''
 '''
 [cases.checks]
 language = "zh"
-rules = ["ellipsis", "han-punctuation", "paragraph-lines", "list-spacing", "forbidden-marker"]
+rules = [
+  "ellipsis",
+  "han-punctuation",
+  "paragraph-lines",
+  "list-spacing",
+  "forbidden-marker",
+]
 targets = ["forbidden-marker"]
 forbidden_marker = "BOOK_FAIR_264"
 
@@ -434,7 +488,13 @@ instruction = '''
 '''
 [cases.checks]
 language = "zh"
-rules = ["ellipsis", "han-punctuation", "paragraph-lines", "list-spacing", "forbidden-marker"]
+rules = [
+  "ellipsis",
+  "han-punctuation",
+  "paragraph-lines",
+  "list-spacing",
+  "forbidden-marker",
+]
 targets = ["forbidden-marker", "paragraph-lines"]
 forbidden_marker = "SEED_AUDIT_815"
 

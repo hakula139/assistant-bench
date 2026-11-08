@@ -89,7 +89,6 @@
           deadnix.enable = true;
           dprint.enable = true;
           editorconfig-checker.enable = true;
-          lychee.enable = true;
           markdownlint-cli2.enable = true;
           nixfmt.enable = true;
           shellcheck.enable = true;
@@ -97,6 +96,11 @@
           sort-file-contents.enable = true;
           statix.enable = true;
           taplo.enable = true;
+
+          lychee = {
+            enable = true;
+            extraPackages = [ pkgs.cacert ];
+          };
 
           ruff = {
             enable = true;
