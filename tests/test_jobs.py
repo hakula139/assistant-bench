@@ -470,7 +470,7 @@ class TestMaterializeSources:
         systems = jobs.family_systems(family, [make_system()])
         tasks = [case_task(family, name) for name in ('again', 'echo')]
         original = tmp_path / 'original'
-        archives = []
+        archives: list[MaterializedTrial] = []
         for name, samples in [('run-a', 2), ('run-b', 1)]:
             config = jobs.job(
                 with_settings(family, samples=samples),

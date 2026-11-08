@@ -24,7 +24,7 @@ from harbor.models.task.task import Task
 from harbor.models.trial.result import TrialResult
 from pydantic import ValidationError
 
-from assistant_bench import artifacts, collection, jobs
+from assistant_bench import collection, jobs
 from assistant_bench.artifacts import (
     ArtifactRef,
     ArtifactRepository,
@@ -1095,10 +1095,8 @@ class TestArtifactRepository:
             shutil.rmtree(trial.job.parent)
             shutil.rmtree(repository.seed)
             client = ArtifactRepository(SLUG)
-            metadata = Mock(wraps=client._metadata)
-            git_calls = Mock(wraps=artifacts._git)
-            monkeypatch.setattr(client, '_metadata', metadata)
-            monkeypatch.setattr(artifacts, '_git', git_calls)
+            command_calls = Mock(wraps=subprocess.run)
+            monkeypatch.setattr(subprocess, 'run', command_calls)
 
             restored = client.materialize_trials(
                 [
@@ -1133,8 +1131,13 @@ class TestArtifactRepository:
                 assert not (workspace / 'vendor' / '.git').exists()
                 assert not (workspace / '.git').exists()
                 assert not (workspace / '__pycache__').exists()
-            metadata.assert_called_once_with()
-            commands = [call.args[1] for call in git_calls.call_args_list]
+            calls = [call.args[0] for call in command_calls.call_args_list]
+            assert [command for command in calls if command[:2] == ['gh', 'api']] == [
+                ['gh', 'api', f'repos/{SLUG}']
+            ]
+            commands = [
+                command[3:] for command in calls if command[:2] == ['git', '-C']
+            ]
             clones = [command for command in commands if command[0] == 'clone']
             assert len(clones) == 1
             assert '--filter=blob:none' not in clones[0]
