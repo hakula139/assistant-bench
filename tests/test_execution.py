@@ -213,6 +213,66 @@ class TestExecute:
 
 
 class TestExecutionPlugin:
+    @pytest.mark.usefixtures('export')
+    @pytest.mark.parametrize(
+        ('harness', 'reflected'),
+        [('claude-code', False), ('claude-code', True), ('codex', False)],
+        ids=['claude-control', 'claude-reflected', 'codex-control'],
+    )
+    def test_cleans_final_claude_controls_before_auditing_publication(
+        self,
+        run_context: RunContext,
+        family: Family,
+        system: System,
+        tmp_path: Path,
+        harness: str,
+        reflected: bool,
+    ) -> None:
+        claude = harness == 'claude-code'
+        system = make_system(
+            api='anthropic-messages' if claude else 'openai-responses',
+            thinking_mode='anthropic-adaptive' if claude else None,
+            harness=harness,
+            version='1.2.3',
+        )
+        config = planned(run_context, family, system)
+        peer = 'a1' * 16
+        relative = Path('sessions') / 'sessions' / f'27.{"c" * 64}.key'
+        trace = '{"type":"assistant"}\n'
+
+        async def finish() -> None:
+            async with executed_trial(
+                run_context, config, system, scope=family.name
+            ) as trial:
+                key = trial.paths.agent_dir / relative
+                key.parent.mkdir(parents=True)
+                key.write_text(json.dumps({'peerToken': peer}))
+                (trial.paths.agent_dir / 'trace.jsonl').write_text(trace)
+                if reflected:
+                    (trial.paths.agent_dir / 'reflected.txt').write_text(peer)
+
+        if reflected:
+            with pytest.raises(InputError, match='known credential'):
+                asyncio.run(finish())
+
+            assert run_context.state.artifact_generation(family.name).artifacts == ()
+            return
+
+        asyncio.run(finish())
+
+        (artifact,) = run_context.state.artifact_generation(family.name).artifacts
+        archive = run_context.artifacts.materialize(
+            ArtifactRef(
+                commit_sha=artifact.commit_sha,
+                path=artifact.path,
+                manifest_digest=artifact.manifest_digest,
+            ),
+            tmp_path / 'final-diagnostics',
+        )
+        logs = archive.job / archive.manifest.trial_name / 'agent'
+        assert (logs / relative).exists() == (not claude)
+        assert (logs / 'trace.jsonl').read_text() == trace
+
     @pytest.mark.parametrize('confirmed', [True, False], ids=['known', 'missing'])
     def test_cap_denial_settles_only_with_all_previously_admitted_receipts(
         self,

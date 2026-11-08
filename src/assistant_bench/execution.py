@@ -29,12 +29,14 @@ from assistant_bench.artifacts import (
     build_manifest,
     snapshot_trial,
 )
+from assistant_bench.harnesses import HARNESSES
 from assistant_bench.harnesses.accounting import (
     TrialAccounting,
     bind_trial,
     reset_trial,
 )
 from assistant_bench.harnesses.endpoint import HEADERS_VAR, KEY_FILE_VAR
+from assistant_bench.harnesses.installed import discard_session_keys
 from assistant_bench.messages import InputError
 from assistant_bench.runtime import REPOSITORY_VAR, RunContext
 from assistant_bench.spend import Accounting, Entry
@@ -216,6 +218,11 @@ class ExecutionPlugin(BaseJobPlugin):
             return
         recorder, token = self._recorders.pop(event.trial_id)
         try:
+            if event.config.agent.import_path == HARNESSES['claude-code'].import_path:
+                assert self._job_dir is not None
+                discard_session_keys(
+                    self._job_dir / event.trial_name / 'agent', recorder
+                )
             claim = self._claims[event.trial_name]
             attempt = recorder.attempt()
             if attempt is None:

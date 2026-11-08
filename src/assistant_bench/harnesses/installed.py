@@ -225,8 +225,6 @@ async def _finish(
         await environment.download_dir(
             agent.environment_logs_dir.as_posix(), agent.logs_dir
         )
-        if isinstance(agent, ClaudeCode):
-            _discard_session_keys(agent.logs_dir, current_trial())
         agent.populate_context_post_run(context)
     except Exception:
         if not failed:
@@ -238,7 +236,7 @@ async def _finish(
         _record(agent, context, calls)
 
 
-def _discard_session_keys(logs: Path, recorder: TrialAccounting) -> None:
+def discard_session_keys(logs: Path, recorder: TrialAccounting) -> None:
     """Remove Claude's validated messaging credentials from downloaded logs."""
     sessions = logs / 'sessions'
     directory = sessions / 'sessions'

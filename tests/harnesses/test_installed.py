@@ -15,7 +15,7 @@ from harbor.models.agent.context import AgentContext
 from assistant_bench import jobs
 from assistant_bench.artifacts import audit_trial
 from assistant_bench.harnesses import agent_kwargs, fingerprint
-from assistant_bench.harnesses.installed import ClaudeCode, Codex
+from assistant_bench.harnesses.installed import ClaudeCode, Codex, discard_session_keys
 from assistant_bench.messages import InputError
 from assistant_bench.state import State
 from support import (
@@ -217,34 +217,12 @@ class TestInstalled:
         assert options.version == '1.2.3'
 
 
-class TestFinish:
-    @pytest.mark.parametrize(
-        'agent_type', [ClaudeCode, Codex], ids=['claude-code', 'codex']
-    )
-    def test_discards_only_claude_control_keys_before_parsing_downloaded_logs(
+class TestDiscardSessionKeys:
+    def test_removes_only_recognized_controls_and_remembers_their_credentials(
         self,
         private_state: State,
-        endpoint: StubEndpoint,
         logs_dir: Path,
-        monkeypatch: pytest.MonkeyPatch,
-        agent_type: type[ClaudeCode] | type[Codex],
     ) -> None:
-        claude = agent_type is ClaudeCode
-        system = make_system(
-            api='anthropic-messages' if claude else 'openai-responses',
-            thinking_mode='anthropic-adaptive' if claude else None,
-            harness='claude-code' if claude else 'codex',
-            version='1.2.3',
-        )
-        agent = agent_type(
-            logs_dir=logs_dir,
-            model_name=('anthropic/' if claude else 'openai/') + system.route,
-            extra_env=endpoint.env,
-            **agent_kwargs(system),
-        )
-        agent.binary_sha256 = 'binary-digest'
-        environment = AsyncMock(spec=BaseEnvironment)
-        context = AgentContext()
         peers = ('a1' * 16, 'b2' * 16)
         digest = 'c' * 64
         credentials = {
@@ -276,74 +254,38 @@ class TestFinish:
             'sessions/projects/-app/example.jsonl': '{"type":"assistant"}\n',
             'reflected.txt': f'Reflected control credential: {peers[0]}\n',
         }
-        observed: list[tuple[bool, ...]] = []
-
-        async def download(source: str, destination: Path) -> None:
-            assert source == agent.environment_logs_dir.as_posix()
-            assert destination == logs_dir
-            for relative, content in preserved.items():
-                path = destination / relative
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text(content)
-            for name, value in credentials.items():
-                path = destination / 'sessions' / 'sessions' / name
-                path.write_text(json.dumps(value))
-
-        def populate(context: AgentContext) -> None:
-            observed.append(
-                tuple(
-                    (logs_dir / 'sessions' / 'sessions' / name).exists()
-                    for name in credentials
-                )
-            )
-
-        environment.download_dir.side_effect = download
-        monkeypatch.setattr(agent, 'populate_context_post_run', populate)
-        monkeypatch.setattr(
-            HarborClaudeCode if claude else HarborCodex, 'run', AsyncMock()
-        )
+        for relative, content in preserved.items():
+            path = logs_dir / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content)
+        for name, value in credentials.items():
+            path = logs_dir / 'sessions' / 'sessions' / name
+            path.write_text(json.dumps(value))
 
         with accounted_trial(private_state) as recorder:
-            asyncio.run(agent.run('Write the greeting.', environment, context))
+            discard_session_keys(logs_dir, recorder)
 
-        assert observed == [(not claude, not claude)]
+        assert all(
+            not (logs_dir / 'sessions' / 'sessions' / name).exists()
+            for name in credentials
+        )
         assert all(
             (logs_dir / path).read_text() == value for path, value in preserved.items()
         )
-        if claude:
-            remembered = all(peer in recorder.secrets() for peer in peers)
-            assert remembered
-            with pytest.raises(InputError, match='known credential'):
-                audit_trial(logs_dir, set(recorder.secrets()))
-        else:
-            remembered = any(peer in recorder.secrets() for peer in peers)
-            assert not remembered
+        remembered = all(peer in recorder.secrets() for peer in peers)
+        assert remembered
+        with pytest.raises(InputError, match='known credential'):
+            audit_trial(logs_dir, set(recorder.secrets()))
 
     @pytest.mark.parametrize('link', ['logs', 'sessions', 'runtime', 'key'])
     def test_does_not_follow_session_control_symlinks(
         self,
         private_state: State,
-        endpoint: StubEndpoint,
         tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
         link: Literal['logs', 'sessions', 'runtime', 'key'],
     ) -> None:
-        system = make_system(
-            api='anthropic-messages',
-            thinking_mode='anthropic-adaptive',
-            harness='claude-code',
-            version='1.2.3',
-        )
         logs = tmp_path / 'logs'
         logs.mkdir()
-        agent = ClaudeCode(
-            logs_dir=logs,
-            model_name='anthropic/' + system.route,
-            extra_env=endpoint.env,
-            **agent_kwargs(system),
-        )
-        agent.binary_sha256 = 'binary-digest'
-        environment = AsyncMock(spec=BaseEnvironment)
         peer = 'a1' * 16
         key = f'27.{"c" * 64}.key'
         external = tmp_path / 'external'
@@ -361,29 +303,24 @@ class TestFinish:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(credential)
 
-        async def download(source: str, destination: Path) -> None:
-            match link:
-                case 'logs':
-                    logs.rmdir()
-                    logs.symlink_to(external, target_is_directory=True)
-                case 'sessions':
-                    (logs / 'sessions').symlink_to(external, target_is_directory=True)
-                case 'runtime':
-                    (logs / 'sessions').mkdir()
-                    (logs / 'sessions' / 'sessions').symlink_to(
-                        external, target_is_directory=True
-                    )
-                case 'key':
-                    directory = logs / 'sessions' / 'sessions'
-                    directory.mkdir(parents=True)
-                    (directory / key).symlink_to(target)
-
-        environment.download_dir.side_effect = download
-        monkeypatch.setattr(agent, 'populate_context_post_run', Mock())
-        monkeypatch.setattr(HarborClaudeCode, 'run', AsyncMock())
+        match link:
+            case 'logs':
+                logs.rmdir()
+                logs.symlink_to(external, target_is_directory=True)
+            case 'sessions':
+                (logs / 'sessions').symlink_to(external, target_is_directory=True)
+            case 'runtime':
+                (logs / 'sessions').mkdir()
+                (logs / 'sessions' / 'sessions').symlink_to(
+                    external, target_is_directory=True
+                )
+            case 'key':
+                directory = logs / 'sessions' / 'sessions'
+                directory.mkdir(parents=True)
+                (directory / key).symlink_to(target)
 
         with accounted_trial(private_state) as recorder:
-            asyncio.run(agent.run('Write the greeting.', environment, AgentContext()))
+            discard_session_keys(logs, recorder)
 
         assert target.read_text() == credential
         remembered = peer in recorder.secrets()
