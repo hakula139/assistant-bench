@@ -171,6 +171,8 @@ jobs:
         run: time docker info
 
       - name: Run trials under Docker
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: nix develop .#python -c uv run pytest -m docker
 
       - name: Check the coding family

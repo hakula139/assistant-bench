@@ -21,7 +21,7 @@ The `main` ruleset requires CI Result and both Codecov patch statuses: `codecov/
 
 Both jobs authenticate the upload with a GitHub OIDC token, so they alone hold `id-token: write`, and the action falls back to a tokenless upload for PRs from forks, which receive no OIDC token. A failed upload fails the job, so a PR stuck on a missing patch check shows the cause in CI.
 
-Only the deploy jobs below read secrets, and only in the steps that run Wrangler. List each new check job in CI Result's `needs`.
+Only the deploy jobs below read repository secrets, and only in the steps that run Wrangler. Harbor Smoke uses the automatic read-only GitHub token to fetch pinned Codex release metadata. List each new check job in CI Result's `needs`.
 
 Set every job's `timeout-minutes` to several times its measured successful duration, including the full coding-family run for Harbor Smoke. Revisit the budget when the workload changes so a stalled job releases its runner and concurrency group promptly.
 
