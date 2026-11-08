@@ -379,8 +379,9 @@ def preflight(env: Mapping[str, str] | None, api: Api) -> None:
 
     if api == 'anthropic-messages' and lookup(SDK_HEADERS_VAR):
         raise ValueError(
-            f'Unset `{SDK_HEADERS_VAR}`. Configure native endpoint headers '
-            f'with `{HEADERS_VAR}`.'
+            f'Unset `{SDK_HEADERS_VAR}`. Configure ordinary endpoint headers '
+            f'with `{HEADERS_VAR}` and confidential headers in the file named '
+            f'by `{SECRET_HEADERS_FILE_VAR}`.'
         )
 
     required = (_base_var(api), KEY_FILE_VAR, EXPORT_VAR)
