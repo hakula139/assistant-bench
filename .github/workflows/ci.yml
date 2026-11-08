@@ -142,7 +142,7 @@ jobs:
       - name: Check the coding family
         shell: bash
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
           args=()
           if [[ -n $BASE_SHA ]]; then

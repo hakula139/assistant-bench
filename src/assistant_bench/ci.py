@@ -1,4 +1,4 @@
-"""Run Harbor Smoke on coding tasks affected by a pull request."""
+"""Run Harbor Smoke on coding tasks affected by repository changes."""
 
 import argparse
 import subprocess
