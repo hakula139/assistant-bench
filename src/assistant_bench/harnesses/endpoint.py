@@ -6,6 +6,7 @@ import ssl
 from collections.abc import Callable, Mapping
 from typing import Any, Literal, override
 
+import h11
 import httpx2
 from anthropic import AsyncAnthropic
 from openai import AsyncOpenAI
@@ -92,8 +93,7 @@ class HeaderSettings(BaseModel):
 
     def resolve(self) -> tuple[dict[str, str], frozenset[str]]:
         """Read confidential headers and return one normalized configuration."""
-        ordinary = httpx2.Headers(self.headers or {})
-        confidential = httpx2.Headers()
+        secret_headers: dict[str, str] = {}
         if self.secret_headers_file:
             try:
                 content = self.secret_headers_file.read_bytes()
@@ -101,7 +101,21 @@ class HeaderSettings(BaseModel):
                 raise ValueError(
                     'The confidential header file could not be read.'
                 ) from None
-            confidential = httpx2.Headers(_parse_headers(content))
+            secret_headers = _parse_headers(content)
+        try:
+            ordinary = httpx2.Headers(self.headers or {})
+            confidential = httpx2.Headers(secret_headers)
+            # HTTP/1.0 validates configured headers without requiring Host.
+            h11.Request(
+                method=b'POST',
+                target=b'/',
+                headers=[*ordinary.raw, *confidential.raw],
+                http_version=b'1.0',
+            )
+        except h11.LocalProtocolError, UnicodeError, TypeError:
+            raise ValueError(
+                'Extra headers must have valid names and values.'
+            ) from None
         if ordinary.keys() & _AUTH_HEADERS:
             raise ValueError(
                 'Authentication headers require the confidential header file.'
@@ -165,7 +179,7 @@ class Endpoint(HeaderSettings):
     def http_client(
         self, api: Api, *, recorder: TrialAccounting | None = None
     ) -> _Client:
-        """Bind the local address and refuse automatic redirects."""
+        """Use the explicit recorder or the current trial for every HTTP request."""
         verify = self.verify()
         transport = (
             httpx2.AsyncHTTPTransport(
@@ -225,8 +239,6 @@ class _Client(httpx2.AsyncClient):
         return self._recorder if self._recorder is not None else current_trial()
 
     async def _admit(self, request: httpx2.Request) -> None:
-        if request.method != 'POST' or request.url.path.endswith('/count_tokens'):
-            return
         recorder = self._accounting()
         for name in _AUTH_HEADERS | self._confidential_headers:
             if value := request.headers.get(name):
@@ -235,6 +247,8 @@ class _Client(httpx2.AsyncClient):
                     scheme, separator, credential = value.partition(' ')
                     if separator and scheme.lower() == 'bearer':
                         recorder.remember_secret(credential)
+        if request.method != 'POST' or request.url.path.endswith('/count_tokens'):
+            return
         request.extensions[REQUEST_ID] = await recorder.admit(self._api)
 
     async def _confirm(self, response: httpx2.Response) -> None:
@@ -282,7 +296,12 @@ def _parse_headers(value: str | bytes) -> dict[str, str]:
         raise ValueError(
             'Extra headers must be a JSON object of string values.'
         ) from None
-    return _headers.validate_python(values)
+    try:
+        return _headers.validate_python(values)
+    except ValidationError:
+        raise ValueError(
+            'Extra headers must be a JSON object of string values.'
+        ) from None
 
 
 def _unique_headers(pairs: list[tuple[str, Any]]) -> dict[str, Any]:

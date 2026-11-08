@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import ssl
+import traceback
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -13,8 +14,9 @@ import pytest
 from pydantic import ValidationError
 
 from assistant_bench import jobs
-from assistant_bench.artifacts import ArtifactRef
+from assistant_bench.artifacts import ArtifactRef, audit_trial
 from assistant_bench.catalog import EXPORT_VAR, Api
+from assistant_bench.database import SQLiteDatabase
 from assistant_bench.families import load_cases, load_family
 from assistant_bench.harnesses.accounting import (
     AccountingError,
@@ -109,6 +111,11 @@ class TestHeaderSettings:
             ('{"Authorization":"Bearer seed"}', '{}'),
             ('{"PROXY-AUTHORIZATION":"Bearer seed"}', '{}'),
             ('{"X-Api-Key":"seed"}', '{}'),
+            ('{}', '{"x-private-field":"synthetic-header-marker\\r\\nvalue"}'),
+            ('{}', '{"x-private field":"synthetic-header-marker"}'),
+            ('{}', '{"x-private-field":"synthetic-header-marker\\u2603"}'),
+            ('{}', '{"x-private-field":1}'),
+            ('{}', '{"x-private-field":["synthetic-header-marker"]}'),
         ],
         ids=[
             'ordinary-exact-duplicate',
@@ -119,9 +126,14 @@ class TestHeaderSettings:
             'ordinary-authorization',
             'ordinary-proxy-authorization',
             'ordinary-api-key',
+            'secret-newline-value',
+            'secret-invalid-name',
+            'secret-unicode-value',
+            'secret-numeric-value',
+            'secret-array-value',
         ],
     )
-    def test_rejects_ambiguous_or_misclassified_headers_without_exposing_values(
+    def test_rejects_invalid_headers_without_exposing_names_or_values(
         self, tmp_path: Path, ordinary: str, confidential: str
     ) -> None:
         path = tmp_path / 'secret-headers.json'
@@ -131,9 +143,19 @@ class TestHeaderSettings:
         with pytest.raises(ValueError) as failure:
             HeaderSettings.from_env(env.get).resolve()
 
+        rendered = ''.join(traceback.format_exception(failure.value))
         assert all(
-            value not in str(failure.value)
-            for value in ('seed', 'twig', 'first', 'second')
+            value not in rendered
+            for value in (
+                'seed',
+                'twig',
+                'first',
+                'second',
+                'x-private',
+                'synthetic-header-marker',
+                '\\u2603',
+                '\u2603',
+            )
         )
 
 
@@ -174,25 +196,58 @@ class TestEndpoint:
         assert attempt.responses == [None, None]
 
     def test_nonbillable_token_counting_needs_no_trial_admission(
-        self, endpoint: StubEndpoint, private_state: State
+        self,
+        endpoint: StubEndpoint,
+        private_state: State,
+        private_store: SQLiteDatabase,
+        tmp_path: Path,
     ) -> None:
         endpoint.response = {'input_tokens': 5}
-        configured = Endpoint.read(endpoint.env.get, 'anthropic-messages')
+        original_key = endpoint.key_file.read_text().strip()
+        original_file = tmp_path / 'original-headers.json'
+        original_file.write_text('{"x-session-token":"seed"}')
+        environment = endpoint.env | {SECRET_HEADERS_FILE_VAR: str(original_file)}
+        configured = Endpoint.read(environment.get, 'anthropic-messages')
 
         async def request() -> None:
-            async with configured.messages_client() as client:
+            client = configured.messages_client()
+            endpoint.key_file.write_text('rotated-endpoint-key')
+            original_file.write_text('{"x-rewritten-token":"rewritten-secret"}')
+            rotated_file = tmp_path / 'rotated-headers.json'
+            rotated_file.write_text('{"x-rotated-token":"later-secret"}')
+            environment[SECRET_HEADERS_FILE_VAR] = str(rotated_file)
+            async with client:
                 result = await client.messages.count_tokens(
                     model='acme/large',
                     messages=[{'role': 'user', 'content': 'Hello.'}],
                 )
                 assert result.input_tokens == 5
 
-        asyncio.run(request())
+        with accounted_trial(private_state) as recorder:
+            asyncio.run(request())
 
         assert [sent.path for sent in endpoint.requests] == [
             '/anthropic/v1/messages/count_tokens'
         ]
         assert private_state.requests('sample') == []
+        assert private_store.execute('SELECT * FROM request_receipts').rows == []
+        assert private_store.execute('SELECT * FROM attempt_starts').rows == []
+        assert recorder.attempt() is None
+        (sent,) = endpoint.requests
+        assert sent.headers['authorization'] == f'Bearer {original_key}'
+        assert sent.headers['x-session-token'] == 'seed'
+        assert 'x-rewritten-token' not in sent.headers
+        assert 'x-rotated-token' not in sent.headers
+        remembered = all(
+            value in recorder.secrets() for value in (original_key, 'seed')
+        )
+        assert remembered
+        echo = tmp_path / 'echo'
+        echo.mkdir()
+        (echo / 'trace.txt').write_text('seed')
+
+        with pytest.raises(InputError, match='known credential'):
+            audit_trial(echo, set(recorder.secrets()))
 
     @pytest.mark.usefixtures('begun_trial')
     class TestHttpClient:
