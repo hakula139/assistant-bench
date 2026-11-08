@@ -20,7 +20,7 @@
 
     # Only pure data and prompt files are imported, so the input skips nixos-config's own inputs.
     nixos-config = {
-      url = "github:hakula139/nixos-config";
+      url = "github:hakula139/nixos-config/bd3448e0aee606c43740ef373aff07b653d2cbc9";
       flake = false;
     };
   };
@@ -60,6 +60,7 @@
             catalog = import "${nixos-config}/data/llm-models.nix";
             instructions = import "${nixos-config}/home/modules/llm-assistants/instructions" {
               inherit promptFragments;
+              devkitSource = devkit;
             };
           }
         );
