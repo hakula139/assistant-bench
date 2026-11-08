@@ -6,7 +6,7 @@ from collections import Counter
 from contextlib import nullcontext
 from datetime import datetime, timedelta, tzinfo
 from pathlib import Path
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, call
 
 import pytest
 from harbor.job_diff import DiffAction, compare_job_trials, load_source_trials
@@ -16,10 +16,12 @@ from harbor.models.job import config as job_config
 from harbor.models.job.config import JobConfig, SourceJobConfig
 from harbor.models.task.task import Task
 from harbor.models.trial import config as trial_config
+from harbor.models.trial.result import TrialResult
 from harbor.trial.queue import TrialQueue
 from openai.types.responses import Response
 
 from assistant_bench import jobs
+from assistant_bench.artifacts import MaterializedTrial, build_manifest
 from assistant_bench.catalog import System
 from assistant_bench.families import (
     Family,
@@ -31,11 +33,13 @@ from assistant_bench.harnesses import HOST_ENVIRONMENT, fingerprint
 from assistant_bench.harnesses.native import NativeCompletionError
 from assistant_bench.harnesses.responses import ResponseResult
 from assistant_bench.messages import InputError
+from assistant_bench.state import Run, State
 from assistant_bench.tasks import render_tasks
 from support import (
     FIXTURES,
     START,
     VOTES,
+    PrivateRepository,
     break_setting,
     finish_job,
     make_system,
@@ -451,6 +455,114 @@ class TestCheckJob:
         )
         assert job.source_jobs == []
         assert job.jobs_dir == data_dir / 'checks' / 'smoke'
+
+
+class TestMaterializeSources:
+    def test_batches_distinct_runs_and_preserves_harbor_reuse_and_regrade(
+        self,
+        families_dir: Path,
+        tmp_path: Path,
+        private_repository: PrivateRepository,
+        private_state: State,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        family = voted_tasks(families_dir, 'again', 'echo')
+        systems = jobs.family_systems(family, [make_system()])
+        tasks = [case_task(family, name) for name in ('again', 'echo')]
+        original = tmp_path / 'original'
+        archives = []
+        for name, samples in [('run-a', 2), ('run-b', 1)]:
+            config = jobs.job(
+                with_settings(family, samples=samples),
+                systems,
+                tasks,
+                root=original,
+                sources=[],
+            ).model_copy(update={'job_name': name})
+            directory = finish_job(config)
+            private_state.create_run(
+                Run(
+                    name,
+                    family.name,
+                    name,
+                    '1' * 40,
+                    private_repository.revision,
+                    START.isoformat(),
+                )
+            )
+            for result_path in sorted(directory.glob('*/result.json')):
+                result = TrialResult.model_validate_json(result_path.read_bytes())
+                (result_path.parent / 'config.json').write_text(
+                    result.config.model_dump_json()
+                )
+                archives.append(
+                    MaterializedTrial(
+                        directory,
+                        build_manifest(
+                            directory,
+                            scope=family.name,
+                            run_id=name,
+                            artifact_id=str(result.id),
+                            trial_id=str(result.id),
+                            job_name=name,
+                            trial_name=result.trial_name,
+                            code_revision='1' * 40,
+                            case_revision=private_repository.revision,
+                        ),
+                    )
+                )
+        references = private_repository.client.publish_trials(archives)
+        for archive, reference in zip(archives, references, strict=True):
+            manifest = archive.manifest
+            private_state.record_trial_artifact(
+                manifest.run_id,
+                manifest.trial_name,
+                manifest.trial_id,
+                reference.commit_sha,
+                reference.path,
+                reference.manifest_digest,
+            )
+        generation = private_state.artifact_generation(family.name)
+        shutil.rmtree(original)
+        lookup = Mock(wraps=private_state.run)
+        batch = Mock(wraps=private_repository.client.materialize_trials)
+        monkeypatch.setattr(private_state, 'run', lookup)
+        monkeypatch.setattr(private_repository.client, 'materialize_trials', batch)
+
+        sources = jobs.materialize_sources(
+            family,
+            private_state,
+            private_repository.client,
+            tmp_path / 'fresh',
+            private_root=tmp_path / 'private',
+            generation=generation,
+        )
+
+        assert lookup.call_args_list == [call('run-a'), call('run-b')]
+        batch.assert_called_once()
+        assert all(not path.is_relative_to(original) for _, path in sources)
+        for minor_bump, expected in [
+            (False, DiffAction.REUSE),
+            (True, DiffAction.REGRADE),
+        ]:
+            if minor_bump:
+                break_setting(tasks[1], ('task', 'version'), '1.1.0')
+            current = jobs.job(
+                with_settings(family, samples=2),
+                systems,
+                tasks,
+                root=tmp_path / 'fresh',
+                sources=sources,
+            )
+            plan = asyncio.run(JobPlan.from_config(current))
+            diff = compare_job_trials(plan, load_source_trials(sources))
+
+            assert Counter(
+                (trial.task_name, trial.action) for trial in diff.trials
+            ) == {
+                ('f/again', DiffAction.REUSE): 2,
+                ('f/echo', expected): 2,
+            }
 
 
 class TestPendingTrials:

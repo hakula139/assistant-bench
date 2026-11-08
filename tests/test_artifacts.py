@@ -12,6 +12,7 @@ from contextlib import closing
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
 import semver
@@ -23,7 +24,7 @@ from harbor.models.task.task import Task
 from harbor.models.trial.result import TrialResult
 from pydantic import ValidationError
 
-from assistant_bench import collection, jobs
+from assistant_bench import artifacts, collection, jobs
 from assistant_bench.artifacts import (
     ArtifactRef,
     ArtifactRepository,
@@ -1067,42 +1068,77 @@ class TestArtifactRepository:
             assert b'Private sentinel' not in archived
 
         def test_restores_original_bytes_modes_and_links_after_the_client_is_gone(
-            self, repository: PrivateRepository, trial: Trial, tmp_path: Path
+            self,
+            repository: PrivateRepository,
+            trial: Trial,
+            tmp_path: Path,
+            monkeypatch: pytest.MonkeyPatch,
         ) -> None:
-            reference = publish(repository, trial)
-            originals = {
+            workspace = trial.job / trial.result.trial_name / 'artifacts' / 'app'
+            (workspace / 'empty').mkdir()
+            first = snapshot(trial)
+            (first_ref,) = repository.client.publish_trials(
+                [MaterializedTrial(trial.job, first)]
+            )
+            original = {
                 item.path: contents(trial.job / Path(item.path).relative_to('job'))
-                for item in trial.manifest.files
+                for item in first.files
             }
+            answer = f'job/{trial.result.trial_name}/artifacts/app/answer.txt'
+            originals = [original, {**original, answer: b'Second archive.\r\n'}]
+            (workspace / 'answer.txt').write_bytes(originals[1][answer])
+            second = snapshot(trial).model_copy(update={'artifact_id': 'artifact-b'})
+            (second_ref,) = repository.client.publish_trials(
+                [MaterializedTrial(trial.job, second)]
+            )
+            assert first_ref.commit_sha != second_ref.commit_sha
             shutil.rmtree(trial.job.parent)
+            shutil.rmtree(repository.seed)
+            client = ArtifactRepository(SLUG)
+            metadata = Mock(wraps=client._metadata)
+            git_calls = Mock(wraps=artifacts._git)
+            monkeypatch.setattr(client, '_metadata', metadata)
+            monkeypatch.setattr(artifacts, '_git', git_calls)
 
-            restored = ArtifactRepository(SLUG).materialize(
-                reference, tmp_path / 'fresh'
+            restored = client.materialize_trials(
+                [
+                    (first_ref, tmp_path / 'first'),
+                    (second_ref, tmp_path / 'second'),
+                ]
             )
 
-            for item in trial.manifest.files:
-                path = restored.job / Path(item.path).relative_to('job')
-                assert contents(path) == originals[item.path], item.path
-                assert path.is_symlink() == (item.mode == '120000'), item.path
-                if not path.is_symlink():
-                    assert bool(path.stat().st_mode & stat.S_IXUSR) == (
-                        item.mode == '100755'
-                    ), item.path
-            workspace = restored.job / trial.result.trial_name / 'artifacts' / 'app'
-            for name in [
-                'Cargo.lock',
-                'yarn.lock',
-                'fixture.sqlite',
-                '.env.example',
-                'credentials.py',
-            ]:
-                assert (workspace / name).exists(), name
-            assert (workspace / 'vendor' / 'module.py').read_text() == (
-                "LABEL = 'nested repository contents'\n"
-            )
-            assert not (workspace / 'vendor' / '.git').exists()
-            assert not (workspace / '.git').exists()
-            assert not (workspace / '__pycache__').exists()
+            assert [archive.manifest for archive in restored] == [first, second]
+            for archive, expected in zip(restored, originals, strict=True):
+                for item in archive.manifest.files:
+                    path = archive.job / Path(item.path).relative_to('job')
+                    assert contents(path) == expected[item.path], item.path
+                    assert path.is_symlink() == (item.mode == '120000'), item.path
+                    if not path.is_symlink():
+                        assert bool(path.stat().st_mode & stat.S_IXUSR) == (
+                            item.mode == '100755'
+                        ), item.path
+                workspace = archive.job / trial.result.trial_name / 'artifacts' / 'app'
+                assert list((workspace / 'empty').iterdir()) == []
+                for name in [
+                    'Cargo.lock',
+                    'yarn.lock',
+                    'fixture.sqlite',
+                    '.env.example',
+                    'credentials.py',
+                ]:
+                    assert (workspace / name).exists(), name
+                assert (workspace / 'vendor' / 'module.py').read_text() == (
+                    "LABEL = 'nested repository contents'\n"
+                )
+                assert not (workspace / 'vendor' / '.git').exists()
+                assert not (workspace / '.git').exists()
+                assert not (workspace / '__pycache__').exists()
+            metadata.assert_called_once_with()
+            commands = [call.args[1] for call in git_calls.call_args_list]
+            clones = [command for command in commands if command[0] == 'clone']
+            assert len(clones) == 1
+            assert '--filter=blob:none' not in clones[0]
+            assert not [command for command in commands if command[0] == 'fetch']
 
         @pytest.mark.parametrize(
             ('minor_bump', 'expected'),
