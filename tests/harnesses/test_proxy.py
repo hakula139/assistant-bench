@@ -1,13 +1,19 @@
 import asyncio
 import json
+from pathlib import Path
 from typing import Any
 
 import httpx2
 import pytest
 
 from assistant_bench.catalog import Api
+from assistant_bench.generation import load_generation
 from assistant_bench.harnesses.accounting import RequestReceipt, TrialAccounting
-from assistant_bench.harnesses.endpoint import Endpoint
+from assistant_bench.harnesses.endpoint import (
+    HEADERS_VAR,
+    SECRET_HEADERS_FILE_VAR,
+    Endpoint,
+)
 from assistant_bench.harnesses.proxy import connect
 from assistant_bench.state import State
 from support import StubEndpoint, message, message_stream, response
@@ -22,6 +28,7 @@ class TestConnect:
         self,
         endpoint: StubEndpoint,
         begun_trial: TrialAccounting,
+        tmp_path: Path,
         api: Api,
         reported: bool,
     ) -> None:
@@ -35,7 +42,28 @@ class TestConnect:
             else [f'data: {json.dumps(event)}\n\n'.encode()]
         )
         endpoint.streams = [stream, stream[:-1]]
-        configured = Endpoint.read(endpoint.env.get, api)
+        secret_file = tmp_path / 'secret-headers.json'
+        secret_file.write_text(
+            json.dumps(
+                {
+                    'x-session-token': 'seed',
+                    'Authorization': 'Bearer configured-but-never-sent',
+                }
+            )
+        )
+        environment = endpoint.env | {
+            HEADERS_VAR: json.dumps(
+                {
+                    'x-trace': 'bench',
+                    'x-client-label': 'twig',
+                    'Content-Type': 'application/unused',
+                    'anthropic-version': 'configured-version',
+                    'anthropic-beta': 'configured-beta',
+                }
+            ),
+            SECRET_HEADERS_FILE_VAR: str(secret_file),
+        }
+        configured = Endpoint.read(environment.get, api)
         path = '/v1/messages' if api == 'anthropic-messages' else '/v1/responses'
         body = b'{"model":"acme/large","stream":true,"input":"hello"}'
 
@@ -46,6 +74,8 @@ class TestConnect:
                 url = connection.url.replace('host.docker.internal', '127.0.0.1')
                 async with httpx2.AsyncClient() as client:
                     headers = {'Authorization': f'Bearer {connection.token}'}
+                    if api == 'anthropic-messages':
+                        headers['anthropic-beta'] = 'requested-beta'
                     first = await client.post(url + path, content=body, headers=headers)
                     partial: list[bytes] = []
                     with pytest.raises(httpx2.RemoteProtocolError):
@@ -74,6 +104,29 @@ class TestConnect:
             for sent in endpoint.requests
         )
         assert all(sent.headers['x-trace'] == 'bench' for sent in endpoint.requests)
+        assert all(
+            sent.headers['x-client-label'] == 'twig' for sent in endpoint.requests
+        )
+        assert all(
+            sent.headers['x-session-token'] == 'seed' for sent in endpoint.requests
+        )
+        assert all(
+            sent.headers['content-type'] == 'application/json'
+            for sent in endpoint.requests
+        )
+        if api == 'anthropic-messages':
+            assert all(
+                sent.headers['anthropic-version']
+                == load_generation().anthropic_api_version
+                and sent.headers['anthropic-beta'] == 'requested-beta'
+                for sent in endpoint.requests
+            )
+        remembered = begun_trial.secrets()
+        assert 'seed' in remembered
+        unused_credential_remembered = 'configured-but-never-sent' in remembered
+        assert not unused_credential_remembered
+        ordinary_metadata_remembered = 'twig' in remembered
+        assert not ordinary_metadata_remembered
         assert all(sent.body['model'] == 'acme/large' for sent in endpoint.requests)
         assert begun_trial.fatal
 

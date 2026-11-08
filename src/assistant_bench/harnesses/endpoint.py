@@ -1,5 +1,6 @@
 """Endpoint-bound clients and authentication for the bench's model APIs."""
 
+import json
 import os
 import ssl
 from collections.abc import Callable, Mapping
@@ -16,9 +17,9 @@ from pydantic import (
     FilePath,
     HttpUrl,
     IPvAnyAddress,
-    Json,
     TypeAdapter,
     ValidationError,
+    field_validator,
 )
 
 from assistant_bench.catalog import EXPORT_VAR, Api
@@ -38,6 +39,7 @@ ANTHROPIC_BASE_URL_VAR = 'BENCH_ANTHROPIC_BASE_URL'
 KEY_FILE_VAR = 'BENCH_API_KEY_FILE'
 CA_FILE_VAR = 'BENCH_API_CA_FILE'
 HEADERS_VAR = 'BENCH_API_HEADERS'
+SECRET_HEADERS_FILE_VAR = 'BENCH_API_SECRET_HEADERS_FILE'
 LOCAL_ADDRESS_VAR = 'BENCH_API_LOCAL_ADDRESS'
 ENDPOINT_VARS = (
     BASE_URL_VAR,
@@ -45,6 +47,7 @@ ENDPOINT_VARS = (
     KEY_FILE_VAR,
     CA_FILE_VAR,
     HEADERS_VAR,
+    SECRET_HEADERS_FILE_VAR,
     LOCAL_ADDRESS_VAR,
 )
 
@@ -54,12 +57,64 @@ SDK_HEADERS_VAR = 'ANTHROPIC_CUSTOM_HEADERS'
 REQUEST_TIMEOUT = httpx2.Timeout(600.0, connect=30.0, read=None)
 _payload = TypeAdapter(dict[str, Any])
 _choices = TypeAdapter(list[dict[str, Any]])
+_headers = TypeAdapter(dict[str, str], config=ConfigDict(hide_input_in_errors=True))
+_AUTH_HEADERS = frozenset(('authorization', 'proxy-authorization', 'x-api-key'))
 
 
-class Endpoint(BaseModel):
-    """The endpoint variables, where an empty value counts as unset."""
+class HeaderSettings(BaseModel):
+    """Configured headers and the explicit boundary for confidential values."""
 
     model_config = ConfigDict(frozen=True, hide_input_in_errors=True)
+
+    headers: dict[str, str] | None = Field(default=None, validation_alias=HEADERS_VAR)
+    secret_headers_file: FilePath | None = Field(
+        default=None, validation_alias=SECRET_HEADERS_FILE_VAR
+    )
+
+    @field_validator('headers', mode='before')
+    @classmethod
+    def _parse_headers(cls, value: object) -> dict[str, str] | None:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError('Extra headers must be a JSON object of string values.')
+        return _parse_headers(value)
+
+    @classmethod
+    def from_env(cls, env: Callable[[str], str | None]) -> HeaderSettings:
+        """Read header settings without requiring an endpoint or API."""
+        values = {
+            name: value
+            for name in (HEADERS_VAR, SECRET_HEADERS_FILE_VAR)
+            if (value := env(name))
+        }
+        return cls.model_validate(values)
+
+    def resolve(self) -> tuple[dict[str, str], frozenset[str]]:
+        """Read confidential headers and return one normalized configuration."""
+        ordinary = httpx2.Headers(self.headers or {})
+        confidential = httpx2.Headers()
+        if self.secret_headers_file:
+            try:
+                content = self.secret_headers_file.read_bytes()
+            except OSError:
+                raise ValueError(
+                    'The confidential header file could not be read.'
+                ) from None
+            confidential = httpx2.Headers(_parse_headers(content))
+        if ordinary.keys() & _AUTH_HEADERS:
+            raise ValueError(
+                'Authentication headers require the confidential header file.'
+            )
+        if ordinary.keys() & confidential.keys():
+            raise ValueError('Header names must be unique ignoring case.')
+        headers = dict(ordinary)
+        headers.update(confidential)
+        return headers, frozenset(confidential)
+
+
+class Endpoint(HeaderSettings):
+    """The endpoint variables, where an empty value counts as unset."""
 
     base_url: HttpUrl = Field(
         validation_alias=AliasChoices(BASE_URL_VAR, ANTHROPIC_BASE_URL_VAR)
@@ -67,10 +122,6 @@ class Endpoint(BaseModel):
 
     key_file: FilePath = Field(validation_alias=KEY_FILE_VAR)
     ca_file: FilePath | None = Field(default=None, validation_alias=CA_FILE_VAR)
-
-    headers: Json[dict[str, str]] | None = Field(
-        default=None, validation_alias=HEADERS_VAR
-    )
 
     local_address: IPvAnyAddress | None = Field(
         default=None, validation_alias=LOCAL_ADDRESS_VAR
@@ -84,6 +135,7 @@ class Endpoint(BaseModel):
             KEY_FILE_VAR,
             CA_FILE_VAR,
             HEADERS_VAR,
+            SECRET_HEADERS_FILE_VAR,
             LOCAL_ADDRESS_VAR,
         )
         values = {name: value for name in names if (value := env(name))}
@@ -100,18 +152,19 @@ class Endpoint(BaseModel):
         self, api: Literal['openai-chat-completions', 'openai-responses']
     ) -> AsyncOpenAI:
         """Build the native client, bound to the local address if set."""
+        client = self.http_client(api)
         return AsyncOpenAI(
             base_url=str(self.base_url),
             api_key=self.api_key(),
             max_retries=0,
             timeout=REQUEST_TIMEOUT,
-            default_headers=self.headers,
-            http_client=self.http_client(api),
+            default_headers=client.configured_headers,
+            http_client=client,
         )
 
     def http_client(
         self, api: Api, *, recorder: TrialAccounting | None = None
-    ) -> httpx2.AsyncClient:
+    ) -> _Client:
         """Bind the local address and refuse automatic redirects."""
         verify = self.verify()
         transport = (
@@ -133,6 +186,7 @@ class Endpoint(BaseModel):
         )
 
     def messages_client(self) -> AsyncAnthropic:
+        client = self.http_client('anthropic-messages')
         return AsyncAnthropic(
             base_url=str(self.base_url),
             api_key=self.api_key(),
@@ -140,10 +194,10 @@ class Endpoint(BaseModel):
             open_telemetry=False,
             timeout=REQUEST_TIMEOUT,
             default_headers={
-                **(self.headers or {}),
+                **client.configured_headers,
                 'anthropic-version': load_generation().anthropic_api_version,
             },
-            http_client=self.http_client('anthropic-messages'),
+            http_client=client,
         )
 
 
@@ -155,13 +209,17 @@ class _Client(httpx2.AsyncClient):
         recorder: TrialAccounting | None,
         **kwargs: Any,
     ) -> None:
+        self._configured_headers, self._confidential_headers = endpoint.resolve()
         super().__init__(
             event_hooks={'request': [self._admit], 'response': [self._confirm]},
             **kwargs,
         )
         self._api: Api = api
-        self._endpoint = endpoint
         self._recorder = recorder
+
+    @property
+    def configured_headers(self) -> dict[str, str]:
+        return self._configured_headers.copy()
 
     def _accounting(self) -> TrialAccounting:
         return self._recorder if self._recorder is not None else current_trial()
@@ -170,18 +228,13 @@ class _Client(httpx2.AsyncClient):
         if request.method != 'POST' or request.url.path.endswith('/count_tokens'):
             return
         recorder = self._accounting()
-        if authorization := request.headers.get('Authorization'):
-            scheme, separator, credential = authorization.partition(' ')
-            recorder.remember_secret(
-                credential
-                if separator and scheme.lower() == 'bearer'
-                else authorization
-            )
-        if key := request.headers.get('x-api-key'):
-            recorder.remember_secret(key)
-        for name in self._endpoint.headers or {}:
+        for name in _AUTH_HEADERS | self._confidential_headers:
             if value := request.headers.get(name):
                 recorder.remember_secret(value)
+                if name in ('authorization', 'proxy-authorization'):
+                    scheme, separator, credential = value.partition(' ')
+                    if separator and scheme.lower() == 'bearer':
+                        recorder.remember_secret(credential)
         request.extensions[REQUEST_ID] = await recorder.admit(self._api)
 
     async def _confirm(self, response: httpx2.Response) -> None:
@@ -220,6 +273,27 @@ class _Client(httpx2.AsyncClient):
             if REQUEST_ID in request.extensions:
                 await self._accounting().uncertain()
             raise
+
+
+def _parse_headers(value: str | bytes) -> dict[str, str]:
+    try:
+        values = json.loads(value, object_pairs_hook=_unique_headers)
+    except json.JSONDecodeError, UnicodeDecodeError:
+        raise ValueError(
+            'Extra headers must be a JSON object of string values.'
+        ) from None
+    return _headers.validate_python(values)
+
+
+def _unique_headers(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    names: set[str] = set()
+    values: dict[str, Any] = {}
+    for name, value in pairs:
+        if name.lower() in names:
+            raise ValueError('Header names must be unique ignoring case.')
+        names.add(name.lower())
+        values[name] = value
+    return values
 
 
 def receipt(

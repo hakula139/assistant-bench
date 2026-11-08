@@ -6,16 +6,19 @@ Learn how to point the bench at a model endpoint, check and run a family, collec
 
 Every system calls its configured API at the endpoint in `.env`, which `bench` loads from the working directory or a parent: OpenAI-compatible Chat Completions or Responses, or the Anthropic Messages API for `api = "anthropic-messages"`. Copy [`.env.example`](../../.env.example) and fill in:
 
-| Variable                   | Value                                                                                                                                                                  |
-| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `BENCH_API_BASE_URL`       | The OpenAI-compatible base URL, including `/v1`                                                                                                                        |
-| `BENCH_ANTHROPIC_BASE_URL` | The Messages API base URL, to which the SDK appends `/v1/messages`. Required for a Messages system                                                                     |
-| `BENCH_API_KEY_FILE`       | A file holding the API key, so the key is never copied into the checkout                                                                                               |
-| `BENCH_API_CA_FILE`        | Optional. A CA bundle for an endpoint whose certificate the system store does not trust                                                                                |
-| `BENCH_API_HEADERS`        | Optional. A JSON object of extra request headers                                                                                                                       |
-| `BENCH_API_LOCAL_ADDRESS`  | Optional. A local IP address to bind outgoing connections to, such as `0.0.0.0` to keep them on IPv4. A bound client connects directly and ignores the proxy variables |
+| Variable                        | Value                                                                                                                                                                  |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `BENCH_API_BASE_URL`            | The OpenAI-compatible base URL, including `/v1`                                                                                                                        |
+| `BENCH_ANTHROPIC_BASE_URL`      | The Messages API base URL, to which the SDK appends `/v1/messages`. Required for a Messages system                                                                     |
+| `BENCH_API_KEY_FILE`            | A file holding the API key, so the key is never copied into the checkout                                                                                               |
+| `BENCH_API_CA_FILE`             | Optional. A CA bundle for an endpoint whose certificate the system store does not trust                                                                                |
+| `BENCH_API_HEADERS`             | Optional. A JSON object of ordinary extra request headers                                                                                                              |
+| `BENCH_API_SECRET_HEADERS_FILE` | Optional. A file holding a JSON object of confidential extra request headers                                                                                           |
+| `BENCH_API_LOCAL_ADDRESS`       | Optional. A local IP address to bind outgoing connections to, such as `0.0.0.0` to keep them on IPv4. A bound client connects directly and ignores the proxy variables |
 
 Both APIs share the key file, CA bundle, headers, and local address.
+
+Put confidential header values in the file named by `BENCH_API_SECRET_HEADERS_FILE`. The bench audits artifacts and receipt metadata against those values and the authentication headers actually sent. `BENCH_API_HEADERS` cannot set `Authorization`, `Proxy-Authorization` or `x-api-key`. Header names must be unique ignoring case within and across both maps.
 
 Without `BENCH_API_LOCAL_ADDRESS`, the client honors `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, and `NO_PROXY`.
 

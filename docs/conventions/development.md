@@ -38,7 +38,7 @@ Commands stay minimal, and settings live in config files:
 | Admission, cap, and retention limits of the vote API                             | `web/worker/limits.ts`, with the per-minute request limit in `web/wrangler.toml`                                      |
 | The Cloudflare account, the voting Worker's environments, and their D1 databases | `web/wrangler.toml`                                                                                                   |
 | Point-fit parameters, the actor cap, and diagnostic coverage rules               | `scoring/ranking.py`, `scoring/weighting.py`, and `report.py`, and recorded in each report                            |
-| The model endpoint                                                               | The ignored `.env`                                                                                                    |
+| The model endpoint                                                               | The ignored `.env`, with API keys and confidential headers in the files it names                                      |
 | Prettier, markdownlint, cspell, lychee, Taplo, and shfmt                         | Their own files at the repository root                                                                                |
 | The site's Astro, TypeScript, ESLint, shadcn/ui, and Vitest settings             | `web/astro.config.ts`, `web/tsconfig.json`, `web/eslint.config.js`, `web/components.json`, and `web/vitest.config.ts` |
 | Codecov's project and patch status targets, per flag                             | `codecov.yml`                                                                                                         |

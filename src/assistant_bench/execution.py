@@ -35,7 +35,7 @@ from assistant_bench.harnesses.accounting import (
     bind_trial,
     reset_trial,
 )
-from assistant_bench.harnesses.endpoint import HEADERS_VAR, KEY_FILE_VAR
+from assistant_bench.harnesses.endpoint import KEY_FILE_VAR, HeaderSettings
 from assistant_bench.harnesses.installed import discard_session_keys
 from assistant_bench.messages import InputError
 from assistant_bench.runtime import REPOSITORY_VAR, RunContext
@@ -262,8 +262,8 @@ class ExecutionPlugin(BaseJobPlugin):
                 known.add(event.config.agent.env[agent])
         if key_file := os.environ.get(KEY_FILE_VAR):
             known.add(Path(key_file).read_text().strip())
-        if headers := os.environ.get(HEADERS_VAR):
-            known.update(json.loads(headers).values())
+        headers, confidential = HeaderSettings.from_env(os.environ.get).resolve()
+        known.update(headers[name] for name in confidential)
         run = self._input.run
         repository = self._repository
         artifact_id = str(uuid4())

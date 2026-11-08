@@ -73,9 +73,9 @@ async def connect(
                 else request.path.removeprefix('/v1')
             )
             headers = {
-                **(endpoint.headers or {}),
-                'Authorization': f'Bearer {endpoint.api_key()}',
-                'Content-Type': 'application/json',
+                **client.configured_headers,
+                'authorization': f'Bearer {endpoint.api_key()}',
+                'content-type': 'application/json',
             }
             if api == 'anthropic-messages':
                 headers['anthropic-version'] = load_generation().anthropic_api_version

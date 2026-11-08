@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import ssl
 from datetime import UTC, datetime
@@ -12,6 +13,7 @@ import pytest
 from pydantic import ValidationError
 
 from assistant_bench import jobs
+from assistant_bench.artifacts import ArtifactRef
 from assistant_bench.catalog import EXPORT_VAR, Api
 from assistant_bench.families import load_cases, load_family
 from assistant_bench.harnesses.accounting import (
@@ -27,10 +29,13 @@ from assistant_bench.harnesses.endpoint import (
     KEY_FILE_VAR,
     LOCAL_ADDRESS_VAR,
     SDK_HEADERS_VAR,
+    SECRET_HEADERS_FILE_VAR,
     Endpoint,
+    HeaderSettings,
     preflight,
 )
 from assistant_bench.harnesses.usage import MeasuredUsage
+from assistant_bench.messages import InputError
 from assistant_bench.runtime import RunContext
 from assistant_bench.spend import Entry
 from assistant_bench.state import State
@@ -51,19 +56,27 @@ pytestmark = pytest.mark.usefixtures('export')
 
 
 async def request_native(
-    client: openai.AsyncOpenAI | anthropic.AsyncAnthropic, api: Api
+    client: openai.AsyncOpenAI | anthropic.AsyncAnthropic,
+    api: Api,
+    *,
+    extra_headers: dict[str, str] | None = None,
 ) -> None:
     if isinstance(client, anthropic.AsyncAnthropic):
         await client.messages.create(
             model='acme/large',
             max_tokens=64,
             messages=[{'role': 'user', 'content': 'Hello.'}],
+            extra_headers=extra_headers,
         )
     elif api == 'openai-responses':
-        await client.responses.create(model='acme/large', input='Hello.')
+        await client.responses.create(
+            model='acme/large', input='Hello.', extra_headers=extra_headers
+        )
     else:
         await client.chat.completions.create(
-            model='acme/large', messages=[{'role': 'user', 'content': 'Hello.'}]
+            model='acme/large',
+            messages=[{'role': 'user', 'content': 'Hello.'}],
+            extra_headers=extra_headers,
         )
 
 
@@ -82,6 +95,46 @@ class TestLoopbackRequestsOnly:
 
         with pytest.raises(pytest.fail.Exception, match='non-loopback.*example.com'):
             asyncio.run(request())
+
+
+class TestHeaderSettings:
+    @pytest.mark.parametrize(
+        ('ordinary', 'confidential'),
+        [
+            ('{"x-mode":"first","x-mode":"second"}', '{}'),
+            ('{"X-Mode":"first","x-mode":"second"}', '{}'),
+            ('{}', '{"x-session-token":"seed","x-session-token":"twig"}'),
+            ('{}', '{"X-Session-Token":"seed","x-session-token":"twig"}'),
+            ('{"X-Mode":"first"}', '{"x-mode":"second"}'),
+            ('{"Authorization":"Bearer seed"}', '{}'),
+            ('{"PROXY-AUTHORIZATION":"Bearer seed"}', '{}'),
+            ('{"X-Api-Key":"seed"}', '{}'),
+        ],
+        ids=[
+            'ordinary-exact-duplicate',
+            'ordinary-case-duplicate',
+            'secret-exact-duplicate',
+            'secret-case-duplicate',
+            'cross-map-duplicate',
+            'ordinary-authorization',
+            'ordinary-proxy-authorization',
+            'ordinary-api-key',
+        ],
+    )
+    def test_rejects_ambiguous_or_misclassified_headers_without_exposing_values(
+        self, tmp_path: Path, ordinary: str, confidential: str
+    ) -> None:
+        path = tmp_path / 'secret-headers.json'
+        path.write_text(confidential)
+        env = {HEADERS_VAR: ordinary, SECRET_HEADERS_FILE_VAR: str(path)}
+
+        with pytest.raises(ValueError) as failure:
+            HeaderSettings.from_env(env.get).resolve()
+
+        assert all(
+            value not in str(failure.value)
+            for value in ('seed', 'twig', 'first', 'second')
+        )
 
 
 class TestEndpoint:
@@ -152,24 +205,40 @@ class TestEndpoint:
             ],
             ids=['chat-completions', 'responses', 'messages'],
         )
-        def test_provider_metadata_cannot_persist_known_credentials(
+        @pytest.mark.parametrize(
+            'credential_source', ['api-key', 'ordinary-header', 'secret-header']
+        )
+        def test_only_credentials_are_refused_in_artifacts_and_provider_metadata(
             self,
             endpoint: StubEndpoint,
             run_context: RunContext,
+            tmp_path: Path,
             monkeypatch: pytest.MonkeyPatch,
             api: Api,
             usage: MeasuredUsage,
+            credential_source: str,
         ) -> None:
-            key = endpoint.key_file.read_text().strip()
+            confidential = credential_source != 'ordinary-header'
+            marker = (
+                endpoint.key_file.read_text().strip()
+                if credential_source == 'api-key'
+                else 'twig'
+            )
             endpoint.response = {
                 'openai-chat-completions': completion(),
                 'openai-responses': response(),
                 'anthropic-messages': message(),
-            }[api] | {'id': key, 'model': key}
-            endpoint.response_headers['x-request-id'] = key
+            }[api] | {'id': marker, 'model': marker}
+            endpoint.response_headers['x-request-id'] = marker
             environment = endpoint.env | {
                 HEADERS_VAR: '{"x-trace": "synthetic-endpoint-trace"}'
             }
+            if credential_source == 'ordinary-header':
+                environment[HEADERS_VAR] = json.dumps({'x-client-label': marker})
+            elif credential_source == 'secret-header':
+                secret_file = tmp_path / 'secret-headers.json'
+                secret_file.write_text(json.dumps({'x-client-label': marker}))
+                environment[SECRET_HEADERS_FILE_VAR] = str(secret_file)
             for name, value in environment.items():
                 monkeypatch.setenv(name, value)
             configured = Endpoint.read(environment.get, api)
@@ -194,6 +263,9 @@ class TestEndpoint:
                 async with executed_trial(
                     run_context, config, system, scope='metadata'
                 ) as trial:
+                    (trial.paths.agent_dir / 'trace.txt').write_text(
+                        f'{marker}_count = 1\n'
+                    )
                     trial.recorder.begin(datetime.now(UTC))
                     try:
                         client = (
@@ -206,15 +278,21 @@ class TestEndpoint:
                     finally:
                         trial.recorder.finish(datetime.now(UTC))
 
-            asyncio.run(request())
+            if confidential:
+                with pytest.raises(InputError, match='known credential'):
+                    asyncio.run(request())
+            else:
+                asyncio.run(request())
 
             (stored,) = run_context.state.requests('metadata')
             assert isinstance(stored['receipt_json'], str)
             (entry_json,) = run_context.state.entries('metadata')
-            credential_is_absent = all(
-                key not in value for value in (stored['receipt_json'], entry_json)
-            )
-            assert credential_is_absent
+            if confidential:
+                credential_is_absent = all(
+                    marker not in value
+                    for value in (stored['receipt_json'], entry_json)
+                )
+                assert credential_is_absent
             saved = RequestReceipt.model_validate_json(stored['receipt_json'])
             assert saved.usage == usage
             assert saved.http_status == 200
@@ -223,9 +301,28 @@ class TestEndpoint:
                 saved.response_id,
                 saved.response_model,
                 saved.provider_request_id,
-            ) == (None, None, None)
+            ) == (
+                (None, None, None)
+                if confidential
+                else (marker, marker, f'req-1, {marker}')
+            )
             entry = Entry.model_validate_json(entry_json)
             assert entry.responses == [usage]
+            artifacts = run_context.state.artifact_generation('metadata').artifacts
+            if confidential:
+                assert artifacts == ()
+            else:
+                (artifact,) = artifacts
+                archive = run_context.artifacts.materialize(
+                    ArtifactRef(
+                        commit_sha=artifact.commit_sha,
+                        path=artifact.path,
+                        manifest_digest=artifact.manifest_digest,
+                    ),
+                    tmp_path / 'recovered-trace',
+                )
+                trace = archive.job / archive.manifest.trial_name / 'agent/trace.txt'
+                assert trace.read_text() == f'{marker}_count = 1\n'
 
         @pytest.mark.parametrize('api', ['openai-responses', 'anthropic-messages'])
         def test_remembers_sent_credentials_after_key_and_header_rotation(
@@ -233,6 +330,7 @@ class TestEndpoint:
             endpoint: StubEndpoint,
             begun_trial: TrialAccounting,
             monkeypatch: pytest.MonkeyPatch,
+            tmp_path: Path,
             api: Api,
         ) -> None:
             original_key = endpoint.key_file.read_text().strip()
@@ -241,9 +339,10 @@ class TestEndpoint:
             rotated_header = 'rotated-endpoint-header'
             for name, value in endpoint.env.items():
                 monkeypatch.setenv(name, value)
-            monkeypatch.setenv(
-                HEADERS_VAR, f'{{"x-session-token": "{original_header}"}}'
-            )
+            original_file = tmp_path / 'original-headers.json'
+            original_file.write_text(json.dumps({'x-session-token': original_header}))
+            monkeypatch.setenv(SECRET_HEADERS_FILE_VAR, str(original_file))
+            monkeypatch.setenv(HEADERS_VAR, '{"x-client-label": "first"}')
             configured = Endpoint.read(os.environ.get, api)
             first_client = (
                 configured.messages_client()
@@ -252,9 +351,13 @@ class TestEndpoint:
             )
             endpoint.response = message() if api == 'anthropic-messages' else response()
             endpoint.key_file.write_text(rotated_key)
-            monkeypatch.setenv(
-                HEADERS_VAR, f'{{"x-rotated-token": "{rotated_header}"}}'
+            original_file.write_text(
+                json.dumps({'x-mutated-token': 'configured-but-never-sent'})
             )
+            rotated_file = tmp_path / 'rotated-headers.json'
+            rotated_file.write_text(json.dumps({'x-rotated-token': rotated_header}))
+            monkeypatch.setenv(SECRET_HEADERS_FILE_VAR, str(rotated_file))
+            monkeypatch.setenv(HEADERS_VAR, '{"x-client-label": "later"}')
 
             async def request() -> None:
                 async with first_client:
@@ -282,6 +385,10 @@ class TestEndpoint:
             assert sent_original and sent_rotated
             assert first.headers['x-session-token'] == original_header
             assert second.headers['x-rotated-token'] == rotated_header
+            assert first.headers['x-client-label'] == 'first'
+            assert second.headers['x-client-label'] == 'later'
+            assert 'x-mutated-token' not in first.headers
+            assert 'x-session-token' not in second.headers
             remembered_both = all(
                 value in begun_trial.secrets()
                 for value in (
@@ -292,6 +399,91 @@ class TestEndpoint:
                 )
             )
             assert remembered_both
+            unused_credential_remembered = (
+                'configured-but-never-sent' in begun_trial.secrets()
+            )
+            assert not unused_credential_remembered
+
+        @pytest.mark.parametrize(
+            ('api', 'name', 'value', 'expected'),
+            [
+                ('openai-responses', 'Authorization', 'bEaReR seed', 'seed'),
+                ('openai-responses', 'Proxy-Authorization', 'Bearer seed', 'seed'),
+                ('anthropic-messages', 'x-api-key', 'seed', 'seed'),
+                ('openai-responses', 'X-Session-Token', 'seed', 'seed'),
+            ],
+            ids=['sdk-authorization', 'proxy-authorization', 'sdk-api-key', 'custom'],
+        )
+        def test_remembers_actual_wire_overrides_instead_of_unused_configuration(
+            self,
+            endpoint: StubEndpoint,
+            begun_trial: TrialAccounting,
+            tmp_path: Path,
+            api: Api,
+            name: str,
+            value: str,
+            expected: str,
+        ) -> None:
+            path = tmp_path / 'secret-headers.json'
+            path.write_text(json.dumps({'x-session-token': 'configured-but-not-sent'}))
+            configured = Endpoint.read(
+                (endpoint.env | {SECRET_HEADERS_FILE_VAR: str(path)}).get, api
+            )
+            endpoint.response = message() if api == 'anthropic-messages' else response()
+
+            async def request() -> None:
+                client = (
+                    configured.messages_client()
+                    if api == 'anthropic-messages'
+                    else configured.client(api)
+                )
+                async with client:
+                    await request_native(client, api, extra_headers={name: value})
+
+            asyncio.run(request())
+
+            (sent,) = endpoint.requests
+            assert sent.headers[name.lower()] == value
+            sent_credential_remembered = expected in begun_trial.secrets()
+            assert sent_credential_remembered
+            if name.lower() == 'x-session-token':
+                unused_credential_remembered = (
+                    'configured-but-not-sent' in begun_trial.secrets()
+                )
+                assert not unused_credential_remembered
+
+        def test_configured_header_copy_cannot_change_the_client_snapshot(
+            self,
+            endpoint: StubEndpoint,
+            begun_trial: TrialAccounting,
+            tmp_path: Path,
+        ) -> None:
+            path = tmp_path / 'secret-headers.json'
+            path.write_text('{"x-session-token":"seed"}')
+            configured = Endpoint.read(
+                (endpoint.env | {SECRET_HEADERS_FILE_VAR: str(path)}).get,
+                'openai-responses',
+            )
+
+            async def request() -> None:
+                async with configured.http_client('openai-responses') as client:
+                    headers = client.configured_headers
+                    headers['x-session-token'] = 'mutated-copy'
+                    path.write_text('{"x-rotated-token":"later"}')
+                    result = await client.post(
+                        f'{endpoint.url}/v1/responses',
+                        json={},
+                        headers=client.configured_headers,
+                    )
+                    assert result.status_code == 200
+
+            asyncio.run(request())
+
+            (sent,) = endpoint.requests
+            assert sent.headers['x-session-token'] == 'seed'
+            assert 'x-rotated-token' not in sent.headers
+            sent_credential_remembered = 'seed' in begun_trial.secrets()
+            assert sent_credential_remembered
 
         @pytest.mark.parametrize(
             'api', ['openai-chat-completions', 'anthropic-messages']
@@ -602,6 +794,7 @@ class TestPreflight:
             (BASE_URL_VAR, 'api.example.com/v1'),
             (KEY_FILE_VAR, 'missing-key'),
             (HEADERS_VAR, '{"x-trace": 1}'),
+            (SECRET_HEADERS_FILE_VAR, 'missing-headers.json'),
             (CA_FILE_VAR, 'missing-ca.pem'),
             (LOCAL_ADDRESS_VAR, 'eth0'),
         ],
@@ -629,6 +822,8 @@ class TestPreflight:
     def test_treats_an_empty_optional_setting_as_unset(
         self, endpoint: StubEndpoint
     ) -> None:
-        empty = dict.fromkeys((CA_FILE_VAR, HEADERS_VAR, LOCAL_ADDRESS_VAR), '')
+        empty = dict.fromkeys(
+            (CA_FILE_VAR, HEADERS_VAR, SECRET_HEADERS_FILE_VAR, LOCAL_ADDRESS_VAR), ''
+        )
 
         preflight(endpoint.env | empty, 'openai-chat-completions')

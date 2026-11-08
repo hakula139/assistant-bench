@@ -19,6 +19,7 @@ from assistant_bench.catalog import Api, Price, System, SystemIdentity
 from assistant_bench.database import SQLiteDatabase
 from assistant_bench.families import load_cases, load_family
 from assistant_bench.harnesses import HOST_ENVIRONMENT, agent_kwargs, fingerprint
+from assistant_bench.harnesses.endpoint import SECRET_HEADERS_FILE_VAR
 from assistant_bench.harnesses.generate import OUTPUT_FILE
 from assistant_bench.messages import InputError
 from assistant_bench.paths import REPO_ROOT
@@ -77,13 +78,16 @@ def prepare_probe(
 
 @pytest.fixture
 def host_jobs(
-    endpoint: StubEndpoint, run_context: RunContext, monkeypatch: pytest.MonkeyPatch
+    endpoint: StubEndpoint,
+    run_context: RunContext,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> list[JobConfig]:
     for name, value in endpoint.env.items():
         monkeypatch.setenv(name, value)
-    monkeypatch.setenv(
-        'BENCH_API_HEADERS', '{"x-trace": "synthetic-canary-trace-unique-value"}'
-    )
+    secret_file = tmp_path / 'secret-headers.json'
+    secret_file.write_text('{"x-session-token":"synthetic-canary-trace-unique-value"}')
+    monkeypatch.setenv(SECRET_HEADERS_FILE_VAR, str(secret_file))
     configs: list[JobConfig] = []
 
     def run_job(
