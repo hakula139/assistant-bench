@@ -25,6 +25,7 @@ class Run:
     code_revision: str | None
     case_revision: str | None
     created_at: str
+    max_requests: int | None = None
 
 
 @dataclass(frozen=True)
@@ -64,6 +65,31 @@ class Collection:
     expected_count: int
     manifest_digest: str
     created_at: str
+    code_revision: str | None
+    case_revision: str | None
+    system_names_json: str | None
+
+
+@dataclass(frozen=True)
+class OutputGeneration:
+    id: str | None
+    outputs: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class TrialArtifact:
+    run_id: str
+    trial_id: str
+    source_trial_id: str
+    commit_sha: str
+    path: str
+    manifest_digest: str
+
+
+@dataclass(frozen=True)
+class ArtifactGeneration:
+    revision: int
+    artifacts: tuple[TrialArtifact, ...]
 
 
 class State:
@@ -81,8 +107,9 @@ class State:
     def create_run(self, run: Run) -> None:
         self._database.execute(
             """
-            INSERT INTO runs (id, scope, job, code_revision, case_revision, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO runs (
+                id, scope, job, code_revision, case_revision, created_at, max_requests
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (id) DO NOTHING
             """,
             (
@@ -92,6 +119,7 @@ class State:
                 run.code_revision,
                 run.case_revision,
                 run.created_at,
+                run.max_requests,
             ),
         )
         if self._run(run.id) != run:
@@ -191,6 +219,22 @@ class State:
             ).rows
         )
 
+    def cancel_unstarted(self, run_id: str) -> int:
+        """Release only this run's claimed slots that never crossed a start fence."""
+        return len(
+            self._database.execute(
+                """
+                UPDATE attempt_claims SET state = 'cancelled'
+                WHERE run_id = ? AND state = 'claimed' AND NOT EXISTS (
+                    SELECT 1 FROM attempt_starts
+                    WHERE claim_id = attempt_claims.id
+                )
+                RETURNING id
+                """,
+                (run_id,),
+            ).rows
+        )
+
     def begin_attempt(self, attempt: AttemptStart) -> bool:
         """Persist the mandatory start fence before any paid request.
 
@@ -230,7 +274,16 @@ class State:
             INSERT INTO request_admissions (id, attempt_id, created_at)
             SELECT ?, starts.id, ? FROM attempt_starts AS starts
             JOIN attempt_claims AS claims ON claims.id = starts.claim_id
+            JOIN runs ON runs.id = claims.run_id
             WHERE starts.id = ? AND claims.state = 'claimed'
+                AND (runs.max_requests IS NULL OR (
+                    SELECT COUNT(*) FROM request_admissions AS admissions
+                    JOIN attempt_starts AS admitted_starts
+                        ON admitted_starts.id = admissions.attempt_id
+                    JOIN attempt_claims AS admitted_claims
+                        ON admitted_claims.id = admitted_starts.claim_id
+                    WHERE admitted_claims.run_id = runs.id
+                ) < runs.max_requests)
                 AND NOT EXISTS (
                     SELECT 1 FROM attempt_entries WHERE attempt_id = starts.id
                 )
@@ -287,6 +340,21 @@ class State:
             ORDER BY requests.created_at, requests.id
             """,
             (scope, int(unrecorded_only)),
+        ).rows
+
+    def trial_requests(self, run_id: str, trial_id: str) -> list[Row]:
+        """Read canonical receipts for admissions belonging to one exact trial."""
+        return self._database.execute(
+            """
+            SELECT requests.id AS request_id, receipts.receipt_json
+            FROM request_admissions AS requests
+            JOIN attempt_starts AS starts ON starts.id = requests.attempt_id
+            JOIN attempt_claims AS claims ON claims.id = starts.claim_id
+            LEFT JOIN request_receipts AS receipts ON receipts.request_id = requests.id
+            WHERE claims.run_id = ? AND claims.trial = ?
+            ORDER BY requests.created_at, requests.id
+            """,
+            (run_id, trial_id),
         ).rows
 
     def record_entry(self, claim_id: str, entry_json: str) -> None:
@@ -349,6 +417,34 @@ class State:
                 (scope,),
             ).rows
         ]
+
+    def accounting(self, scope: str) -> list[Row]:
+        """Read final entries and uncovered admitted requests in one snapshot."""
+        return self._database.execute(
+            """
+            SELECT 'entry' AS kind, entries.entry_json, NULL AS attempt_id,
+                entries.job, entries.trial, NULL AS accounting_json,
+                NULL AS receipt_json, entries.started_at AS started_at,
+                '' AS request_id
+            FROM attempt_entries AS entries WHERE entries.scope = ?
+            UNION ALL
+            SELECT 'request', NULL, starts.id, runs.job, claims.trial,
+                claims.accounting_json, receipts.receipt_json, starts.started_at,
+                requests.id
+            FROM request_admissions AS requests
+            JOIN attempt_starts AS starts ON starts.id = requests.attempt_id
+            JOIN attempt_claims AS claims ON claims.id = starts.claim_id
+            JOIN runs ON runs.id = claims.run_id
+            LEFT JOIN request_receipts AS receipts ON receipts.request_id = requests.id
+            WHERE claims.scope = ? AND NOT EXISTS (
+                SELECT 1 FROM attempt_entries AS entries
+                WHERE entries.attempt_id = starts.id
+                    AND entries.started_at = starts.started_at
+            )
+            ORDER BY started_at, job, trial, request_id
+            """,
+            (scope, scope),
+        ).rows
 
     def settle_claim(self, claim_id: str) -> None:
         """Atomically settle recorded work with registered artifacts and receipts.
@@ -427,15 +523,52 @@ class State:
             raise InputError(f'Trial `{trial_id}` has no registered artifacts.')
         return rows[0]
 
-    def artifacts(self, scope: str) -> list[Row]:
-        return self._database.execute(
+    def trial_registered(
+        self, run_id: str, trial_id: str, source_trial_id: str
+    ) -> bool:
+        """Confirm an audited archive for the exact Harbor execution UUID."""
+        return bool(
+            self._database.execute(
+                """
+                SELECT 1 FROM trial_artifacts
+                WHERE run_id = ? AND trial_id = ? AND source_trial_id = ?
+                """,
+                (run_id, trial_id, source_trial_id),
+            ).rows
+        )
+
+    def artifact_generation(self, scope: str) -> ArtifactGeneration:
+        """Read the registry and its admission fence in one statement snapshot."""
+        rows = self._database.execute(
             """
-            SELECT artifacts.* FROM trial_artifacts AS artifacts
-            JOIN runs ON runs.id = artifacts.run_id
-            WHERE runs.scope = ? ORDER BY runs.created_at, runs.id, artifacts.trial_id
+            WITH head AS (
+                SELECT COALESCE((
+                    SELECT revision FROM source_heads WHERE scope = ?
+                ), 0) AS revision
+            ), selected AS (
+                SELECT artifacts.*, runs.created_at FROM trial_artifacts AS artifacts
+                JOIN runs ON runs.id = artifacts.run_id WHERE runs.scope = ?
+            )
+            SELECT head.revision, selected.* FROM head LEFT JOIN selected ON 1 = 1
+            ORDER BY selected.created_at, selected.run_id, selected.trial_id
             """,
-            (scope,),
+            (scope, scope),
         ).rows
+        return ArtifactGeneration(
+            revision=cast(int, rows[0]['revision']),
+            artifacts=tuple(
+                TrialArtifact(
+                    run_id=cast(str, row['run_id']),
+                    trial_id=cast(str, row['trial_id']),
+                    source_trial_id=cast(str, row['source_trial_id']),
+                    commit_sha=cast(str, row['commit_sha']),
+                    path=cast(str, row['path']),
+                    manifest_digest=cast(str, row['manifest_digest']),
+                )
+                for row in rows
+                if row['run_id'] is not None
+            ),
+        )
 
     def complete_run(self, run_id: str) -> bool:
         """Close a run whose claims settled or were cancelled before execution.
@@ -466,15 +599,22 @@ class State:
     def run_status(self, run_id: str) -> RunStatus:
         return cast(RunStatus, self._run_row(run_id)['status'])
 
+    def run(self, run_id: str) -> Run:
+        return self._run(run_id)
+
     # ── Output Generations ──
+
+    def collection(self, collection_id: str) -> Collection:
+        return _collection(self._collection_row(collection_id))
 
     def begin_collection(self, collection: Collection) -> None:
         self._database.execute(
             """
             INSERT INTO collections (
-                id, family, expected_count, manifest_digest, created_at
+                id, family, expected_count, manifest_digest, created_at,
+                code_revision, case_revision, system_names_json
             )
-            VALUES (?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (id) DO NOTHING
             """,
             (
@@ -483,6 +623,9 @@ class State:
                 collection.expected_count,
                 collection.manifest_digest,
                 collection.created_at,
+                collection.code_revision,
+                collection.case_revision,
+                collection.system_names_json,
             ),
         )
         if _collection(self._collection_row(collection.id)) != collection:
@@ -595,19 +738,35 @@ class State:
         ).rows
         return bool(current and current[0]['collection_id'] == collection)
 
-    def outputs(self, family: str) -> list[str]:
-        return [
-            cast(str, row['output_json'])
-            for row in self._database.execute(
-                """
-                SELECT outputs.output_json FROM collection_outputs AS outputs
-                JOIN active_collections AS active
-                    ON active.collection_id = outputs.collection_id
-                WHERE active.family = ? ORDER BY outputs.position
-                """,
-                (family,),
-            ).rows
-        ]
+    def output_generation(self, family: str) -> OutputGeneration:
+        """Read the active generation and its ordered outputs in one SQL snapshot."""
+        rows = self._database.execute(
+            """
+            SELECT active.collection_id, outputs.output_json
+            FROM active_collections AS active
+            LEFT JOIN collection_outputs AS outputs
+                ON outputs.collection_id = active.collection_id
+            WHERE active.family = ? ORDER BY outputs.position
+            """,
+            (family,),
+        ).rows
+        return _generation(rows)
+
+    def collection_generation(self, collection: str) -> OutputGeneration:
+        """Read one complete immutable generation, refusing an unsealed import."""
+        rows = self._database.execute(
+            """
+            SELECT collections.id AS collection_id, outputs.output_json
+            FROM collections LEFT JOIN collection_outputs AS outputs
+                ON outputs.collection_id = collections.id
+            WHERE collections.id = ? AND collections.sealed = 1
+            ORDER BY outputs.position
+            """,
+            (collection,),
+        ).rows
+        if not rows:
+            raise InputError(f'Collection `{collection}` is not sealed.')
+        return _generation(rows)
 
     # ── Canary History and Baselines ──
 
@@ -638,33 +797,36 @@ class State:
             ).rows
         ]
 
-    def baseline(self, system: str) -> str | None:
+    def baseline(self, system: str, context_key: str) -> str | None:
         rows = self._database.execute(
             """
             SELECT records.record_json FROM canary_records AS records
             JOIN canary_baselines AS baselines ON baselines.run_id = records.run_id
-            WHERE baselines.system = ?
+            WHERE baselines.system = ? AND baselines.context_key = ?
             """,
-            (system,),
+            (system, context_key),
         ).rows
         return cast(str, rows[0]['record_json']) if rows else None
 
-    def establish_baseline(self, system: str, run: str) -> bool:
+    def establish_baseline(self, system: str, context_key: str, run: str) -> bool:
         """Keep the first baseline the caller has accepted as successful."""
         return bool(
             self._database.execute(
                 """
-            INSERT INTO canary_baselines (system, run_id)
-            SELECT system, run_id FROM canary_records WHERE system = ? AND run_id = ?
-            ON CONFLICT (system) DO NOTHING RETURNING run_id
+            INSERT INTO canary_baselines (system, context_key, run_id)
+            SELECT system, ?, run_id FROM canary_records WHERE system = ? AND run_id = ?
+            ON CONFLICT (system, context_key) DO NOTHING RETURNING run_id
             """,
-                (system, run),
+                (context_key, system, run),
             ).rows
         )
 
-    def reset_baseline(self, system: str) -> None:
-        self._database.execute(
-            'DELETE FROM canary_baselines WHERE system = ?', (system,)
+    def reset_baseline(self, system: str) -> int:
+        return len(
+            self._database.execute(
+                'DELETE FROM canary_baselines WHERE system = ? RETURNING context_key',
+                (system,),
+            ).rows
         )
 
     # ── Stored Metadata ──
@@ -684,6 +846,7 @@ class State:
             code_revision=cast(str | None, row['code_revision']),
             case_revision=cast(str | None, row['case_revision']),
             created_at=cast(str, row['created_at']),
+            max_requests=cast(int | None, row['max_requests']),
         )
 
     def _claim_row(self, claim_id: str) -> Row:
@@ -701,6 +864,17 @@ class State:
         if not rows:
             raise InputError(f'Collection `{collection}` is not recorded.')
         return rows[0]
+
+
+def _generation(rows: list[Row]) -> OutputGeneration:
+    return OutputGeneration(
+        id=cast(str, rows[0]['collection_id']) if rows else None,
+        outputs=tuple(
+            cast(str, row['output_json'])
+            for row in rows
+            if row['output_json'] is not None
+        ),
+    )
 
 
 def _claim(row: Row) -> Claim:
@@ -725,6 +899,9 @@ def _collection(row: Row) -> Collection:
         expected_count=cast(int, row['expected_count']),
         manifest_digest=cast(str, row['manifest_digest']),
         created_at=cast(str, row['created_at']),
+        code_revision=cast(str | None, row['code_revision']),
+        case_revision=cast(str | None, row['case_revision']),
+        system_names_json=cast(str | None, row['system_names_json']),
     )
 
 

@@ -1,5 +1,6 @@
 import asyncio
 import os
+import shutil
 import subprocess
 import sys
 import textwrap
@@ -8,26 +9,38 @@ from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from unittest.mock import Mock
+from uuid import uuid4
 
 import pytest
 import tomli_w
 from harbor.job_diff import DiffAction, compare_job_trials, load_source_trials
 from harbor.job_plan import JobPlan
 from harbor.models.agent.context import AgentContext
-from harbor.models.job.config import JobConfig
+from harbor.models.job.config import JobConfig, SourceJobConfig
 from harbor.models.task.config import TaskConfig
 from harbor.models.trial.config import AgentConfig
 from harbor.models.trial.result import TrialResult
 from rich.text import Text
 from typer.testing import CliRunner, Result
 
-from assistant_bench import canaries, catalog, cli, collection, jobs, report
-from assistant_bench.arena import local, publication, votes
+from assistant_bench import (
+    canaries,
+    catalog,
+    cli,
+    collection,
+    execution,
+    jobs,
+    report,
+    runtime,
+)
+from assistant_bench.arena import publication, votes
+from assistant_bench.artifacts import MaterializedTrial, build_manifest
 from assistant_bench.catalog import (
     EXPORT_VAR,
     NixosConfigExport,
+    Price,
     System,
     load_export,
     load_systems,
@@ -35,22 +48,27 @@ from assistant_bench.catalog import (
 from assistant_bench.cli import app
 from assistant_bench.collection import Collection
 from assistant_bench.database import SQLiteDatabase
-from assistant_bench.families import Family, Gate, load_cases, load_family
+from assistant_bench.families import Category, Family, Gate, load_cases, load_family
 from assistant_bench.harnesses import fingerprint
-from assistant_bench.harnesses.endpoint import SDK_HEADERS_VAR
-from assistant_bench.harnesses.usage import ATTEMPTS_FILE, Attempt, MeasuredUsage
+from assistant_bench.harnesses.endpoint import SDK_HEADERS_VAR, SECRET_HEADERS_FILE_VAR
+from assistant_bench.harnesses.usage import Attempt, MeasuredUsage
 from assistant_bench.messages import InputError
-from assistant_bench.outputs import Output, write_outputs
+from assistant_bench.outputs import Output, read_outputs, write_outputs
+from assistant_bench.runtime import PrivateSources, RunContext
+from assistant_bench.spend import Accounting, Entry
+from assistant_bench.state import Run
 from assistant_bench.tasks import render_task_config, render_tasks
 from support import (
     FIXTURES,
     REPORT_FIXTURE,
+    StubEndpoint,
     current_fingerprints,
     finish_job,
     make_output,
     make_system,
     make_trial,
     record_vote,
+    run_host_job,
     write_task_family,
     write_trial,
     write_votes_family,
@@ -58,6 +76,7 @@ from support import (
 
 
 runner = CliRunner()
+REAL_EXECUTE = execution.execute
 
 RENAME_GUIDE = (
     'Give a changed system a new name and keep the old name only in closed '
@@ -72,10 +91,7 @@ MOVED = (
     'now resolves to `{current}`.'
 )
 RENAME = f'Closed reports name `opus-5.5-high`. {RENAME_GUIDE}'
-STALE_TRIALS = (
-    'Delete the stale trials of `opus-5.5-high` under `jobs/f/` in the data '
-    'directory before the next run.'
-)
+STALE_TRIALS = 'Give the changed systems `opus-5.5-high` new names before the next run.'
 
 
 def invoke(*args: str) -> Result:
@@ -92,22 +108,17 @@ def trials(
     ]
 
 
-CLOSE_CASES = {'c1': 'reply', 'c2': 'docs'}
+CLOSE_CASES: dict[str, Category] = {'c1': 'reply', 'c2': 'docs'}
 
 
 @dataclass(frozen=True)
 class Store:
     database: SQLiteDatabase
+    private_database: SQLiteDatabase
     published: publication.Publication
+    generation: str
     targets: list[str]
     """Each target a command connected to."""
-
-
-def write_job(job_dir: Path) -> None:
-    """Write the files that mark a finished Harbor job without trials."""
-    job_dir.mkdir(parents=True)
-    (job_dir / 'config.json').touch()
-    (job_dir / 'result.json').touch()
 
 
 SPENDER = make_system(name='large', context_window=2_000_000, max_output_tokens=200_000)
@@ -115,14 +126,16 @@ SPENDER = make_system(name='large', context_window=2_000_000, max_output_tokens=
 
 def write_spent_attempt(
     job_dir: Path,
+    database: SQLiteDatabase,
     system: str = 'large',
     responses: tuple[MeasuredUsage | None, ...] = (
         MeasuredUsage(1_000_000, 0, 0, 100_000, None),
         None,
     ),
+    *,
+    price: Price | None = SPENDER.price,
 ) -> None:
     """Record an attempt, by default of a $3 response and an unmeasured one."""
-    job_dir.mkdir(parents=True)
     attempt = Attempt(
         trial='c__1',
         system=system,
@@ -131,10 +144,120 @@ def write_spent_attempt(
         finished_at=datetime(2026, 10, 21, 0, 1, tzinfo=UTC),
         responses=list(responses),
     )
-    (job_dir / ATTEMPTS_FILE).write_text(attempt.model_dump_json() + '\n')
+    accounting = Accounting.of(SPENDER.model_copy(update={'price': price}))
+    entry = Entry(
+        **attempt.model_dump(),
+        job=job_dir.name,
+        price=accounting.price,
+        ceiling_usd=accounting.ceiling_usd,
+    )
+    database.execute(
+        'INSERT INTO attempt_entries '
+        '(scope, job, trial, started_at, claim_id, attempt_id, entry_json) '
+        'VALUES (?, ?, ?, ?, NULL, NULL, ?)',
+        (
+            job_dir.parent.name,
+            entry.job,
+            entry.trial,
+            entry.started_at.isoformat(),
+            entry.model_dump_json(),
+        ),
+    )
 
 
-def write_closed_report(family: str, frozen: str | None) -> None:
+def archive_job(
+    context: RunContext, config: JobConfig, database: SQLiteDatabase
+) -> Path:
+    root = finish_job(config)
+    archive_trials(context, root, config.jobs_dir.name, database)
+    return root
+
+
+def archive_trials(
+    context: RunContext, root: Path, scope: str, database: SQLiteDatabase
+) -> None:
+    rows = database.execute(
+        'SELECT id FROM runs WHERE scope = ? AND job = ?', (scope, root.name)
+    ).rows
+    if rows:
+        run = context.state.run(str(rows[0]['id']))
+    else:
+        run = Run(
+            id=str(uuid4()),
+            scope=scope,
+            job=root.name,
+            code_revision=None,
+            case_revision=None,
+            created_at=datetime.now(UTC).isoformat(),
+        )
+        context.state.create_run(run)
+    archives: list[MaterializedTrial] = []
+    results = [
+        TrialResult.model_validate_json(path.read_text())
+        for path in sorted(root.glob('*/result.json'))
+    ]
+    for result in results:
+        (root / result.trial_name / 'config.json').write_text(
+            result.config.model_dump_json()
+        )
+        manifest = build_manifest(
+            root,
+            scope=scope,
+            run_id=run.id,
+            artifact_id=str(result.id),
+            trial_id=str(result.id),
+            job_name=root.name,
+            trial_name=result.trial_name,
+            code_revision=run.code_revision,
+            case_revision=run.case_revision,
+        )
+        archives.append(MaterializedTrial(root, manifest))
+    references = context.artifacts.publish_trials(archives)
+    for result, reference in zip(results, references, strict=True):
+        context.state.record_trial_artifact(
+            run.id,
+            result.trial_name,
+            str(result.id),
+            reference.commit_sha,
+            reference.path,
+            reference.manifest_digest,
+        )
+    context.refresh_sources(load_family(scope))
+
+
+def archive_stale_job(
+    context: RunContext, family: Family, system: System, database: SQLiteDatabase
+) -> None:
+    tasks = render_tasks(
+        family, load_cases(family, private_root=context.private_root), root=context.root
+    )
+    config = jobs.job(
+        family,
+        jobs.family_systems(family, [system]),
+        tasks,
+        root=context.root,
+        sources=context.sources(family),
+    )
+    config.agents[0].kwargs['fingerprint'] = 'fp-old'
+    archive_job(context, config, database)
+
+
+def collected_outputs(
+    family: Family, outputs: list[Output], context: RunContext
+) -> Collection:
+    generation = write_outputs(
+        family.name,
+        outputs,
+        context.state,
+        previous=context.state.output_generation(family.name).id,
+        code_revision=context.code_revision,
+        case_revision=context.case_revision,
+        system_names={output.system: output.system for output in outputs},
+    )
+    return Collection(outputs, [], generation)
+
+
+def write_closed_report(family: str, frozen: str | None) -> Path:
     """Close a round of the family that froze `opus-5.5-high` under a fingerprint."""
     closed = report.Report.model_validate_json(
         REPORT_FIXTURE.read_text().replace('acme-large', 'opus-5.5-high')
@@ -144,7 +267,7 @@ def write_closed_report(family: str, frozen: str | None) -> None:
             update={'fingerprint': frozen}
         )
     }
-    report.write_report(
+    return report.write_report(
         closed.model_copy(update={'family': family, 'systems': systems})
     )
 
@@ -154,13 +277,72 @@ def submitted(data_dir: Path, monkeypatch: pytest.MonkeyPatch) -> list[JobConfig
     """Record each job `bench` submits in place of running Harbor."""
     configs: list[JobConfig] = []
 
-    def run_job(job: JobConfig) -> Path:
+    def run_job(
+        job: JobConfig,
+        *,
+        log: Path | None = None,
+        plugin_context: Path | None = None,
+        source_root: Path | None = None,
+    ) -> Path:
         configs.append(job)
         return jobs.job_path(job)
 
     monkeypatch.setattr(jobs, 'run_job', run_job)
     monkeypatch.setattr(canaries, 'prepare', Mock(return_value=[]))
+    monkeypatch.setattr(canaries, 'run', Mock(return_value=[]))
+
+    def execute(
+        context: RunContext,
+        job: JobConfig,
+        accounting: dict[str, Accounting],
+        *,
+        scope: str,
+        run_id: str,
+        expected_source_revision: int,
+        log: Path | None = None,
+        max_requests: int | None = None,
+    ) -> Run:
+        configs.append(job)
+        run = Run(
+            id=run_id,
+            scope=scope,
+            job=job.job_name,
+            code_revision=context.code_revision,
+            case_revision=context.case_revision,
+            created_at=datetime.now(UTC).isoformat(),
+            max_requests=max_requests,
+        )
+        context.state.create_run(run)
+        return run
+
+    monkeypatch.setattr(execution, 'execute', execute)
     return configs
+
+
+@pytest.fixture
+def cloud(run_context: RunContext, monkeypatch: pytest.MonkeyPatch) -> RunContext:
+    monkeypatch.setattr(cli, 'open_context', lambda: nullcontext(run_context))
+
+    def materialize(revision: str, destination: Path) -> None:
+        assert revision == run_context.code_revision
+        shutil.copytree(run_context.public_root, destination)
+
+    monkeypatch.setattr(cli, 'materialize_implementation', materialize)
+    monkeypatch.setattr(runtime, 'materialize_implementation', materialize)
+    return run_context
+
+
+@pytest.fixture
+def private_sources(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> PrivateSources:
+    sources = PrivateSources('1' * 40, tmp_path / 'private-cases')
+    sources.root.mkdir()
+    monkeypatch.setattr(cli, 'open_sources', lambda: nullcontext(sources))
+    return sources
+
+
+@pytest.fixture
+def vote_target() -> Literal['production', 'private']:
+    return 'production'
 
 
 @pytest.fixture
@@ -168,7 +350,9 @@ def check_trials(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Output]]:
     """Serve each family's check job the trials stored under the family's name."""
     outputs: dict[str, list[Output]] = {}
 
-    def read_trials(family: Family, job_dir: Path) -> list[Output]:
+    def read_trials(
+        family: Family, job_dir: Path, *, private_root: Path | None = None
+    ) -> list[Output]:
         return outputs[family.name]
 
     monkeypatch.setattr(collection, 'read_trials', read_trials)
@@ -180,7 +364,9 @@ def resolved(monkeypatch: pytest.MonkeyPatch) -> dict[str, System]:
     """Resolve `bench`'s systems to the ones a test stores here."""
     systems: dict[str, System] = {}
 
-    def load_systems(export: NixosConfigExport) -> dict[str, System]:
+    def load_systems(
+        export: NixosConfigExport, *, root: Path | None = None
+    ) -> dict[str, System]:
         return systems
 
     monkeypatch.setattr(cli, 'load_systems', load_systems)
@@ -190,9 +376,11 @@ def resolved(monkeypatch: pytest.MonkeyPatch) -> dict[str, System]:
 def planned_actions(job: JobConfig) -> dict[str, set[DiffAction]]:
     """Map each system to the actions Harbor plans against the job's one source."""
     plan = asyncio.run(JobPlan.from_config(job))
-    (source,) = job.source_jobs
-    assert source.path is not None
-    diff = compare_job_trials(plan, load_source_trials([(source, source.path)]))
+    sources: list[tuple[SourceJobConfig, Path]] = []
+    for source in job.source_jobs:
+        assert source.path is not None
+        sources.append((source, source.path))
+    diff = compare_job_trials(plan, load_source_trials(sources))
     actions: defaultdict[str, set[DiffAction]] = defaultdict(set)
     for trial, trial_diff in zip(plan.trial_configs, diff.trials, strict=True):
         actions[trial.agent.kwargs['system']].add(trial_diff.action)
@@ -339,12 +527,13 @@ class TestCheck:
         assert message in Text.from_ansi(result.stderr).plain
         assert submitted == []
 
-    def test_refuses_a_data_case_entry_no_family_reads(self, data_dir: Path) -> None:
-        unread = data_dir / 'cases' / 'smoke-text.jsonl'
-        unread.parent.mkdir(parents=True)
+    def test_rejects_a_private_case_entry_no_family_reads(
+        self, private_sources: PrivateSources
+    ) -> None:
+        unread = private_sources.root / 'smoke-text.jsonl'
         unread.write_text('cases = []\n')
 
-        result = invoke('check', 'smoke-text')
+        result = invoke('check', 'smoke-text', '--private')
 
         assert result.exit_code == 1
         assert result.stderr.startswith(f'No family reads `{unread}`')
@@ -588,7 +777,13 @@ class TestCheck:
     ) -> None:
         failed: list[JobConfig] = []
 
-        def run_job(job: JobConfig) -> Path:
+        def run_job(
+            job: JobConfig,
+            *,
+            log: Path | None = None,
+            plugin_context: Path | None = None,
+            source_root: Path | None = None,
+        ) -> Path:
             failed.append(job)
             if started:
                 jobs.job_path(job).mkdir(parents=True)
@@ -618,7 +813,9 @@ class TestCheck:
         stderr: str,
         escapes: bool,
     ) -> None:
-        def read_trials(family: Any, job_dir: Path) -> list[Output]:
+        def read_trials(
+            family: Any, job_dir: Path, *, private_root: Path | None = None
+        ) -> list[Output]:
             raise error('Trial `echo__1` failed.')
 
         monkeypatch.setattr(collection, 'read_trials', read_trials)
@@ -628,7 +825,7 @@ class TestCheck:
         assert (result.exit_code, result.stderr) == (1, stderr)
         assert isinstance(result.exception, error) is escapes
 
-    def test_reports_an_unreadable_run_trial_without_a_traceback(
+    def test_checks_public_cases_without_reading_disposable_trials(
         self, data_dir: Path, submitted: list[JobConfig]
     ) -> None:
         job = data_dir / 'jobs' / 'smoke-text' / 'job-1'
@@ -642,8 +839,8 @@ class TestCheck:
 
         result = invoke('check', 'smoke-text')
 
-        assert result.exit_code == 1
-        assert 'has a result.json but no lock.json' in result.stderr
+        assert result.exit_code == 0, result.output
+        assert result.stdout == 'Family `smoke-text`: 2 valid cases.\n'
         assert submitted == []
 
     def test_names_the_file_and_field_of_an_invalid_family(
@@ -662,11 +859,10 @@ class TestCheck:
             'equal to 1.\n',
         )
 
-    def test_rejects_a_local_case_that_reuses_a_committed_id(
-        self, data_dir: Path
+    def test_rejects_a_private_case_that_reuses_a_committed_id(
+        self, private_sources: PrivateSources
     ) -> None:
-        local = data_dir / 'cases' / 'smoke-text.toml'
-        local.parent.mkdir(parents=True)
+        local = private_sources.root / 'smoke-text.toml'
         local.write_text(
             tomli_w.dumps(
                 {
@@ -682,7 +878,7 @@ class TestCheck:
             )
         )
 
-        result = invoke('check', 'smoke-text')
+        result = invoke('check', 'smoke-text', '--private')
 
         assert result.exit_code == 1
         assert 'case `en-greeting` appears at' in result.output
@@ -778,6 +974,7 @@ class TestCheck:
         )
 
 
+@pytest.mark.usefixtures('cloud')
 class TestRun:
     @pytest.mark.parametrize('scenario', ['priced', 'unpriced', 'refused'])
     def test_checks_the_pending_union_once_before_any_family_job(
@@ -801,14 +998,22 @@ class TestRun:
         events: list[str] = []
         probes: list[canaries.Probe] = []
 
-        def check(selected: list[canaries.Probe]) -> list[canaries.Record]:
+        def check(
+            selected: list[canaries.Probe], context: RunContext
+        ) -> list[canaries.Record]:
             probes.extend(selected)
             events.append('canaries')
             if scenario == 'refused':
                 raise InputError('Canary refused the run.')
             return []
 
-        def run_job(config: JobConfig) -> Path:
+        def run_job(
+            config: JobConfig,
+            *,
+            log: Path | None = None,
+            plugin_context: Path | None = None,
+            source_root: Path | None = None,
+        ) -> Path:
             events.append(config.jobs_dir.name)
             return jobs.job_path(config)
 
@@ -840,23 +1045,17 @@ class TestRun:
         resolved: dict[str, System],
         monkeypatch: pytest.MonkeyPatch,
         guard: str,
+        private_store: SQLiteDatabase,
+        cloud: RunContext,
     ) -> None:
         write_votes_family(families_dir, ['large'], {'c1': 'message'})
         resolved['large'] = SPENDER
         if guard == 'fingerprint':
-            write_trial(
-                data_dir / 'jobs' / 'f' / 'old-job',
-                'c1__1',
-                AgentConfig(
-                    import_path='x:Y',
-                    kwargs={'system': 'large', 'fingerprint': 'fp-old'},
-                ),
-                task='f/c1',
-            )
+            archive_stale_job(cloud, load_family('f'), resolved['large'], private_store)
         else:
             with (families_dir / 'f' / 'family.toml').open('a') as file:
                 file.write('budget_usd = 1\n')
-            write_spent_attempt(data_dir / 'jobs' / 'f' / 'old-job')
+            write_spent_attempt(data_dir / 'jobs' / 'f' / 'old-job', private_store)
         prepare = Mock()
         probe = Mock()
         ordinary = Mock()
@@ -937,18 +1136,23 @@ class TestRun:
         assert submitted == []
 
     def test_generates_after_a_named_run_only_the_systems_it_left_out(
-        self, submitted: list[JobConfig]
+        self,
+        submitted: list[JobConfig],
+        cloud: RunContext,
+        private_store: SQLiteDatabase,
     ) -> None:
         named = ['gpt-6.1-sol-high', 'kimi-k3-high']
         args = [arg for name in named for arg in ('--system', name)]
         result = invoke('run', 'smoke-text', *args)
         assert result.exit_code == 0, result.output
-        first = finish_job(submitted[0])
+        first = archive_job(cloud, submitted[0], private_store)
 
         result = invoke('run', 'smoke-text')
         assert result.exit_code == 0, result.output
 
-        assert [source.path for source in submitted[1].source_jobs] == [first]
+        assert {
+            source.path.name for source in submitted[1].source_jobs if source.path
+        } == {first.name}
         assert planned_actions(submitted[1]) == {
             system: {DiffAction.REUSE if system in named else DiffAction.RERUN}
             for system in load_family('smoke-text').settings.systems
@@ -988,7 +1192,11 @@ class TestRun:
         ]
 
     def test_runs_after_a_task_family_run_only_the_systems_it_left_out(
-        self, families_dir: Path, submitted: list[JobConfig]
+        self,
+        families_dir: Path,
+        submitted: list[JobConfig],
+        cloud: RunContext,
+        private_store: SQLiteDatabase,
     ) -> None:
         write_task_family(
             families_dir,
@@ -998,7 +1206,7 @@ class TestRun:
         )
         result = invoke('run', 'f', '--system', 'opus-5.5-high')
         assert result.exit_code == 0, result.output
-        finish_job(submitted[0])
+        archive_job(cloud, submitted[0], private_store)
 
         result = invoke('run', 'f')
         assert result.exit_code == 0, result.output
@@ -1079,92 +1287,107 @@ class TestRun:
         assert submitted == []
 
     @pytest.mark.usefixtures('submitted')
-    def test_collects_the_run_into_outputs(
-        self, data_dir: Path, monkeypatch: pytest.MonkeyPatch
+    def test_collects_the_run_into_cloud_outputs(
+        self,
+        families_dir: Path,
+        resolved: dict[str, System],
+        cloud: RunContext,
+        endpoint: StubEndpoint,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        def run_job(job: JobConfig) -> Path:
-            write_trial(
-                jobs.job_path(job),
-                'en-greeting__1',
-                job.agents[0],
-                task='smoke-text/en-greeting',
-                output='Hi.',
-                instruction=None,
-                context=AgentContext(metadata={'finish_reason': 'stop'}),
-                environment=job.environment,
-                verifier_disabled=job.verifier.disable,
-            )
-            return jobs.job_path(job)
+        write_votes_family(families_dir, ['large'], {'c1': 'message'})
+        resolved['large'] = make_system(name='large')
+        for name, value in endpoint.env.items():
+            monkeypatch.setenv(name, value)
+        secret_file = tmp_path / 'secret-headers.json'
+        secret_file.write_text('{"x-session-token":"synthetic-trace-credential"}')
+        monkeypatch.setenv(SECRET_HEADERS_FILE_VAR, str(secret_file))
+        monkeypatch.setattr(jobs, 'run_job', run_host_job)
+        monkeypatch.setattr(execution, 'execute', REAL_EXECUTE)
 
-        monkeypatch.setattr(jobs, 'run_job', run_job)
+        result = invoke('run', 'f')
 
-        result = invoke('run', 'smoke-text')
         assert result.exit_code == 0, result.output
-
-        assert 'Family `smoke-text`: 1 output, 0 errored.\n' in result.output
-        written = (data_dir / 'outputs' / 'smoke-text.jsonl').read_text()
-        assert written.count('\n') == 1
+        assert 'Family `f`: 1 output, 0 errored.\n' in result.output
+        (output,) = read_outputs('f', cloud.state)
+        assert output.text == 'Hello there.'
+        assert output.input_tokens == 120
+        assert len(endpoint.requests) == 1
+        assert cloud.state.artifact_generation('f').artifacts
 
     @pytest.mark.usefixtures('submitted')
     def test_stops_after_a_failed_family(
         self,
         families_dir: Path,
-        data_dir: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         write_votes_family(families_dir, ['opus-5.5-high'], name='f')
         write_votes_family(families_dir, ['opus-5.5-high'], name='g')
         submitted: list[JobConfig] = []
 
-        def run_job(job: JobConfig) -> Path:
+        def run_job(
+            job: JobConfig,
+            *,
+            log: Path | None = None,
+            plugin_context: Path | None = None,
+            source_root: Path | None = None,
+        ) -> Path:
             submitted.append(job)
             raise subprocess.CalledProcessError(3, 'harbor')
 
         monkeypatch.setattr(jobs, 'run_job', run_job)
+        monkeypatch.setattr(execution, 'execute', REAL_EXECUTE)
 
         result = invoke('run')
 
-        assert result.exit_code == 3
+        assert result.exit_code == 3, result.output
         assert [job.jobs_dir.name for job in submitted] == ['f']
 
     @pytest.mark.usefixtures('submitted')
-    def test_collects_finished_trials_and_names_the_job_when_harbor_fails(
-        self, data_dir: Path, monkeypatch: pytest.MonkeyPatch
+    def test_collects_durable_trials_when_the_harbor_parent_fails(
+        self,
+        families_dir: Path,
+        resolved: dict[str, System],
+        cloud: RunContext,
+        endpoint: StubEndpoint,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        submitted: list[JobConfig] = []
+        write_votes_family(families_dir, ['large'], {'c1': 'message'})
+        resolved['large'] = make_system(name='large')
+        for name, value in endpoint.env.items():
+            monkeypatch.setenv(name, value)
+        secret_file = tmp_path / 'secret-headers.json'
+        secret_file.write_text('{"x-session-token":"synthetic-trace-credential"}')
+        monkeypatch.setenv(SECRET_HEADERS_FILE_VAR, str(secret_file))
 
-        def run_job(job: JobConfig) -> Path:
-            submitted.append(job)
-            write_trial(
-                jobs.job_path(job),
-                'en-greeting__1',
-                job.agents[0],
-                task='smoke-text/en-greeting',
-                output='Hi.',
-                instruction=None,
-                context=AgentContext(
-                    n_input_tokens=10,
-                    n_output_tokens=2,
-                    metadata={'finish_reason': 'stop'},
-                ),
-                environment=job.environment,
-                verifier_disabled=job.verifier.disable,
+        def run_job(
+            job: JobConfig,
+            *,
+            log: Path | None = None,
+            plugin_context: Path | None = None,
+            source_root: Path | None = None,
+        ) -> Path:
+            run_host_job(
+                job,
+                log=log,
+                plugin_context=plugin_context,
+                source_root=source_root,
             )
             raise subprocess.CalledProcessError(3, 'harbor')
 
         monkeypatch.setattr(jobs, 'run_job', run_job)
+        monkeypatch.setattr(execution, 'execute', REAL_EXECUTE)
 
-        result = invoke('run', 'smoke-text')
+        result = invoke('run', 'f')
 
-        (job,) = submitted
-        assert (result.exit_code, result.stderr) == (
-            3,
-            'Harbor exited with code 3. Browse its trials with '
-            f'`harbor view {jobs.job_path(job)}`.\n',
-        )
-        assert result.stdout.endswith('Family `smoke-text`: 1 output, 0 errored.\n')
-        written = (data_dir / 'outputs' / 'smoke-text.jsonl').read_text()
-        assert written.count('\n') == 1
+        assert result.exit_code == 3, result.output
+        assert 'Family `f`: 1 output, 0 errored.\n' in result.output
+        (output,) = read_outputs('f', cloud.state)
+        assert output.text == 'Hello there.'
+        assert output.cost_usd is not None
+        assert cloud.state.artifact_generation('f').artifacts
 
     @pytest.mark.parametrize(
         ('reported', 'frozen', 'trial', 'expected'),
@@ -1217,22 +1440,24 @@ class TestRun:
         frozen: str | None,
         trial: bool,
         expected: list[str],
+        cloud: RunContext,
+        private_store: SQLiteDatabase,
     ) -> None:
-        write_votes_family(families_dir, ['opus-5.5-high'], name='f')
+        write_votes_family(families_dir, ['opus-5.5-high'], {'c1': 'message'}, name='f')
         current = fingerprint(load_systems(load_export())['opus-5.5-high'])
         if reported:
-            write_closed_report(
+            path = write_closed_report(
                 'f', None if frozen is None else frozen.format(current=current)
             )
+            destination = cloud.public_root / 'reports' / 'f' / path.name
+            destination.parent.mkdir(parents=True)
+            shutil.copyfile(path, destination)
         if trial:
-            write_trial(
-                data_dir / 'jobs' / 'f' / '2026-10-20__10-00-00',
-                'c1__1',
-                AgentConfig(
-                    import_path='x:Y',
-                    kwargs={'system': 'opus-5.5-high', 'fingerprint': 'fp-old'},
-                ),
-                task='f/c1',
+            archive_stale_job(
+                cloud,
+                load_family('f'),
+                load_systems(load_export())['opus-5.5-high'],
+                private_store,
             )
 
         result = invoke('run', 'f')
@@ -1266,12 +1491,13 @@ class TestRun:
         budget: int,
         exit_code: int,
         stderr: str,
+        private_store: SQLiteDatabase,
     ) -> None:
         write_votes_family(families_dir, ['large'], {'c1': 'message', 'c2': 'message'})
         with (families_dir / 'f' / 'family.toml').open('a') as file:
             file.write(f'budget_usd = {budget}\n')
         resolved['large'] = SPENDER
-        write_spent_attempt(data_dir / 'jobs' / 'f' / 'job-1')
+        write_spent_attempt(data_dir / 'jobs' / 'f' / 'job-1', private_store)
 
         result = invoke('run', 'f')
 
@@ -1289,6 +1515,7 @@ class TestRun:
         data_dir: Path,
         resolved: dict[str, System],
         submitted: list[JobConfig],
+        private_store: SQLiteDatabase,
     ) -> None:
         write_votes_family(families_dir, ['large', 'small'], {'c1': 'message'})
         with (families_dir / 'f' / 'family.toml').open('a') as file:
@@ -1297,9 +1524,12 @@ class TestRun:
         resolved['small'] = make_system(
             name='small', context_window=2_000_000, max_output_tokens=200_000
         )
-        write_spent_attempt(data_dir / 'jobs' / 'f' / 'job-1')
+        write_spent_attempt(data_dir / 'jobs' / 'f' / 'job-1', private_store)
         write_spent_attempt(
-            data_dir / 'jobs' / 'f' / 'job-2', 'small', (None, None, None)
+            data_dir / 'jobs' / 'f' / 'job-2',
+            private_store,
+            'small',
+            (None, None, None),
         )
 
         result = invoke('run', 'f', '--system', 'small')
@@ -1339,13 +1569,16 @@ class TestRun:
         data_dir: Path,
         resolved: dict[str, System],
         submitted: list[JobConfig],
+        private_store: SQLiteDatabase,
     ) -> None:
         write_votes_family(families_dir, ['large', 'small'], {'c1': 'message'})
         with (families_dir / 'f' / 'family.toml').open('a') as file:
             file.write('budget_usd = 51\n')
         resolved['large'] = SPENDER
         resolved['small'] = make_system(name='small')
-        write_spent_attempt(data_dir / 'jobs' / 'f' / 'job-1', 'large', (None,) * 8)
+        write_spent_attempt(
+            data_dir / 'jobs' / 'f' / 'job-1', private_store, 'large', (None,) * 8
+        )
 
         result = invoke('run', 'f', '--system', 'small')
 
@@ -1358,13 +1591,14 @@ class TestRun:
         data_dir: Path,
         resolved: dict[str, System],
         submitted: list[JobConfig],
+        private_store: SQLiteDatabase,
     ) -> None:
         write_votes_family(families_dir, ['large', 'small'], {'c1': 'message'})
         with (families_dir / 'f' / 'family.toml').open('a') as file:
             file.write('budget_usd = 1\n')
         resolved['large'] = SPENDER
         resolved['small'] = make_system(name='small', price=None)
-        write_spent_attempt(data_dir / 'jobs' / 'f' / 'job-1')
+        write_spent_attempt(data_dir / 'jobs' / 'f' / 'job-1', private_store)
 
         result = invoke('run', 'f', '--system', 'small')
 
@@ -1377,14 +1611,16 @@ class TestRun:
         data_dir: Path,
         resolved: dict[str, System],
         submitted: list[JobConfig],
+        cloud: RunContext,
+        private_store: SQLiteDatabase,
     ) -> None:
         write_votes_family(families_dir, ['large'], {'c1': 'message'})
         resolved['large'] = SPENDER
         assert invoke('run', 'f').exit_code == 0
-        finish_job(submitted.pop())
+        archive_job(cloud, submitted.pop(), private_store)
         with (families_dir / 'f' / 'family.toml').open('a') as file:
             file.write('budget_usd = 1\n')
-        write_spent_attempt(data_dir / 'jobs' / 'f' / 'job-spent')
+        write_spent_attempt(data_dir / 'jobs' / 'f' / 'job-spent', private_store)
 
         result = invoke('run', 'f')
 
@@ -1392,7 +1628,12 @@ class TestRun:
         assert len(submitted) == 1
 
     def test_refuses_a_later_family_before_running_any(
-        self, families_dir: Path, data_dir: Path, submitted: list[JobConfig]
+        self,
+        families_dir: Path,
+        data_dir: Path,
+        submitted: list[JobConfig],
+        cloud: RunContext,
+        private_store: SQLiteDatabase,
     ) -> None:
         write_votes_family(families_dir, ['opus-5.5-high'], name='f')
         cases = write_votes_family(families_dir, ['opus-5.5-high'], name='g')
@@ -1410,14 +1651,11 @@ class TestRun:
                 }
             )
         )
-        write_trial(
-            data_dir / 'jobs' / 'g' / '2026-10-20__10-00-00',
-            'old__1',
-            AgentConfig(
-                import_path='x:Y',
-                kwargs={'system': 'opus-5.5-high', 'fingerprint': 'fp-old'},
-            ),
-            task='g/old',
+        archive_stale_job(
+            cloud,
+            load_family('g'),
+            load_systems(load_export())['opus-5.5-high'],
+            private_store,
         )
 
         result = invoke('run')
@@ -1428,7 +1666,11 @@ class TestRun:
         assert not (data_dir / 'tasks' / 'g' / 'c1').exists()
 
     def test_refuses_a_task_edited_without_a_bump_before_running_any(
-        self, families_dir: Path, submitted: list[JobConfig]
+        self,
+        families_dir: Path,
+        submitted: list[JobConfig],
+        cloud: RunContext,
+        private_store: SQLiteDatabase,
     ) -> None:
         write_votes_family(families_dir, ['opus-5.5-high'], name='f')
         write_task_family(
@@ -1440,7 +1682,7 @@ class TestRun:
         )
         result = invoke('run', 'z')
         assert result.exit_code == 0, result.output
-        finish_job(submitted.pop())
+        archive_job(cloud, submitted.pop(), private_store)
         test = families_dir / 'z' / 'tasks' / 'echo' / 'tests' / 'test.sh'
         test.write_text(test.read_text() + '# Edited.\n')
 
@@ -1453,17 +1695,20 @@ class TestRun:
             'Task `echo` changed since a trial ran it at version `1.0.0`.\n'
             "Bump each task's `[task] version`: the patch for a change no trial\n"
             'depends on, such as its solution, the minor for a change to `tests/`\n'
-            'alone, which regrades its trials, or the major for anything the agent\n'
-            'sees, which reruns them.\n',
+            'and the major for a change to inputs the agent sees.\n',
         )
         assert submitted == []
 
     def test_refuses_a_case_whose_rendered_task_changed_under_its_version(
-        self, monkeypatch: pytest.MonkeyPatch, submitted: list[JobConfig]
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        submitted: list[JobConfig],
+        cloud: RunContext,
+        private_store: SQLiteDatabase,
     ) -> None:
         result = invoke('run', 'smoke-text')
         assert result.exit_code == 0, result.output
-        finish_job(submitted.pop())
+        archive_job(cloud, submitted.pop(), private_store)
         render = render_task_config
 
         def with_new_default(name: str, instruction: str) -> TaskConfig:
@@ -1477,38 +1722,35 @@ class TestRun:
 
         result = invoke('run', 'smoke-text')
 
-        assert (result.exit_code, result.stdout, result.stderr) == (
-            1,
-            '',
-            'Family `smoke-text` has cases whose rendered task changed under a '
-            'version a trial recorded: `en-greeting`, `zh-greeting`. A Harbor '
-            'upgrade that changes a `task.toml` default does this, and Harbor '
-            "aborts the job until the family's earlier job directories are "
-            'removed, as `docs/research/harbor.md#quirks-of-the-pinned-release` '
-            'describes.\n',
-        )
+        assert (result.exit_code, result.stdout) == (1, '')
+        assert result.stderr.startswith('Family `smoke-text` has tasks to bump:\n')
+        for case in ('en-greeting', 'zh-greeting'):
+            assert (
+                f'Task `{case}` changed since a trial ran it at version `1.0.0+'
+                in result.stderr
+            )
+        assert "Bump each task's `[task] version`" in result.stderr
         assert submitted == []
 
-    def test_rejects_an_unreadable_trial_record(
-        self, families_dir: Path, data_dir: Path, submitted: list[JobConfig]
+    def test_ignores_unregistered_trial_directories(
+        self,
+        families_dir: Path,
+        data_dir: Path,
+        submitted: list[JobConfig],
     ) -> None:
-        write_votes_family(families_dir, ['opus-5.5-high'], name='f')
-        job = data_dir / 'jobs' / 'f' / '2026-10-20__10-00-00'
-        write_trial(
-            job,
-            'c1__1',
-            AgentConfig(import_path='x:Y', kwargs={'system': 'opus-5.5-high'}),
-            task='f/c1',
-        )
-        (job / 'c1__1' / 'lock.json').unlink()
+        write_votes_family(families_dir, ['opus-5.5-high'])
+        trial = data_dir / 'jobs' / 'f' / 'unregistered' / 'c1__1'
+        trial.mkdir(parents=True)
+        (trial / 'result.json').write_text('{')
 
         result = invoke('run', 'f')
 
-        assert result.exit_code == 1
-        assert 'has a result.json but no lock.json' in result.output
-        assert submitted == []
+        assert result.exit_code == 0, result.output
+        assert len(submitted) == 1
+        assert submitted[0].source_jobs == []
 
 
+@pytest.mark.usefixtures('cloud')
 class TestSpend:
     def test_prints_the_ledger_and_the_projection_without_running(
         self,
@@ -1516,10 +1758,11 @@ class TestSpend:
         data_dir: Path,
         resolved: dict[str, System],
         submitted: list[JobConfig],
+        private_store: SQLiteDatabase,
     ) -> None:
         write_votes_family(families_dir, ['large'], {'c1': 'message'})
         resolved['large'] = SPENDER
-        write_spent_attempt(data_dir / 'jobs' / 'f' / 'job-1')
+        write_spent_attempt(data_dir / 'jobs' / 'f' / 'job-1', private_store)
 
         result = invoke('spend', 'f')
 
@@ -1539,13 +1782,20 @@ class TestSpend:
         data_dir: Path,
         resolved: dict[str, System],
         submitted: list[JobConfig],
+        private_store: SQLiteDatabase,
     ) -> None:
         write_votes_family(families_dir, ['large', 'small'], {'c1': 'message'})
         with (families_dir / 'f' / 'family.toml').open('a') as file:
             file.write('budget_usd = 100\n')
         resolved['large'] = SPENDER
         resolved['small'] = make_system(name='small', price=None)
-        write_spent_attempt(data_dir / 'jobs' / 'f' / 'job-1', 'small', (None,))
+        write_spent_attempt(
+            data_dir / 'jobs' / 'f' / 'job-1',
+            private_store,
+            'small',
+            (None,),
+            price=None,
+        )
 
         result = invoke('spend', 'f')
 
@@ -1601,6 +1851,7 @@ class TestSpend:
         submitted: list[JobConfig],
         attempts: list[tuple[str, str, tuple[MeasuredUsage | None, ...]]],
         expected: list[str],
+        private_store: SQLiteDatabase,
     ) -> None:
         write_votes_family(families_dir, ['large', 'small'], {'c1': 'message'})
         resolved['large'] = SPENDER
@@ -1608,7 +1859,9 @@ class TestSpend:
             name='small', context_window=2_000_000, max_output_tokens=200_000
         )
         for job, system, responses in attempts:
-            write_spent_attempt(data_dir / 'jobs' / 'f' / job, system, responses)
+            write_spent_attempt(
+                data_dir / 'jobs' / 'f' / job, private_store, system, responses
+            )
 
         result = invoke('spend', 'f')
 
@@ -1617,13 +1870,18 @@ class TestSpend:
         assert submitted == []
 
 
+@pytest.mark.usefixtures('cloud')
 class TestCollect:
     def test_prints_each_systems_spend_from_the_ledger(
-        self, families_dir: Path, data_dir: Path, resolved: dict[str, System]
+        self,
+        families_dir: Path,
+        data_dir: Path,
+        resolved: dict[str, System],
+        private_store: SQLiteDatabase,
     ) -> None:
         write_votes_family(families_dir, ['large'], name='f')
         resolved['large'] = SPENDER
-        write_spent_attempt(data_dir / 'jobs' / 'f' / 'job-1')
+        write_spent_attempt(data_dir / 'jobs' / 'f' / 'job-1', private_store)
 
         result = invoke('collect', 'f')
 
@@ -1641,23 +1899,35 @@ class TestCollect:
         resolved: dict[str, System],
         submitted: list[JobConfig],
         command: str,
+        cloud: RunContext,
+        private_store: SQLiteDatabase,
     ) -> None:
         write_votes_family(families_dir, ['large'], {'c1': 'message', 'c2': 'message'})
         system = make_system(name='large')
         resolved['large'] = system
         family = load_family('f')
-        tasks = {task.name: task for task in render_tasks(family, load_cases(family))}
+        tasks = {
+            task.name: task
+            for task in render_tasks(family, load_cases(family), root=cloud.root)
+        }
         for job, case, model in (
             ('job-1', 'c1', 'large-2026'),
             ('job-2', 'c2', 'other-2026'),
         ):
-            config = jobs.job(family, [system], [tasks[case]])
+            config = jobs.job(
+                family,
+                [system],
+                [tasks[case]],
+                root=cloud.root,
+                sources=cloud.sources(family),
+            )
             (path,) = finish_job(config.model_copy(update={'job_name': job})).glob(
                 '*/result.json'
             )
             trial = TrialResult.model_validate_json(path.read_text())
             trial.agent_result = AgentContext(metadata={'response_model': model})
             path.write_text(trial.model_dump_json())
+            archive_trials(cloud, path.parent.parent, 'f', private_store)
 
         result = invoke(command, 'f')
 
@@ -1674,8 +1944,10 @@ class TestCollect:
             families_dir, 'echo', systems=('opus-5.5-high',), author_vendor='unknown'
         )
 
-        def collect(family: Family, systems: dict[str, System]) -> Collection:
-            return Collection([], [])
+        def collect(
+            family: Family, systems: dict[str, System], context: RunContext
+        ) -> Collection:
+            return collected_outputs(family, [], context)
 
         monkeypatch.setattr(collection, 'collect', collect)
 
@@ -1718,8 +1990,10 @@ class TestCollect:
             for system in ('opus-5.5-high', 'gpt-6-astra-high')
         ]
 
-        def collect(family: Family, systems: dict[str, System]) -> Collection:
-            return Collection(outputs, [])
+        def collect(
+            family: Family, systems: dict[str, System], context: RunContext
+        ) -> Collection:
+            return collected_outputs(family, outputs, context)
 
         monkeypatch.setattr(collection, 'collect', collect)
 
@@ -1746,8 +2020,11 @@ class TestCollect:
             families_dir, 'one', systems=('opus-5.5-high',), author_vendor='anthropic'
         )
 
-        def collect(family: Family, systems: dict[str, System]) -> Collection:
-            return Collection(
+        def collect(
+            family: Family, systems: dict[str, System], context: RunContext
+        ) -> Collection:
+            return collected_outputs(
+                family,
                 [
                     make_output(
                         case='one',
@@ -1757,7 +2034,7 @@ class TestCollect:
                         output_tokens=20,
                     )
                 ],
-                [],
+                context,
             )
 
         monkeypatch.setattr(collection, 'collect', collect)
@@ -1828,8 +2105,15 @@ class TestCollect:
         outputs: list[Output],
         summary: str,
     ) -> None:
-        def collect(family: Family, systems: dict[str, System]) -> Collection:
-            return Collection(outputs, [])
+        outputs = [
+            output.model_copy(update={'trial': f'sample-{index}'})
+            for index, output in enumerate(outputs)
+        ]
+
+        def collect(
+            family: Family, systems: dict[str, System], context: RunContext
+        ) -> Collection:
+            return collected_outputs(family, outputs, context)
 
         monkeypatch.setattr(collection, 'collect', collect)
 
@@ -1838,23 +2122,53 @@ class TestCollect:
 
         assert result.output == textwrap.dedent(summary)
 
-    def test_collects_every_family_with_jobs(
-        self, families_dir: Path, data_dir: Path
+    def test_collects_only_families_with_registered_artifacts(
+        self,
+        families_dir: Path,
+        cloud: RunContext,
+        private_store: SQLiteDatabase,
     ) -> None:
         for name in ('f', 'g', 'h'):
-            write_votes_family(families_dir, ['opus-5.5-high'], name=name)
+            write_votes_family(
+                families_dir,
+                ['opus-5.5-high'],
+                {'c1': 'message'},
+                name=name,
+            )
+        system = load_systems(load_export())['opus-5.5-high']
         for name in ('f', 'g'):
-            write_job(data_dir / 'jobs' / name / 'job-1')
+            family = load_family(name)
+            tasks = render_tasks(
+                family,
+                load_cases(family, private_root=None),
+                root=cloud.root,
+            )
+            config = jobs.job(
+                family,
+                [system],
+                tasks,
+                root=cloud.root,
+                sources=cloud.sources(family),
+            )
+            archive_job(cloud, config, private_store)
+        cloud.state.create_run(
+            Run(
+                id='waiting-run',
+                scope='h',
+                job='not-started',
+                code_revision=None,
+                case_revision=None,
+                created_at=datetime.now(UTC).isoformat(),
+            )
+        )
 
         result = invoke('collect')
-        assert result.exit_code == 0, result.output
 
-        assert result.output == (
-            'Family `f`: 0 outputs, 0 errored.\nFamily `g`: 0 outputs, 0 errored.\n'
-        )
-        assert (data_dir / 'outputs' / 'f.jsonl').exists()
-        assert (data_dir / 'outputs' / 'g.jsonl').exists()
-        assert not (data_dir / 'outputs' / 'h.jsonl').exists()
+        assert result.exit_code == 0, result.output
+        for name in ('f', 'g'):
+            assert f'Family `{name}`: 1 output, 0 errored.' in result.output
+            assert [output.case for output in read_outputs(name, cloud.state)] == ['c1']
+        assert cloud.state.output_generation('h').id is None
 
     def test_reports_when_no_family_has_jobs(self) -> None:
         result = invoke('collect')
@@ -1864,39 +2178,26 @@ class TestCollect:
             'No family has jobs yet. Run `uv run bench run` first.\n',
         )
 
-    def test_reports_an_unreadable_trial_without_a_traceback(
-        self, families_dir: Path, data_dir: Path
-    ) -> None:
-        write_votes_family(families_dir, ['opus-5.5-high'])
-        trial = data_dir / 'jobs' / 'f' / 'job-1' / 'c1__1'
-        write_trial(
-            trial.parent,
-            trial.name,
-            AgentConfig(import_path='x:Y', kwargs={'system': 'opus-5.5-high'}),
-            task='f/c1',
-        )
-        (trial / 'result.json').write_text('{')
 
-        result = invoke('collect', 'f')
-
-        assert result.exit_code == 1
-        assert result.output.startswith(
-            f"Source trial '{trial.resolve()}' has an unreadable result.json"
-        )
-
-
+@pytest.mark.usefixtures('cloud')
 class TestClose:
     @pytest.fixture
     def store(
         self,
         arena_store: SQLiteDatabase,
+        private_store: SQLiteDatabase,
         families_dir: Path,
-        tmp_path: Path,
+        cloud: RunContext,
         monkeypatch: pytest.MonkeyPatch,
+        vote_target: Literal['production', 'private'],
     ) -> Store:
-        """Publish family `f` to a store that serves every target."""
+        target = vote_target
         write_votes_family(
-            families_dir, ['large', 'small'], CLOSE_CASES, samples=2, public_voting=True
+            families_dir,
+            ['large', 'small'],
+            CLOSE_CASES,
+            samples=2,
+            public_voting=target == 'production',
         )
         family = load_family('f')
         outputs = [
@@ -1904,63 +2205,44 @@ class TestClose:
             for case in CLOSE_CASES
             for system in ['large', 'small']
         ]
-        write_outputs('f', outputs)
+        generation = collected_outputs(family, outputs, cloud).generation
         published = publication.prepare(
             family,
-            load_cases(family),
+            load_cases(family, private_root=None),
             outputs,
             {'large': 'Public Large', 'small': 'Public Small'},
-            target='production',
+            target=target,
         )
-        store = Store(arena_store, published, [])
-        publication.publish(
-            store.database, published, datetime.now(UTC), target='production'
+        now = datetime.now(UTC)
+        publication.stage(private_store, published, now)
+        publication.record_preparation(
+            private_store,
+            publication.Preparation(
+                publication_id=published.id,
+                target=target,
+                collection_id=generation,
+                case_revision=cloud.case_revision,
+                prepared_at=now,
+            ),
         )
+        database = arena_store if target == 'production' else private_store
+        if target == 'production':
+            publication.stage(database, published, now)
+        publication.activate(database, published.id, now)
+        store = Store(database, private_store, published, generation, [])
 
         def connect(target: str) -> AbstractContextManager[SQLiteDatabase]:
             store.targets.append(target)
-            return nullcontext(store.database)
+            return nullcontext(private_store if target == 'private' else arena_store)
 
         monkeypatch.setattr(cli, 'connect', connect)
+        monkeypatch.setattr(cli, 'implementation_revision', lambda: '1' * 40)
         return store
 
-    def test_closes_local_only_without_opening_a_remote_client(
+    @pytest.mark.parametrize('vote_target', ['production', 'private'])
+    def test_seals_the_selected_store_and_closes_from_its_generation(
         self,
         store: Store,
-        families_dir: Path,
-        reports_dir: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        configuration = families_dir / 'f' / 'family.toml'
-        configuration.write_text(
-            configuration.read_text().replace(
-                'public_voting = true', 'public_voting = false'
-            )
-        )
-        record_vote(
-            store.database,
-            store.published,
-            datetime.now(UTC),
-            actor='local',
-            age=timedelta(hours=1),
-        )
-        monkeypatch.setattr(local, 'exists', lambda: True)
-        monkeypatch.setattr(local, 'database', lambda: nullcontext(store.database))
-
-        result = invoke('close', 'f')
-
-        assert result.exit_code == 0, result.output
-        assert store.targets == []
-        (path,) = (reports_dir / 'f').iterdir()
-        closed = report.Report.model_validate_json(path.read_text())
-        assert closed.results.scorer == 'votes'
-        assert closed.results.cutoffs.production is None
-        assert closed.results.cutoffs.local == report.Cutoff(id=1, votes=1)
-
-    def test_saves_the_production_cut_and_closes_from_it(
-        self,
-        store: Store,
-        data_dir: Path,
         reports_dir: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -1969,65 +2251,110 @@ class TestClose:
         monkeypatch.setattr(canaries, 'prepare', prepare)
         monkeypatch.setattr(canaries, 'run', probe)
         now = datetime.now(UTC)
-        for case, actor in enumerate(('first', 'second')):
+        for index, actor in enumerate(('first', 'second', 'third')):
             record_vote(
                 store.database,
                 store.published,
                 now,
                 actor=actor,
                 age=timedelta(hours=1),
-                case=case,
+                case=index % 2,
             )
-        last = record_vote(
-            store.database, store.published, now, actor='third', age=timedelta(hours=1)
-        )
         record_vote(
-            store.database, store.published, now, actor='late', age=timedelta(minutes=1)
+            store.database,
+            store.published,
+            now,
+            actor='late',
+            age=timedelta(minutes=1),
         )
 
         result = invoke('close', 'f')
 
         assert result.exit_code == 0, result.output
-        assert store.targets == ['production']
-        (snapshot,) = (data_dir / 'votes' / 'f').glob('*.json')
-        assert f'Votes saved to `{snapshot}`.' in result.output
+        target = store.published.target
+        assert store.targets == (
+            ['private', 'production', 'private']
+            if target == 'production'
+            else ['private', 'private']
+        )
+        (header,) = store.private_database.execute(
+            'SELECT id FROM vote_snapshots WHERE sealed = 1'
+        ).rows
+        assert f'Votes sealed as snapshot `{header["id"]}`.' in result.output
+        saved = votes.read_snapshot(store.private_database, str(header['id']))
+        cut = saved.production if target == 'production' else saved.private
+        assert cut is not None and cut.output_generation == store.generation
+        assert saved.closed_at == saved.taken_at
         (path,) = (reports_dir / 'f').iterdir()
         closed = report.Report.model_validate_json(path.read_text())
         assert closed.results.scorer == 'votes'
-        assert closed.results.cutoffs == report.Cutoffs(
-            production=report.Cutoff(id=last, votes=3), local=None
-        )
         assert (closed.results.votes, closed.results.voters) == (3, 3)
         assert closed.systems['large'] == report.PublicSystem(
             display_name='Public Large', fingerprint='fp-large'
         )
         assert closed.results.standings[0].mean_cost_usd == 0.5
+        assert (closed.results.cutoffs.production is not None) == (
+            target == 'production'
+        )
+        assert (closed.results.cutoffs.private is not None) == (target == 'private')
         prepare.assert_not_called()
         probe.assert_not_called()
 
-    def test_recloses_a_saved_snapshot_without_reading_the_store(
+    def test_replays_pinned_metrics_and_closing_time_without_current_inputs(
         self,
         store: Store,
+        cloud: RunContext,
         reports_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        now = datetime.now(UTC)
+        closed_at = datetime(2026, 10, 21, 18, tzinfo=UTC)
         record_vote(
-            store.database, store.published, now, actor='a', age=timedelta(hours=1)
+            store.database,
+            store.published,
+            closed_at,
+            actor='reader',
+            age=timedelta(hours=1),
         )
-        cut = votes.read_cut(store.database, 'f', now)
+        cut = votes.read_cut(store.database, 'f', closed_at)
         assert cut is not None
-        path = votes.write_snapshot(
-            votes.Snapshot(family='f', taken_at=now, production=cut, local=None)
+        snapshot = votes.Snapshot(
+            family='f',
+            taken_at=closed_at + timedelta(days=2),
+            closed_at=closed_at,
+            category_order=tuple(CLOSE_CASES.values()),
+            closing_revision='1' * 40,
+            production=cut.model_copy(update={'output_generation': store.generation}),
+            private=None,
+        )
+        identity = votes.save_snapshot(store.private_database, snapshot)
+        family = load_family('f')
+        changed = [
+            output.model_copy(update={'cost_usd': 99.0})
+            for output in read_outputs('f', cloud.state)
+        ]
+        collected_outputs(family, changed, cloud)
+        for name in ('load_family', 'load_cases', 'load_systems'):
+            monkeypatch.setattr(
+                cli, name, Mock(side_effect=AssertionError('Live inputs read.'))
+            )
+        monkeypatch.setattr(
+            votes, 'read_cut', Mock(side_effect=AssertionError('Live votes read.'))
         )
 
-        result = invoke('close', 'f', '--snapshot', str(path))
+        result = invoke('close', 'f', '--snapshot', identity)
 
         assert result.exit_code == 0, result.output
-        assert store.targets == []
-        assert (reports_dir / 'f').is_dir()
+        assert store.targets == ['private']
+        path = reports_dir / 'f' / '2026-10-21.json'
+        closed = report.Report.model_validate_json(path.read_text())
+        assert closed.closed_at == closed_at
+        assert closed.results.scorer == 'votes'
+        assert closed.results.standings[0].mean_cost_usd == 0.5
+        assert [board.category for board in closed.results.categories] == ['docs']
 
-    def test_names_the_publish_command_when_production_has_no_publication(
-        self, store: Store
+    def test_names_publication_preparation_when_no_store_is_active(
+        self,
+        store: Store,
     ) -> None:
         store.database.execute('DELETE FROM active')
 
@@ -2036,66 +2363,31 @@ class TestClose:
         assert result.exit_code == 1
         assert result.stderr == (
             'Family `f` has no active voting publication. '
-            'Publish production cases or run `uv run bench serve` first.\n'
+            'Prepare and publish a production or private voting round first.\n'
         )
 
-    def test_refuses_votes_of_a_family_without_public_voting(
-        self, families_dir: Path
+    def test_rejects_an_unknown_snapshot_id_without_loading_a_family(
+        self,
+        store: Store,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        write_votes_family(families_dir, ['large', 'small'], CLOSE_CASES, samples=2)
+        monkeypatch.setattr(
+            cli, 'load_family', Mock(side_effect=AssertionError('Live family read.'))
+        )
 
-        result = invoke('close', 'f')
+        result = invoke('close', 'f', '--snapshot', 'missing')
 
         assert result.exit_code == 1
-        assert result.stderr == (
-            'Family `f` has no active voting publication. '
-            'Publish production cases or run `uv run bench serve` first.\n'
-        )
-
-    def test_rejects_a_missing_snapshot_as_its_option(
-        self, families_dir: Path, tmp_path: Path
-    ) -> None:
-        write_votes_family(families_dir, ['large', 'small'], CLOSE_CASES, samples=2)
-        snapshot = tmp_path / 'snapshot.json'
-
-        result = invoke('close', 'f', '--snapshot', str(snapshot))
-
-        assert result.exit_code == 2
         assert (
-            f"Invalid value for '--snapshot': File '{snapshot}' does not exist."
-            in Text.from_ansi(result.stderr).plain
+            result.stderr == 'Snapshot `missing` is not sealed in the private store.\n'
         )
-
-    def test_names_a_malformed_snapshot_and_its_error(
-        self, families_dir: Path, tmp_path: Path
-    ) -> None:
-        write_votes_family(families_dir, ['large', 'small'], CLOSE_CASES, samples=2)
-        snapshot = tmp_path / 'snapshot.json'
-        snapshot.write_text('{')
-
-        result = invoke('close', 'f', '--snapshot', str(snapshot))
-
-        assert (result.exit_code, result.stdout, result.stderr) == (
-            1,
-            '',
-            f'Snapshot `{snapshot}`: Invalid JSON: EOF while parsing an object at '
-            'line 1 column 1.\n',
-        )
-
-    def test_refuses_a_snapshot_for_a_tests_family(
-        self, families_dir: Path, tmp_path: Path
-    ) -> None:
-        write_task_family(families_dir, 'echo')
-        snapshot = tmp_path / 'snapshot.json'
-        snapshot.write_text('{}')
-
-        result = invoke('close', 'f', '--snapshot', str(snapshot))
-
-        assert result.exit_code == 1
-        assert result.stderr == 'Family `f` is scored by tests, so it has no votes.\n'
 
     def test_collects_real_test_trials_before_writing_their_aggregate(
-        self, families_dir: Path, reports_dir: Path
+        self,
+        families_dir: Path,
+        reports_dir: Path,
+        cloud: RunContext,
+        private_store: SQLiteDatabase,
     ) -> None:
         write_task_family(families_dir, 'echo')
         settings = families_dir / 'f/family.toml'
@@ -2116,7 +2408,13 @@ class TestClose:
         family = load_family('f')
         system = load_systems(load_export())['opus-5.5-high']
         (run,) = jobs.family_systems(family, [system])
-        finish_job(jobs.job(family, [run], [task]))
+        archive_job(
+            cloud,
+            jobs.job(
+                family, [run], [task], root=cloud.root, sources=cloud.sources(family)
+            ),
+            private_store,
+        )
 
         result = invoke('close', 'f')
         assert result.exit_code == 0, result.output
@@ -2130,7 +2428,7 @@ class TestClose:
         assert 'Family `f`: 1 output, 0 errored.' in result.output
 
     def test_names_each_conflict_once_when_it_refuses_the_close(
-        self, families_dir: Path
+        self, families_dir: Path, cloud: RunContext, private_store: SQLiteDatabase
     ) -> None:
         write_task_family(families_dir, 'echo', samples=2)
         settings = families_dir / 'f/family.toml'
@@ -2150,6 +2448,8 @@ class TestClose:
                 family,
                 jobs.family_systems(family, [system]),
                 [task],
+                root=cloud.root,
+                sources=cloud.sources(family),
             )
         )
         models = ('large-2026', 'other-2026')
@@ -2158,6 +2458,8 @@ class TestClose:
             trial = TrialResult.model_validate_json(path.read_text())
             trial.agent_result = AgentContext(metadata={'response_model': model})
             path.write_text(trial.model_dump_json())
+
+        archive_trials(cloud, job_dir, 'f', private_store)
 
         result = invoke('close', 'f')
 

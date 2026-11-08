@@ -24,6 +24,7 @@ from pydantic import (
 from scipy.stats import bootstrap
 
 from assistant_bench.families import (
+    Case,
     Category,
     CheckersSettings,
     CheckRule,
@@ -31,13 +32,11 @@ from assistant_bench.families import (
     Defect,
     Family,
     FamilyName,
-    load_cases,
 )
 from assistant_bench.messages import InputError
 from assistant_bench.outputs import (
     Output,
     Verdict,
-    read_outputs,
     refuse_pool_conflicts,
     system_fingerprints,
     tests_pass,
@@ -146,11 +145,11 @@ class Cutoffs(_Model):
     """Each store's cutoff at closing, null when it contributed no cut."""
 
     production: Cutoff | None
-    local: Cutoff | None
+    private: Cutoff | None
 
     @model_validator(mode='after')
     def validate_stores(self) -> Cutoffs:
-        if self.production is None and self.local is None:
+        if self.production is None and self.private is None:
             raise ValueError('At least one store cutoff is required.')
         return self
 
@@ -560,18 +559,19 @@ def _referenced_systems(results: Results) -> set[str]:
 
 
 def close_tests(
-    family: Family, closed_at: datetime, *, system_names: Mapping[str, str]
+    family: Family,
+    cases: Sequence[Case],
+    outputs: Sequence[Output],
+    closed_at: datetime,
+    *,
+    system_names: Mapping[str, str],
 ) -> Report:
     """Aggregate a tests family's current outputs under their public system names.
 
     `closed_at` is an aware time, and its UTC date names the round.
     """
-    categories: dict[str, Category] = {
-        case.id: case.category for case in load_cases(family)
-    }
-    outputs = [
-        output for output in read_outputs(family.name) if output.case in categories
-    ]
+    categories: dict[str, Category] = {case.id: case.category for case in cases}
+    outputs = [output for output in outputs if output.case in categories]
 
     if not outputs:
         raise InputError(f'Family `{family.name}` has no outputs on its current cases.')
@@ -586,14 +586,19 @@ def close_tests(
 
 
 def close_checkers(
-    family: Family, closed_at: datetime, *, system_names: Mapping[str, str]
+    family: Family,
+    source_cases: Sequence[Case],
+    outputs: Sequence[Output],
+    closed_at: datetime,
+    *,
+    system_names: Mapping[str, str],
 ) -> Report:
     """Close only a complete configured system-by-case matrix at this revision."""
     assert isinstance(family.settings, CheckersSettings)
-    cases = {case.id: case for case in load_cases(family)}
+    cases = {case.id: case for case in source_cases}
     outputs = [
         output
-        for output in read_outputs(family.name)
+        for output in outputs
         if output.case in cases and output.system in family.settings.systems
     ]
     counts = Counter((output.system, output.case) for output in outputs)
@@ -808,7 +813,9 @@ def write_report(report: Report) -> Path:
     return path
 
 
-def reported_fingerprints(family: str) -> dict[str, str | None]:
+def reported_fingerprints(
+    family: str, *, root: Path | None = None
+) -> dict[str, str | None]:
     """Map each system a closed report of the family names to the fingerprint it froze.
 
     A system maps to null when no report recorded its fingerprint.
@@ -819,7 +826,7 @@ def reported_fingerprints(family: str) -> dict[str, str | None]:
         Two closed reports froze different fingerprints under one system.
     """
     frozen: dict[str, str | None] = {}
-    for report in _closed(family):
+    for report in _closed(family, REPORTS_DIR if root is None else root):
         for system, metadata in report.systems.items():
             known = frozen.get(system)
             if metadata.fingerprint is None:
@@ -833,9 +840,9 @@ def reported_fingerprints(family: str) -> dict[str, str | None]:
     return frozen
 
 
-def _closed(family: str) -> list[Report]:
+def _closed(family: str, root: Path) -> list[Report]:
     reports: list[Report] = []
-    for path in sorted((REPORTS_DIR / family).glob('*.json')):
+    for path in sorted((root / family).glob('*.json')):
         report = Report.model_validate_json(path.read_text())
         if report.family != family or report.round != path.stem:
             raise InputError(

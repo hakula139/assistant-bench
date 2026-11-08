@@ -7,27 +7,30 @@ The arena shows blind pairs of outputs from a family scored by votes and records
 The `bench` process publishes outputs to a vote store and reads votes back through Cloudflare's D1 REST API, one statement per request. `web/wrangler.toml` names the account and each target's database, and `.env` names the [credential source](../guide/running.md#voting).
 
 ```bash
-uv run bench arena prepare writing-zh
-uv run bench arena publish production <publication>.json
+uv run bench arena prepare writing-zh production
+uv run bench arena inspect <publication-id>
+uv run bench arena publish production <publication-id>
 uv run bench arena status production writing-zh
 uv run bench close writing-zh
 ```
 
-Production votes on the public and synthetic cases of a family that sets `public_voting`. Every other case is voted locally through `bench serve`. `bench close` combines both stores. `prepare` requires `public_voting`, collects the family's current outputs, keeps the listed systems' outputs on the production cases, and writes `publications/<family>/<id>.json` in the data directory with a Markdown listing beside it. The listing shows each case's instruction and checklist, each passing output's text or diff under its system name, and each failing or ungraded output's system and gates. Reviewing the listing and publishing that exact file approves it.
+Production votes on the public and synthetic cases of a family that sets `public_voting`. Every other case is voted in the private cloud store. `bench close` combines both stores. `prepare` pins the family's sealed output collection and reconstructs its recorded family, cases and system names, keeps the listed systems' outputs for the selected target, and stages the normalized publication in private D1. A production preparation requires `public_voting`. `inspect` reconstructs the prepared publication and renders its instruction, checklist, passing outputs under system names, and failing or ungraded outputs with gates from the pinned collection. Reviewing this listing and publishing its exact ID approves it.
 
-- **Identities.** The publication ID digests the file's content, including its target, without the ID, so `publish` refuses an edited file. Staging accepts production publications, and a local publication can only enter the local store. A case's key digests its instruction and checklist, and an output's key digests its family, job and trial, so republishing unchanged outputs keeps their keys and the votes on them. Duplicate cases are refused before partitioning them between stores.
+- **Identities.** The publication ID digests the publication's content, including its target, without the ID. Every prepared read reconstructs the normalized rows and verifies this digest. Staging accepts production publications, and a private publication can only enter the private store. A case's key digests its instruction and checklist, and an output's key digests its family, job and trial, so republishing unchanged outputs keeps their keys and the votes on them. Duplicate cases are refused before partitioning them between stores.
 - **Task verdicts.** A task output's tests set its verdict even after its agent errored, so an errored solution whose tests passed can join voted pairs, one whose tests failed loses its settled comparisons, and one whose tests never ran is ungraded and sits out of every comparison. The system's pass rate counts them by the [test pass rate](ranking.md#test-pass-rates) rule.
 - **Content.** Only passing outputs carry content, since only they can form a voted pair. Every output carries its verdict, length and content digest, which settle the comparisons no one votes on. HTML content is the unchanged eligible document extracted during collection, its digest covers that document, and its text length is null.
-- **Publishing** refuses a private case before anything leaves the machine. It inserts the cases and outputs idempotently and derives each system pair's eligible cases before activation. It activates the publication only once every row and eligible comparison is staged, so an interrupted run completes on a rerun and an identical file changes nothing.
+- **Publishing** refuses a private case in a production publication. Preparation inserts cases and outputs idempotently, verifies their complete content identity, and records immutable collection and case provenance. Publishing stages the reviewed projection in the selected store and derives each system pair's eligible cases before activation. It activates the publication only once every row and eligible comparison is staged, so an interrupted run completes on a rerun and an already active ID changes nothing.
 
-`bench close` for a votes family takes production and local cuts at the same timestamp, saves them as `votes/<family>/<taken-at>.json` in the data directory, and closes the round from that file. Either cut may be null, and at least one must be present. Families without `public_voting` read only local votes. Stop `bench serve` before closing. `--snapshot <path>` recloses a saved file without the stores.
+Preparing an existing publication ID compares every published output's complete canonical record in the new and original collections. Identical records reuse the original preparation and provenance, which the command prints. Different measurements or gates require an explicit regrade or rerun before publishing. Outputs outside that publication do not affect this comparison.
+
+`bench close` for a votes family takes production and private cuts at the same timestamp. Each store cut uses one SQL read view for its active publication, undo cutoff, vote facts and exclusions. The stores have independent read views. Closing stages the cuts as normalized private D1 facts, verifies their canonical digest and expected counts, and seals the content-addressed snapshot. Either cut may be null, and at least one must be present. Families without `public_voting` read only private votes. `--snapshot <id>` recloses a sealed snapshot without reading live votes or cases. A snapshot freezes its category order, closing code revision and each publication's collection pin.
 
 The cuts must agree on family, system labels and fingerprints, reference and defects, and have disjoint case and output keys. Each vote is checked against its own cut before merging. Browser identities are prefixed by store, and actor weights are assigned once to the combined eligible votes.
 
 - **A cut** holds the largest vote ID older than the [undo window](#vote-api), or 0 when no vote is, the active publication without content, the counted votes up to that ID and the number of excluded ones. It carries no network tags.
 - **Counting.** A vote counts when both of its outputs are still in the active publication, still pass on the case the vote was cast on, and differ in content. A checklist-only edit changes the case's key but reruns no trial, so its outputs keep their keys and the case's votes drop. Every other vote, and every excluded one, counts in `dropped_votes`.
 - **Settlements** come from the publication's verdicts and content digests by the rule in [Pairs and Skips](#pairs-and-skips).
-- **Measurements.** Latency, tokens and cost come from the collected `outputs/<family>.jsonl`, matched by output key. An output missing from the file contributes null.
+- **Measurements.** Latency, tokens and cost come from each cut's immutable output collection, matched by output key. Different cuts can pin different collections. A missing historical collection mapping or an output absent from that collection contributes null.
 - **The report** names its evidence by each contributing store's cutoff and the counted votes up to it, without any digest of private content. It anchors on the reference the publications froze.
 
 ## Blinding
@@ -52,7 +55,7 @@ A publication freezes these output facts, and only a later publication changes t
 
 ## Vote Store
 
-Production D1 holds public votes. Staging has a separate D1 database for validating publications and runtime changes. The local store holds the cases that production cannot publish.
+Production D1 holds public votes. Staging has a separate D1 database for validating publications and runtime changes. Private D1 holds the cases that production cannot publish, prepared publications and sealed vote snapshots.
 
 `web/wrangler.toml` names each target's database, whose tables `web/migrations/` defines, and the voting Worker in `web/worker/` serves each target's vote API from it.
 
@@ -60,11 +63,9 @@ Production D1 holds public votes. Staging has a separate D1 database for validat
 
 `publication_pair_cases` holds the immutable eligible case keys per publication and unordered system pair. Pair requests read these facts to filter the browser's completed comparisons and count what remains, then read passing sample metadata only for the chosen case and systems. A pending-pair reload reads no sample metadata.
 
-## Local Voting
+## Private Voting
 
-`bench serve` collects current outputs, partitions the cases, builds the site, applies the Worker's migrations and activates each pairable local publication. The same Worker serves the site and vote API through Wrangler with persistence under the data directory's `arena/`. A family whose local cases no longer form a pair is deactivated. Cases retain only the coarse split `public`, `held-out` or `private` in the store.
-
-The process holds an exclusive nonblocking lock on `arena/serve.lock` from preparation until Wrangler and its workerd process group stop. Another server or local arena command refuses while that lock is held. Local commands open the single SQLite database Wrangler initialized. The local signing keys are created once in `arena/keys.json` with mode 0600 and reach Wrangler through its process environment, so restarting preserves browser cookies and votes.
+Prepare a private publication with `bench arena prepare <family> private`, review it with `inspect`, and activate it with `bench arena publish private <id>`. The private Worker serves the same vote API behind its configured access policy. Its D1 database and signing keys persist independently of the execution checkout. Cases retain their actual source and the coarse split `public`, `held-out` or `private` in the store.
 
 ## Moderation
 
@@ -95,7 +96,7 @@ Speed, minority preferences and disagreement with the owner are signals to inves
 - **HTML previews.** HTML pair state omits `a` and `b`. Each preview reads one selected output only while the actor owns that pending pair in the active HTML publication. Voting, skipping or changing publication invalidates the URL, and undo restores the original pair ID. Responses use private no-store caching, no referrer, disabled DNS prefetch and a sandbox CSP allowing only inline CSS and data images or fonts. The empty-sandbox iframe cannot execute JavaScript, submit forms, load external dependencies or access its parent's origin. Native disclosures and current-document fragments remain available. Chromium can omit the Strict cookie when reloading the iframe itself, so an unavailable preview instructs the voter to reload the outer voting page.
 - **Recording.** One batch inserts the vote from the pending pair, copying its systems from the outputs and measuring `elapsed_ms` from the pair's issue, and then releases the pair. When nothing was inserted, the Worker answers 204 for a retry with the same choice and issues, `daily_limit` at the network's cap with the pair kept, and `stale_pair` otherwise. It accepts only the issues the publication lists.
 - **Undo.** The undo window covers the 10 minutes after a vote is recorded. Undo restores the pair of the browser's latest counted vote inside it, with its ID and issue time, in place of the pending one, and deletes that vote. Each call walks one vote further back.
-- **Freshness.** A closed round's board sends each available store's cutoff and counted votes as `production` with `production_votes`, and `local` with `local_votes`. The Worker checks the pair named by its `STORE` and answers `stale` when a counted vote follows the cutoff or the number of counted votes up to it has changed. A missing cutoff or staging answers `unknown`. Each data center reuses the answer for the same parameters for a minute, so a busy board reads the store once.
+- **Freshness.** A closed round's board sends each available store's cutoff and counted votes as `production` with `production_votes`, and `private` with `private_votes`. The public Worker checks production and answers `stale` when a counted vote follows the cutoff or the number of counted votes up to it has changed. A contributing private cut, a missing cutoff or staging answers `unknown`. Each data center reuses the answer for the same parameters for a minute, so a busy board reads the store once.
 - **Errors.** Every response carries `Cache-Control: no-store`, and any route answers 429 `rate_limited` past the per-minute request limit. One error hook maps each refusal to its fixed code and anything else to 500 `unavailable`. Invocation logs are off, so Workers Logs hold only what that hook writes, the route and the error, and never an address, tag, cookie or body.
 
 On public deployments, the sitekey comes from the Worker's `TURNSTILE_SITEKEY` var in the 401 body, so one site build serves every environment. The private Worker verifies an Access JWT's signature, issuer, audience, expiry, subject and allowed owner email before serving any response. Its `/vote/` HTML response creates the configured owner actor if absent and issues the same signed cookie. A private API request without that owner's valid cookie answers 401 `reload_required`, which asks the browser to reload the page without showing Turnstile. The owner's actor does not expire with its original creation time, and its configured opaque ID preserves progress across allowed login addresses and devices.

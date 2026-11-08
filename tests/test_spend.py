@@ -1,37 +1,37 @@
-import asyncio
-import json
-import shutil
 from collections import Counter
+from collections.abc import Sequence
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import pytest
-from harbor.job import Job
-from harbor.models.job.config import JobConfig
-from pydantic import ValidationError
 
-from assistant_bench import jobs
 from assistant_bench.catalog import Price, System
-from assistant_bench.families import load_cases, load_family
-from assistant_bench.harnesses.usage import ATTEMPTS_FILE, Attempt, MeasuredUsage
-from assistant_bench.messages import InputError
+from assistant_bench.database import Param, Result, SQLiteDatabase
+from assistant_bench.harnesses.accounting import RequestReceipt
+from assistant_bench.harnesses.usage import Attempt, MeasuredUsage
 from assistant_bench.spend import (
+    Accounting,
     Basis,
     Entry,
+    PendingAttempt,
     Projection,
     Share,
     Spend,
     Tokens,
     budget_problem,
     project,
+    read_ledger,
     summarize,
-    update_canary_ledger,
-    update_ledger,
-    write_canary_accounting,
 )
-from assistant_bench.tasks import render_tasks
-from support import START, VOTES, StubEndpoint, make_system, with_settings
+from assistant_bench.state import AttemptStart, Claim, RequestAdmission, Run, State
+from support import (
+    START,
+    VOTES,
+    make_system,
+    private_database,
+    with_settings,
+)
 
 
 # $3 at `make_system`'s price.
@@ -41,7 +41,6 @@ UNPRICED_WRITE = MeasuredUsage(10, 0, 10, 10, None, cache_write_unpriced=True)
 LARGE = make_system(context_window=100_000, max_output_tokens=10_000)
 NO_WRITE_PRICE = make_system(price=Price(input=2.0, output=10.0, cache_read=0.2))
 UNPRICED = make_system(name='acme-small', price=None)
-SYSTEMS = {LARGE.name: LARGE}
 NOTHING_IMPUTED: dict[Basis, Share] = {}
 
 
@@ -62,162 +61,219 @@ def attempt(
 
 
 def entry(job: str = 'job-1', priced_as: System | None = LARGE, **fields: Any) -> Entry:
-    return Entry.of(attempt(**fields), job, priced_as)
+    frozen = Accounting.of(priced_as) if priced_as is not None else None
+    return Entry(
+        **attempt(**fields).model_dump(),
+        job=job,
+        price=frozen.price if frozen is not None else None,
+        ceiling_usd=frozen.ceiling_usd if frozen is not None else None,
+    )
 
 
-def write_attempts(job_dir: Path, *attempts: Attempt) -> None:
-    job_dir.mkdir(parents=True, exist_ok=True)
-    with (job_dir / ATTEMPTS_FILE).open('a') as file:
-        file.writelines(item.model_dump_json() + '\n' for item in attempts)
+def started(
+    state: State, frozen: Entry, identifier: str, *, scope: str = 'f'
+) -> tuple[Claim, AttemptStart]:
+    parent = Run(
+        id=f'run-{identifier}',
+        scope=scope,
+        job=frozen.job,
+        code_revision='a' * 40,
+        case_revision='b' * 40,
+        created_at=START.isoformat(),
+    )
+    owner = Claim(
+        id=f'claim-{identifier}',
+        run_id=parent.id,
+        scope=scope,
+        slot_key=identifier,
+        trial=frozen.trial,
+        system=frozen.system,
+        fingerprint=frozen.fingerprint,
+        accounting_json=Accounting(
+            system=frozen.system,
+            price=frozen.price,
+            ceiling_usd=frozen.ceiling_usd,
+        ).model_dump_json(),
+        expected_source_revision=state.source_revision(scope),
+        created_at=START.isoformat(),
+    )
+    start = AttemptStart(
+        f'attempt-{identifier}',
+        owner.id,
+        frozen.started_at.isoformat().replace('+00:00', 'Z'),
+    )
+    state.create_run(parent)
+    assert state.claim_attempt(owner)
+    assert state.begin_attempt(start)
+    return owner, start
 
 
-async def run_in_process(config: JobConfig) -> None:
-    await (await Job.create(config)).run()
+def admitted(
+    state: State,
+    start: AttemptStart,
+    identifier: str,
+    usage: MeasuredUsage | None,
+    *,
+    terminal: bool = True,
+) -> None:
+    request = RequestAdmission(identifier, start.id, start.started_at)
+    assert state.admit_request(request)
+    if terminal:
+        state.record_receipt(
+            identifier,
+            RequestReceipt(
+                api='openai-chat-completions',
+                outcome='completed',
+                http_status=200,
+                usage=usage,
+            ).model_dump_json(),
+        )
 
 
-def spend_of(*entries: Entry) -> Spend:
+def spend_of(*entries: Entry | PendingAttempt) -> Spend:
     (spend,) = summarize(entries)
     return spend
 
 
-class TestUpdateLedger:
-    def test_keeps_each_attempt_once_after_its_job_is_deleted(
-        self, data_dir: Path
+class TestReadLedger:
+    def test_unlinked_history_retains_its_original_price_alongside_linked_attempts(
+        self, private_state: State, private_store: SQLiteDatabase
     ) -> None:
-        job_dir = jobs.jobs_dir(VOTES) / 'job-1'
-        write_attempts(job_dir, attempt())
-        update_ledger(VOTES, SYSTEMS)
-        shutil.rmtree(job_dir)
-        write_attempts(jobs.jobs_dir(VOTES) / 'job-2', attempt(trial='b__1'))
-
-        ledger = update_ledger(VOTES, SYSTEMS)
-
-        assert [(item.job, item.trial) for item in ledger] == [
-            ('job-1', 'a__1'),
-            ('job-2', 'b__1'),
-        ]
-        assert update_ledger(VOTES, SYSTEMS) == ledger
-
-    def test_keys_each_attempt_by_its_job_trial_and_start(self, data_dir: Path) -> None:
-        later = attempt(started_at=START + timedelta(seconds=1))
-        write_attempts(jobs.jobs_dir(VOTES) / 'job-1', attempt(), attempt(), later)
-        ledger = data_dir / 'spend' / 'f.jsonl'
-        ledger.parent.mkdir(parents=True)
-        recorded = entry().model_dump_json() + '\n'
-        ledger.write_text(recorded * 2)
-
-        entries = update_ledger(VOTES, SYSTEMS)
-
-        assert [item.started_at for item in entries] == [START, later.started_at]
-
-    def test_keeps_the_attempt_harbor_retried(
-        self, endpoint: StubEndpoint, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        for name, value in endpoint.env.items():
-            monkeypatch.setenv(name, value)
-        family = load_family('smoke-text')
-        endpoint.statuses = [500]
-        config = jobs.job(
-            family, [make_system()], render_tasks(family, load_cases(family)[:1])
+        historical = entry(
+            job='old-job',
+            priced_as=LARGE.model_copy(
+                update={'price': Price(input=7, output=30, cache_read=1)}
+            ),
         )
-
-        asyncio.run(run_in_process(config))
-
-        trials = [path for path in jobs.job_path(config).iterdir() if path.is_dir()]
-        assert len(trials) == 1
-        ledger = update_ledger(family, {})
-        assert [item.trial for item in ledger] == [trials[0].name] * 2
-        assert [len(item.responses) for item in ledger] == [0, 1]
-
-
-class TestWriteCanaryAccounting:
-    @pytest.mark.parametrize(
-        ('price', 'ceiling'),
-        [(LARGE.price, 0.27048), (NO_WRITE_PRICE.price, None), (None, None)],
-        ids=['priced', 'unknown-write-price', 'unpriced'],
-    )
-    def test_freezes_accounting_before_harbor_creates_the_job(
-        self, data_dir: Path, price: Price | None, ceiling: float | None
-    ) -> None:
-        job = data_dir / 'canaries' / 'jobs' / 'probe-job'
-        actual = LARGE.model_copy(update={'max_output_tokens': 2048, 'price': price})
-        write_canary_accounting(job, actual, ceiling)
-        changed = actual.model_copy(update={'price': None})
-
-        with pytest.raises(FileExistsError):
-            write_canary_accounting(job, changed, None)
-
-        assert not job.exists()
-        write_attempts(job, attempt(responses=(None,)))
-        (recorded,) = update_canary_ledger()
-        assert recorded.price == actual.price
-        assert recorded.ceiling_usd == (
-            pytest.approx(ceiling) if ceiling is not None else None
+        raw = historical.model_dump_json(indent=2)
+        private_store.execute(
+            """
+            INSERT INTO attempt_entries (
+                scope, job, trial, started_at, claim_id, attempt_id, entry_json
+            ) VALUES (?, ?, ?, ?, NULL, NULL, ?)
+            """,
+            (
+                'f',
+                historical.job,
+                historical.trial,
+                historical.started_at.isoformat(),
+                raw,
+            ),
         )
+        current = entry(job='new-job')
+        owner, start = started(private_state, current, 'new')
+        admitted(private_state, start, 'new-request', USAGE)
+        private_state.record_entry(owner.id, current.model_dump_json())
 
+        recorded = read_ledger('f', private_state)
 
-class TestUpdateCanaryLedger:
-    def test_keeps_probe_spend_separate_and_prices_its_actual_allowance(
-        self, data_dir: Path
+        assert {item.job: item for item in recorded} == {
+            historical.job: historical,
+            current.job: current,
+        }
+        assert spend_of(*recorded).known_usd == pytest.approx(13)
+        assert raw in private_state.entries('f')
+
+    def test_retains_each_frozen_attempt_once_and_separates_canary_spend(
+        self, private_state: State
     ) -> None:
-        family_job = jobs.jobs_dir(VOTES) / 'family-job'
-        write_attempts(family_job, attempt())
-        update_ledger(VOTES, SYSTEMS)
-        family_ledger = data_dir / 'spend' / 'f.jsonl'
-        frozen = family_ledger.read_bytes()
+        frozen = [entry(), entry(job='job-2', priced_as=None)]
+        for index, frozen_entry in enumerate(frozen):
+            owner, start = started(private_state, frozen_entry, str(index))
+            admitted(private_state, start, f'request-{index}', USAGE)
+            private_state.record_entry(owner.id, frozen_entry.model_dump_json())
+            private_state.record_entry(owner.id, frozen_entry.model_dump_json())
+        other = entry(job='probe-job')
+        owner, start = started(private_state, other, 'probe', scope='canaries')
+        admitted(private_state, start, 'request-probe', USAGE)
+        private_state.record_entry(owner.id, other.model_dump_json())
+
+        recorded = read_ledger('f', private_state)
+
+        assert recorded == frozen
+        assert read_ledger('f', private_state) == recorded
+        assert read_ledger('canaries', private_state) == [other]
+        assert spend_of(*recorded).known_usd == pytest.approx(3)
+
+    @pytest.mark.parametrize('scope', ['f', 'canaries'])
+    def test_pending_responses_keep_frozen_prices_and_unknown_usage(
+        self, private_state: State, scope: str
+    ) -> None:
         actual = LARGE.model_copy(update={'max_output_tokens': 2048})
-        probe_job = data_dir / 'canaries' / 'jobs' / 'probe-job'
-        write_canary_accounting(probe_job, actual, 0.27048)
-        successful = attempt(responses=(MeasuredUsage(100, 0, 0, 40, None),))
-        write_attempts(
-            probe_job,
-            successful,
-            successful,
-            attempt(trial='failed__1', responses=(None,)),
-        )
+        frozen = entry(priced_as=actual, responses=(USAGE, None, None))
+        _, start = started(private_state, frozen, 'pending', scope=scope)
+        admitted(private_state, start, 'known', USAGE)
+        admitted(private_state, start, 'unknown', None)
+        admitted(private_state, start, 'unfinished', None, terminal=False)
 
-        ledger = update_canary_ledger()
-        assert update_canary_ledger() == ledger
-        shutil.rmtree(probe_job)
-        retained = update_canary_ledger()
+        (pending,) = read_ledger(scope, private_state)
+        spend = spend_of(pending)
 
-        assert retained == ledger
-        assert [item.trial for item in ledger] == ['a__1', 'failed__1']
-        assert [item.responses for item in ledger] == [
-            [MeasuredUsage(100, 0, 0, 40, None)],
-            [None],
-        ]
-        assert all(item.ceiling_usd == pytest.approx(0.27048) for item in ledger)
-        assert (data_dir / 'spend' / 'canaries.jsonl').read_text().count('\n') == 2
-        assert family_ledger.read_bytes() == frozen
+        assert isinstance(pending, PendingAttempt)
+        assert pending.responses == [USAGE, None, None]
+        assert pending.price == actual.price
+        assert pending.ceiling_usd == pytest.approx(0.27048)
+        assert spend.known_usd == pytest.approx(3)
+        assert spend.unknown == 2
+        assert private_state.entries(scope) == []
 
-    @pytest.mark.parametrize(
-        ('snapshot', 'error', 'message'),
-        [
-            ('missing', InputError, 'canary accounting.*The run was refused'),
-            ('mismatched', InputError, 'canary accounting.*The run was refused'),
-            ('unknown-price-field', ValidationError, 'price.unknown_rate'),
-        ],
-        ids=['missing', 'mismatched', 'unknown-price-field'],
-    )
-    def test_refuses_unaccountable_attempts_without_writing_a_ledger(
-        self, data_dir: Path, snapshot: str, error: type[Exception], message: str
+    def test_an_entry_covers_only_the_receipts_of_its_exact_attempt(
+        self, private_state: State
     ) -> None:
-        job = data_dir / 'canaries' / 'jobs' / 'probe-job'
-        write_attempts(job, attempt())
-        if snapshot == 'mismatched':
-            write_canary_accounting(job, make_system(name='other'), 0.04096)
-        elif snapshot == 'unknown-price-field':
-            write_canary_accounting(job, make_system(), 0.04096)
-            metadata = Path(f'{job}.accounting.json')
-            document = json.loads(metadata.read_text())
-            document['price']['unknown_rate'] = 1
-            metadata.write_text(json.dumps(document))
+        frozen = entry()
+        owner, first = started(private_state, frozen, 'first')
+        admitted(private_state, first, 'first-request', USAGE)
+        second = AttemptStart(
+            'attempt-second',
+            owner.id,
+            (START + timedelta(seconds=2)).isoformat().replace('+00:00', 'Z'),
+        )
+        assert private_state.begin_attempt(second)
+        later_usage = MeasuredUsage(20, 0, 0, 10, None)
+        admitted(private_state, second, 'second-request', later_usage)
 
-        with pytest.raises(error, match=message):
-            update_canary_ledger()
+        private_state.record_entry(owner.id, frozen.model_dump_json())
+        recorded = read_ledger('f', private_state)
+        spend = spend_of(*recorded)
 
-        assert not (data_dir / 'spend' / 'canaries.jsonl').exists()
+        assert [(type(item), item.responses) for item in recorded] == [
+            (Entry, [USAGE]),
+            (PendingAttempt, [later_usage]),
+        ]
+        assert recorded[0] == frozen
+        assert spend.responses == 2
+        assert spend.known_usd == pytest.approx(3.00014)
+
+    def test_a_concurrent_final_entry_neither_drops_nor_duplicates_pending_spend(
+        self, tmp_path: Path
+    ) -> None:
+        path = tmp_path / 'state.sqlite'
+        with private_database(path) as database, private_database(path) as other:
+            original = State(database)
+            writer = State(other)
+            frozen = entry()
+            owner, start = started(original, frozen, 'concurrent')
+            admitted(original, start, 'request-concurrent', USAGE)
+
+            class CommitEntryAfterRead:
+                committed = False
+
+                def execute(self, sql: str, params: Sequence[Param] = ()) -> Result:
+                    result = database.execute(sql, params)
+                    if not self.committed:
+                        self.committed = True
+                        writer.record_entry(owner.id, frozen.model_dump_json())
+                    return result
+
+            snapshot = read_ledger('f', State(CommitEntryAfterRead()))
+            following = read_ledger('f', original)
+
+        assert [item.responses for item in snapshot] == [[USAGE]]
+        assert isinstance(snapshot[0], PendingAttempt)
+        assert following == [frozen]
+        assert spend_of(*snapshot).known_usd == pytest.approx(3)
+        assert spend_of(*following).known_usd == pytest.approx(3)
+        assert spend_of(*snapshot).responses == spend_of(*following).responses == 1
 
 
 class TestSummarize:
@@ -337,24 +393,6 @@ class TestSummarize:
 
         assert spend[1].imputed == {'borrowed': Share(1, 2.0)}
         assert (projection.basis, projection.usd) == ('borrowed', 2.0)
-
-    @pytest.mark.parametrize(
-        'later',
-        [
-            {},
-            {LARGE.name: make_system(price=Price(input=0.2, output=1.0, cache_read=0))},
-        ],
-        ids=['retired', 'repriced'],
-    )
-    def test_keeps_the_price_each_attempt_was_recorded_at(
-        self, data_dir: Path, later: dict[str, System]
-    ) -> None:
-        write_attempts(jobs.jobs_dir(VOTES) / 'job-1', attempt())
-        update_ledger(VOTES, SYSTEMS)
-
-        (spend,) = summarize(update_ledger(VOTES, later))
-
-        assert (spend.priced, spend.known_usd) == (True, 3.0)
 
     def test_counts_retries_into_the_tokens_per_answered_trial(self) -> None:
         entries = [

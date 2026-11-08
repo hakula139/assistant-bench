@@ -1,9 +1,10 @@
+import json
 import math
 import re
 import sqlite3
+from collections.abc import Sequence
 from contextlib import closing
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 
 import pytest
 
@@ -18,11 +19,14 @@ from assistant_bench.arena.votes import (
     TaggedDefects,
     Vote,
 )
-from assistant_bench.database import SQLiteDatabase
+from assistant_bench.database import Param, Result, SQLiteDatabase
 from assistant_bench.families import Choice
+from assistant_bench.messages import InputError
+from assistant_bench.outputs import read_outputs, write_outputs
 from assistant_bench.paths import REPO_ROOT
 from assistant_bench.report import Cutoff, Cutoffs
 from assistant_bench.scoring.ranking import Comparison
+from assistant_bench.state import State
 from support import (
     ARENA_NAMES,
     ARENA_SYSTEMS,
@@ -36,6 +40,15 @@ from support import (
 
 NOW = datetime(2026, 10, 29, 12, tzinfo=UTC)
 FAMILY = make_votes_family()
+
+
+def stage_and_activate(
+    database: SQLiteDatabase,
+    published: publication.Publication,
+    now: datetime,
+) -> bool:
+    publication.stage(database, published, now)
+    return publication.activate(database, published.id, now)
 
 
 def check_pair_counts(database: SQLiteDatabase) -> None:
@@ -64,9 +77,7 @@ def published_store(
         ARENA_NAMES,
         target='production',
     )
-    publication.publish(
-        arena_store, published, NOW - timedelta(days=1), target='production'
-    )
+    stage_and_activate(arena_store, published, NOW - timedelta(days=1))
     return arena_store, published
 
 
@@ -123,7 +134,10 @@ def snapshot(
     return Snapshot(
         family=FAMILY.name,
         taken_at=NOW,
-        local=None,
+        closed_at=NOW,
+        category_order=('docs',),
+        closing_revision=None,
+        private=None,
         production=Cut(
             cutoff=max((row.id for row in production), default=0),
             inventory=Inventory(
@@ -145,6 +159,52 @@ def snapshot(
 
 
 class TestReadCut:
+    def test_keeps_inventory_and_exclusions_in_one_read_view(
+        self,
+        published_store: tuple[SQLiteDatabase, publication.Publication],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        database, published = published_store
+        identifier = record_vote(
+            database, published, NOW, actor='reader', age=timedelta(hours=1)
+        )
+        changed = publication.prepare(
+            FAMILY,
+            [make_case('replacement')],
+            [make_trial('replacement', system) for system in ARENA_SYSTEMS],
+            ARENA_NAMES,
+            target='production',
+        )
+        publication.stage(database, changed, NOW)
+        expected = votes.read_cut(database, FAMILY.name, NOW)
+        execute = database.execute
+        interposed = False
+
+        def mutate_after_read(sql: str, params: Sequence[Param] = ()) -> Result:
+            nonlocal interposed
+            result = execute(sql, params)
+            if not interposed:
+                interposed = True
+                execute(
+                    'UPDATE active SET publication_id = ? WHERE family = ?',
+                    [changed.id, FAMILY.name],
+                )
+                execute(
+                    'UPDATE votes SET exclusion = ? WHERE id = ?', ['spam', identifier]
+                )
+            return result
+
+        monkeypatch.setattr(database, 'execute', mutate_after_read)
+
+        actual = votes.read_cut(database, FAMILY.name, NOW)
+
+        assert interposed
+        assert actual == expected
+        latest = votes.read_cut(database, FAMILY.name, NOW)
+        assert latest is not None
+        assert latest.inventory.id == changed.id
+        assert latest.excluded == 1
+
     def test_cuts_below_the_votes_an_undo_can_still_change(
         self, published_store: tuple[SQLiteDatabase, publication.Publication]
     ) -> None:
@@ -275,8 +335,11 @@ class TestPairVoteCounts:
             connection.executescript(
                 (MIGRATIONS_DIR / '0004_publication_pair_cases.sql').read_text()
             )
+            for path in sorted(MIGRATIONS_DIR.glob('*.sql')):
+                if path.name[:4] > '0004':
+                    connection.executescript(path.read_text())
             database = SQLiteDatabase(connection)
-            publication.publish(database, published, NOW, target='production')
+            stage_and_activate(database, published, NOW)
             first = record_vote(
                 database, published, NOW, actor='first', age=timedelta(hours=1)
             )
@@ -709,24 +772,267 @@ class TestRestore:
         assert row.exclusion == 'spam'
 
 
-class TestSnapshotFiles:
-    def test_writes_under_the_family_and_reads_back(self, data_dir: Path) -> None:
+class TestSnapshots:
+    def test_persists_private_vote_facts_without_candidate_bodies(
+        self, private_store: SQLiteDatabase
+    ) -> None:
+        case = make_case('held', 'held-out').model_copy(
+            update={'instruction': 'Private instruction marker.'}
+        )
+        published = publication.prepare(
+            FAMILY,
+            [case],
+            [
+                make_trial('held', system, text=f'Private candidate marker {system}.')
+                for system in ARENA_SYSTEMS
+            ],
+            ARENA_NAMES,
+            target='private',
+        )
+        publication.stage(private_store, published, NOW)
+        publication.activate(private_store, published.id, NOW)
+        record_vote(
+            private_store, published, NOW, actor='reader', age=timedelta(hours=1)
+        )
+        cut = votes.read_cut(private_store, FAMILY.name, NOW)
+        saved = Snapshot(
+            family=FAMILY.name,
+            taken_at=NOW,
+            closed_at=NOW,
+            category_order=('docs',),
+            closing_revision=None,
+            production=None,
+            private=cut,
+        )
+
+        identity = votes.save_snapshot(private_store, saved)
+        restored = votes.read_snapshot(private_store, identity)
+
+        assert restored == saved
+        assert 'Private instruction marker' not in restored.model_dump_json()
+        assert 'Private candidate marker' not in restored.model_dump_json()
+        assert len(votes.voting_input(restored, {}).ordinary) == 1
+
+    def test_replays_frozen_facts_after_moderation_and_publication_change(
+        self, private_store: SQLiteDatabase
+    ) -> None:
+        outputs = [
+            make_trial('first', system, cost_usd=0.25) for system in ARENA_SYSTEMS
+        ]
+        published = publication.prepare(
+            FAMILY,
+            [make_case('first')],
+            outputs,
+            ARENA_NAMES,
+            target='production',
+        )
+        publication.stage(private_store, published, NOW)
+        publication.activate(private_store, published.id, NOW)
+        identifier = record_vote(
+            private_store, published, NOW, actor='reader', age=timedelta(hours=1)
+        )
+        cut = votes.read_cut(private_store, FAMILY.name, NOW)
+        assert cut is not None
+        state = State(private_store)
+        generation = write_outputs(
+            FAMILY.name,
+            outputs,
+            state,
+            previous=None,
+            code_revision='a' * 40,
+            case_revision='b' * 40,
+            system_names=ARENA_NAMES,
+        )
+        cut = cut.model_copy(update={'output_generation': generation})
+        saved = Snapshot(
+            family=FAMILY.name,
+            taken_at=NOW,
+            closed_at=NOW + timedelta(hours=2),
+            category_order=('reply', 'docs'),
+            closing_revision=None,
+            production=cut,
+            private=None,
+        )
+
+        identity = votes.save_snapshot(private_store, saved)
+        private_store.execute(
+            'UPDATE votes SET exclusion = ? WHERE id = ?', ['spam', identifier]
+        )
+        private_store.execute('DELETE FROM active')
+        write_outputs(
+            FAMILY.name,
+            [output.model_copy(update={'cost_usd': 99.0}) for output in outputs],
+            state,
+            previous=generation,
+            code_revision='a' * 40,
+            case_revision='c' * 40,
+            system_names=ARENA_NAMES,
+        )
+
+        restored = votes.read_snapshot(private_store, identity)
+        assert restored == saved
+        assert votes.save_snapshot(private_store, saved) == identity
+        assert restored.production is not None
+        assert restored.production.output_generation == generation
+        analysis = votes.voting_input(
+            restored,
+            {
+                'production': read_outputs(
+                    FAMILY.name,
+                    state,
+                    generation=state.collection_generation(generation),
+                )
+            },
+        )
+        assert analysis.declared_categories == ('reply', 'docs')
+        assert len(analysis.ordinary) == 1
+        assert {output.cost_usd for output in analysis.outputs} == {0.25}
+
+    def test_keeps_interrupted_rows_unreadable_until_complete_resumption(
+        self, private_store: SQLiteDatabase, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         a, b = fact('a', 'c', 'acme-large'), fact('b', 'c', 'acme-small')
         saved = snapshot((a, b), (vote(1, a, b),))
+        execute = private_store.execute
 
-        path = votes.write_snapshot(saved)
+        def interrupt(sql: str, params: Sequence[Param] = ()) -> Result:
+            if sql.startswith('INSERT INTO vote_snapshot_outputs'):
+                raise InputError('Interrupted staging.')
+            return execute(sql, params)
 
-        assert path == data_dir / 'votes' / FAMILY.name / '2026-10-29T12-00-00Z.json'
-        assert votes.read_snapshot(path) == saved
+        monkeypatch.setattr(private_store, 'execute', interrupt)
+
+        with pytest.raises(InputError, match='Interrupted staging'):
+            votes.save_snapshot(private_store, saved)
+
+        identity = str(execute('SELECT id FROM vote_snapshots').rows[0]['id'])
+        with pytest.raises(InputError, match='not sealed'):
+            votes.read_snapshot(private_store, identity)
+        with pytest.raises(sqlite3.IntegrityError, match='every expected row'):
+            execute('UPDATE vote_snapshots SET sealed = 1 WHERE id = ?', [identity])
+        monkeypatch.setattr(private_store, 'execute', execute)
+
+        assert votes.save_snapshot(private_store, saved) == identity
+        assert votes.read_snapshot(private_store, identity) == saved
+
+    def test_refuses_corrupted_staging_before_sealing(
+        self, private_store: SQLiteDatabase, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        a, b = fact('a', 'c', 'acme-large'), fact('b', 'c', 'acme-small')
+        saved = snapshot((a, b), (vote(1, a, b),))
+        execute = private_store.execute
+
+        def corrupt(sql: str, params: Sequence[Param] = ()) -> Result:
+            if sql.startswith('INSERT INTO vote_snapshot_outputs'):
+                payload = json.loads(str(params[-1]))
+                payload['length'] = 999
+                params = [*params[:-1], json.dumps(payload)]
+            return execute(sql, params)
+
+        monkeypatch.setattr(private_store, 'execute', corrupt)
+
+        with pytest.raises(InputError, match='incomplete or conflicting facts'):
+            votes.save_snapshot(private_store, saved)
+
+        assert execute('SELECT sealed FROM vote_snapshots').rows == [{'sealed': 0}]
+
+    @pytest.mark.parametrize('change', ['update', 'delete', 'insert'])
+    def test_sealed_rows_reject_later_changes(
+        self, private_store: SQLiteDatabase, change: str
+    ) -> None:
+        a, b = fact('a', 'c', 'acme-large'), fact('b', 'c', 'acme-small')
+        saved = snapshot((a, b), (vote(1, a, b),))
+        identity = votes.save_snapshot(private_store, saved)
+        statements = {
+            'update': (
+                'UPDATE vote_snapshot_outputs SET facts_json = ? WHERE snapshot_id = ?',
+                ['{}', identity],
+            ),
+            'delete': (
+                'DELETE FROM vote_snapshot_votes WHERE snapshot_id = ?',
+                [identity],
+            ),
+            'insert': (
+                'INSERT INTO vote_snapshot_cases VALUES (?, ?, ?, ?)',
+                [identity, 'production', 'extra', '{}'],
+            ),
+        }
+        sql, params = statements[change]
+
+        with pytest.raises(sqlite3.IntegrityError):
+            private_store.execute(sql, params)
+
+        assert votes.read_snapshot(private_store, identity) == saved
+
+    @pytest.mark.parametrize('change', ['digest', 'count'])
+    def test_read_reverifies_count_and_digest_after_external_corruption(
+        self, private_store: SQLiteDatabase, change: str
+    ) -> None:
+        a, b = fact('a', 'c', 'acme-large'), fact('b', 'c', 'acme-small')
+        saved = snapshot((a, b), (vote(1, a, b),))
+        identity = votes.save_snapshot(private_store, saved)
+        if change == 'digest':
+            private_store.execute('DROP TRIGGER snapshot_outputs_keep_content')
+            private_store.execute(
+                'UPDATE vote_snapshot_outputs SET facts_json = '
+                "json_set(facts_json, '$.length', 999)"
+            )
+        else:
+            private_store.execute('DROP TRIGGER snapshots_keep_identity')
+            private_store.execute(
+                'UPDATE vote_snapshots SET expected_output_count = '
+                'expected_output_count + 1'
+            )
+
+        with pytest.raises(InputError, match='incomplete or conflicting facts'):
+            votes.read_snapshot(private_store, identity)
 
 
 class TestVotingInput:
+    @pytest.mark.parametrize(
+        'private_pin', ['generation-b', None], ids=['pinned', 'unknown']
+    )
+    def test_measures_each_cut_from_its_own_generation(
+        self, private_pin: str | None
+    ) -> None:
+        public = make_trial('public', 'acme-large', cost_usd=0.25, reward=1.0)
+        private = make_trial('private', 'acme-large', cost_usd=0.75, reward=0.5)
+        public_key = publication.output_key(FAMILY.name, public)
+        private_key = publication.output_key(FAMILY.name, private)
+        first = snapshot((fact(public_key, 'open', 'acme-large'),)).production
+        second = snapshot((fact(private_key, 'held', 'acme-large'),)).production
+        assert first is not None and second is not None
+        frozen = Snapshot(
+            family=FAMILY.name,
+            taken_at=NOW,
+            closed_at=NOW,
+            category_order=('reply', 'docs'),
+            closing_revision=None,
+            production=first.model_copy(update={'output_generation': 'generation-a'}),
+            private=second.model_copy(update={'output_generation': private_pin}),
+        )
+
+        analysis = votes.voting_input(
+            frozen,
+            {
+                'production': [public, private.model_copy(update={'cost_usd': 99.0})],
+                'private': [private, public.model_copy(update={'cost_usd': 88.0})],
+            },
+        )
+
+        measured = {row.case: (row.cost_usd, row.reward) for row in analysis.outputs}
+        assert measured == {
+            'open': (0.25, 1.0),
+            'held': (0.75, 0.5) if private_pin is not None else (None, None),
+        }
+        assert analysis.declared_categories == ('reply', 'docs')
+
     def test_unions_partly_overlapping_system_fields_in_store_order(self) -> None:
         a, b = fact('a', 'public', 'acme-large'), fact('b', 'public', 'acme-small')
         c, d = fact('c', 'held', 'acme-large'), fact('d', 'held', 'acme-pro')
         production = snapshot((a, b), (vote(1, a, b),)).production
-        local = snapshot((c, d), (vote(1, c, d),)).production
-        assert production is not None and local is not None
+        private = snapshot((c, d), (vote(1, c, d),)).production
+        assert production is not None and private is not None
         production = production.model_copy(
             update={
                 'inventory': production.inventory.model_copy(
@@ -739,9 +1045,9 @@ class TestVotingInput:
                 )
             }
         )
-        local = local.model_copy(
+        private = private.model_copy(
             update={
-                'inventory': local.inventory.model_copy(
+                'inventory': private.inventory.model_copy(
                     update={
                         'systems': {
                             system: ARENA_NAMES[system]
@@ -752,10 +1058,16 @@ class TestVotingInput:
             }
         )
         merged = Snapshot(
-            family=FAMILY.name, taken_at=NOW, production=production, local=local
+            family=FAMILY.name,
+            taken_at=NOW,
+            closed_at=NOW,
+            category_order=('docs',),
+            closing_revision=None,
+            production=production,
+            private=private,
         )
 
-        analysis = votes.voting_input(merged, FAMILY, [])
+        analysis = votes.voting_input(merged, {})
 
         assert analysis.systems == ('acme-large', 'acme-small', 'acme-pro')
         assert list(votes.system_names(merged)) == list(analysis.systems)
@@ -772,11 +1084,11 @@ class TestVotingInput:
         production = snapshot(
             (a, b), tuple(vote(index, a, b) for index in range(1, 102))
         )
-        local = snapshot((c, d), (vote(1, c, d), vote(2, a, b))).production
-        assert local is not None
-        local = local.model_copy(
+        private = snapshot((c, d), (vote(1, c, d), vote(2, a, b))).production
+        assert private is not None
+        private = private.model_copy(
             update={
-                'inventory': local.inventory.model_copy(
+                'inventory': private.inventory.model_copy(
                     update={
                         'cases': (
                             CaseFacts(key='held', category='docs', split='held-out'),
@@ -788,22 +1100,25 @@ class TestVotingInput:
         merged = Snapshot(
             family=FAMILY.name,
             taken_at=NOW,
+            closed_at=NOW,
+            category_order=('docs',),
+            closing_revision=None,
             production=production.production,
-            local=local,
+            private=private,
         )
 
-        analysis = votes.voting_input(merged, FAMILY, [])
+        analysis = votes.voting_input(merged, {})
 
         assert {row.actor for row in analysis.ordinary} == {
             'production:actor',
-            'local:actor',
+            'private:actor',
         }
         assert sum(row.comparison.weight for row in analysis.ordinary) == pytest.approx(
             101
         )
         assert analysis.dropped == 1
         assert analysis.cutoffs == Cutoffs(
-            production=Cutoff(id=101, votes=101), local=Cutoff(id=2, votes=2)
+            production=Cutoff(id=101, votes=101), private=Cutoff(id=2, votes=2)
         )
         assert dict(analysis.splits) == {'public': 'public', 'held': 'held-out'}
 
@@ -824,8 +1139,8 @@ class TestVotingInput:
         a, b = fact('a', 'public', 'acme-large'), fact('b', 'public', 'acme-small')
         c, d = fact('c', 'held', 'acme-large'), fact('d', 'held', 'acme-small')
         production = snapshot((a, b), (vote(1, a, b),)).production
-        local = snapshot((c, d), (vote(1, c, d),)).production
-        assert production is not None and local is not None
+        private = snapshot((c, d), (vote(1, c, d),)).production
+        assert production is not None and private is not None
         variants: dict[str, dict[str, object]] = {
             'cases': {'cases': production.inventory.cases},
             'outputs': {'outputs': (a, d)},
@@ -838,15 +1153,21 @@ class TestVotingInput:
             },
         }
         changes = variants.get(mismatch, {})
-        local = local.model_copy(
+        private = private.model_copy(
             update={'cutoff': 0}
             if mismatch == 'cutoff'
-            else {'inventory': local.inventory.model_copy(update=changes)}
+            else {'inventory': private.inventory.model_copy(update=changes)}
         )
 
         with pytest.raises(ValueError):
             Snapshot(
-                family=FAMILY.name, taken_at=NOW, production=production, local=local
+                family=FAMILY.name,
+                taken_at=NOW,
+                closed_at=NOW,
+                category_order=('docs',),
+                closing_revision=None,
+                production=production,
+                private=private,
             )
 
     def test_counts_votes_both_of_whose_outputs_still_pass_distinctly(self) -> None:
@@ -862,34 +1183,36 @@ class TestVotingInput:
         )
 
         analysis = votes.voting_input(
-            snapshot((a, b, failing, twin), rows, excluded=2), FAMILY, []
+            snapshot((a, b, failing, twin), rows, excluded=2), {}
         )
 
         assert [row.actor for row in analysis.ordinary] == ['production:actor']
         assert analysis.dropped == 5
-        assert analysis.cutoffs == Cutoffs(production=Cutoff(id=4, votes=4), local=None)
+        assert analysis.cutoffs == Cutoffs(
+            production=Cutoff(id=4, votes=4), private=None
+        )
 
     def test_drops_a_vote_on_a_case_whose_text_changed(self) -> None:
         a, b = fact('a', 'c', 'acme-large'), fact('b', 'c', 'acme-small')
         stale = vote(1, a, b).model_copy(update={'case_key': 'edited'})
 
-        analysis = votes.voting_input(snapshot((a, b), (stale,)), FAMILY, [])
+        analysis = votes.voting_input(snapshot((a, b), (stale,)), {})
 
         assert (analysis.ordinary, analysis.dropped) == ((), 1)
 
     def test_records_cutoff_0_for_a_store_without_a_vote(self) -> None:
         a, b = fact('a', 'c', 'acme-large'), fact('b', 'c', 'acme-small')
 
-        analysis = votes.voting_input(snapshot((a, b)), FAMILY, [])
+        analysis = votes.voting_input(snapshot((a, b)), {})
 
-        assert analysis.cutoffs == Cutoffs(production=Cutoff(id=0, votes=0), local=None)
+        assert analysis.cutoffs == Cutoffs(
+            production=Cutoff(id=0, votes=0), private=None
+        )
 
     def test_anchors_on_the_reference_the_publication_froze(self) -> None:
         a, b = fact('a', 'c', 'acme-large'), fact('b', 'c', 'acme-small')
 
-        analysis = votes.voting_input(
-            snapshot((a, b), reference='acme-small'), FAMILY, []
-        )
+        analysis = votes.voting_input(snapshot((a, b), reference='acme-small'), {})
 
         assert analysis.reference == 'acme-small'
 
@@ -910,7 +1233,7 @@ class TestVotingInput:
             fact('b5', 'voted', 'acme-small'),
         )
 
-        analysis = votes.voting_input(snapshot(outputs), FAMILY, [])
+        analysis = votes.voting_input(snapshot(outputs), {})
 
         assert sorted(analysis.settlements) == sorted(
             [
@@ -928,7 +1251,17 @@ class TestVotingInput:
             fact('gone', 'c', 'acme-small'),
         )
 
-        analysis = votes.voting_input(snapshot((measured, missing)), FAMILY, [trial])
+        saved = snapshot((measured, missing))
+        assert saved.production is not None
+        saved = saved.model_copy(
+            update={
+                'production': saved.production.model_copy(
+                    update={'output_generation': 'original'}
+                )
+            }
+        )
+
+        analysis = votes.voting_input(saved, {'production': [trial]})
 
         by_system = {row.system: row for row in analysis.outputs}
         assert (
@@ -939,9 +1272,3 @@ class TestVotingInput:
             3.0,
         )
         assert by_system['acme-small'].cost_usd is None
-
-    def test_refuses_a_snapshot_of_another_family(self) -> None:
-        other = make_votes_family('writing-other')
-
-        with pytest.raises(ValueError, match='belongs to family `writing-fixture`'):
-            votes.voting_input(snapshot(()), other, [])

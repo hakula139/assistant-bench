@@ -9,7 +9,7 @@ import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -28,12 +28,22 @@ from assistant_bench.artifacts import (
     ArtifactRef,
     ArtifactRepository,
     FileEntry,
+    MaterializedTrial,
     TrialManifest,
+    audit_trial,
     build_manifest,
+    snapshot_trial,
 )
 from assistant_bench.families import Family, load_family
 from assistant_bench.messages import InputError
-from support import FIXTURES, finish_generation, make_system, write_votes_family
+from support import (
+    FIXTURES,
+    PrivateRepository,
+    finish_generation,
+    git,
+    make_system,
+    write_votes_family,
+)
 
 
 pytestmark = pytest.mark.usefixtures('export')
@@ -42,78 +52,9 @@ SLUG = 'example/private-data'
 CODE_REVISION = '1' * 40
 
 
-def git(root: Path, *arguments: str) -> str:
-    return subprocess.run(
-        ['git', *arguments],
-        cwd=root,
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
-
-
-@dataclass(frozen=True)
-class Repository:
-    client: ArtifactRepository
-    remote: Path
-    seed: Path
-    metadata: Path
-    revision: str
-
-
 @pytest.fixture
-def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Repository:
-    for name in (
-        'GIT_DIR',
-        'GIT_WORK_TREE',
-        'GIT_INDEX_FILE',
-        'GIT_OBJECT_DIRECTORY',
-        'GIT_ALTERNATE_OBJECT_DIRECTORIES',
-        'GIT_CONFIG_COUNT',
-    ):
-        monkeypatch.delenv(name, raising=False)
-    monkeypatch.setenv('GIT_CONFIG_GLOBAL', os.devnull)
-    monkeypatch.setenv('GIT_CONFIG_NOSYSTEM', '1')
-    for name in ('GIT_AUTHOR_NAME', 'GIT_COMMITTER_NAME'):
-        monkeypatch.setenv(name, 'Test')
-    for name in ('GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_EMAIL'):
-        monkeypatch.setenv(name, 'test@example.com')
-    remote = tmp_path / 'remote.git'
-    git(tmp_path, 'init', '--quiet', '--bare', '--initial-branch=main', str(remote))
-    seed = tmp_path / 'seed'
-    seed.mkdir()
-    git(seed, 'init', '--quiet', '--initial-branch=main')
-    cases = seed / 'cases'
-    cases.mkdir()
-    (cases / 'sample.toml').write_bytes(b'cases = []\r\n')
-    (seed / 'unrelated.txt').write_text('Not a case source.\n')
-    git(seed, 'add', '.')
-    git(seed, 'commit', '--quiet', '-m', 'Add synthetic sources')
-    git(seed, 'remote', 'add', 'origin', str(remote))
-    git(seed, 'push', '--quiet', 'origin', 'main')
-    revision = git(seed, 'rev-parse', 'HEAD')
-    metadata = tmp_path / 'metadata.json'
-    metadata.write_text(
-        json.dumps(
-            {
-                'full_name': SLUG,
-                'private': True,
-                'ssh_url': str(remote),
-                'default_branch': 'main',
-            }
-        )
-    )
-    binary = tmp_path / 'bin'
-    binary.mkdir()
-    stub = binary / 'gh'
-    stub.write_text(
-        f'#!{sys.executable}\n' + (FIXTURES / 'artifacts' / 'gh.py').read_text()
-    )
-    stub.chmod(0o755)
-    monkeypatch.setenv('PATH', f'{binary}{os.pathsep}{os.environ["PATH"]}')
-    monkeypatch.setenv('TEST_GH_METADATA', str(metadata))
-    monkeypatch.delenv('TEST_GH_STATUS', raising=False)
-    return Repository(ArtifactRepository(SLUG), remote, seed, metadata, revision)
+def repository(private_repository: PrivateRepository) -> PrivateRepository:
+    return private_repository
 
 
 @dataclass(frozen=True)
@@ -127,7 +68,7 @@ class Trial:
 
 @pytest.fixture
 def trial(
-    repository: Repository, families_dir: Path, data_dir: Path, tmp_path: Path
+    repository: PrivateRepository, families_dir: Path, data_dir: Path, tmp_path: Path
 ) -> Trial:
     write_votes_family(families_dir, ['acme-large'], {'brief': 'reply'})
     family = load_family('f')
@@ -136,7 +77,11 @@ def trial(
     prepared.config.verifier.environment_mode = VerifierEnvironmentMode.SEPARATE
     (task / 'task.toml').write_text(prepared.config.model_dump_toml())
     config = jobs.job(
-        family, jobs.family_systems(family, [make_system()]), [task]
+        family,
+        jobs.family_systems(family, [make_system()]),
+        [task],
+        root=tmp_path,
+        sources=[],
     ).model_copy(update={'jobs_dir': tmp_path / 'source-jobs', 'job_name': 'job-a'})
     finish_generation(config, 'First line.\r\nSecond line.\n')
     job = config.jobs_dir / config.job_name
@@ -183,10 +128,11 @@ def trial(
     return Trial(family, job, task, result, manifest)
 
 
-def publish(repository: Repository, trial: Trial) -> ArtifactRef:
-    return repository.client.publish_trial(
-        'run-a', 'artifact-a', trial.job, trial.manifest
+def publish(repository: PrivateRepository, trial: Trial) -> ArtifactRef:
+    (reference,) = repository.client.publish_trials(
+        [MaterializedTrial(trial.job, trial.manifest)]
     )
+    return reference
 
 
 def snapshot(trial: Trial) -> TrialManifest:
@@ -205,6 +151,32 @@ def snapshot(trial: Trial) -> TrialManifest:
 
 def contents(path: Path) -> bytes:
     return os.fsencode(os.readlink(path)) if path.is_symlink() else path.read_bytes()
+
+
+class TestAuditTrial:
+    def test_preserves_unknown_token_shaped_output_but_refuses_a_known_credential(
+        self, tmp_path: Path
+    ) -> None:
+        marker = 'ghs_7qFm9K2wR4dX8cN1vP5sH6zB3tL0yJ9aE2uV'
+        output = tmp_path / 'response.json'
+        content = json.dumps({'output': marker}).encode()
+        output.write_bytes(content)
+
+        audit_trial(tmp_path, set())
+
+        assert output.read_bytes() == content
+        with pytest.raises(InputError, match='known credential'):
+            audit_trial(tmp_path, {marker})
+        assert output.read_bytes() == content
+
+    def test_refuses_a_known_credential_in_an_empty_directory_name(
+        self, tmp_path: Path
+    ) -> None:
+        marker = 'sensitive-marker-for-test'
+        (tmp_path / 'artifacts' / marker).mkdir(parents=True)
+
+        with pytest.raises(InputError, match='known credential'):
+            audit_trial(tmp_path, {marker})
 
 
 class TestFileEntry:
@@ -235,6 +207,53 @@ class TestFileEntry:
 
 
 class TestTrialManifest:
+    @pytest.mark.parametrize(
+        'directory',
+        [
+            '/outside',
+            '../outside',
+            'job/other/artifacts',
+            'job/{trial}/artifacts/app/__pycache__',
+            'job/{trial}/artifacts/app/answer.txt',
+            'job/{trial}/artifacts/app/link/child',
+            'job/{trial}/artifacts/app/LINK',
+        ],
+        ids=['absolute', 'parent', 'other-trial', 'cache', 'file', 'symlink', 'alias'],
+    )
+    def test_directories_cannot_escape_or_collide_with_retained_files(
+        self, trial: Trial, directory: str
+    ) -> None:
+        directories = tuple(
+            sorted(
+                [
+                    *trial.manifest.directories,
+                    directory.format(trial=trial.result.trial_name),
+                ]
+            )
+        )
+
+        with pytest.raises(ValidationError):
+            TrialManifest.model_validate(
+                {**trial.manifest.model_dump(), 'directories': directories}
+            )
+
+    @pytest.mark.parametrize('failure', ['missing', 'repeated', 'unsorted'])
+    def test_directories_are_required_unique_and_canonical(
+        self, trial: Trial, failure: str
+    ) -> None:
+        payload = trial.manifest.model_dump()
+        if failure == 'missing':
+            del payload['directories']
+        elif failure == 'repeated':
+            payload['directories'] = tuple(
+                sorted([*trial.manifest.directories, trial.manifest.directories[0]])
+            )
+        else:
+            payload['directories'] = tuple(reversed(trial.manifest.directories))
+
+        with pytest.raises(ValidationError):
+            TrialManifest.model_validate(payload)
+
     @pytest.mark.parametrize('root', ['agent', 'verifier', 'artifacts'])
     @pytest.mark.parametrize('mode', ['100644', '120000'])
     def test_artifact_roots_must_be_directories(
@@ -310,7 +329,7 @@ class TestBuildManifest:
 class TestArtifactRepository:
     def test_inherited_git_locations_cannot_redirect_private_storage_operations(
         self,
-        repository: Repository,
+        repository: PrivateRepository,
         trial: Trial,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
@@ -323,15 +342,52 @@ class TestArtifactRepository:
             restored = repository.client.materialize(reference, tmp_path / 'restored')
             source = repository.client.source(repository.revision, tmp_path / 'sources')
 
-        assert (restored / 'config.json').read_bytes() == (
+        assert (restored.job / 'config.json').read_bytes() == (
             trial.job / 'config.json'
         ).read_bytes()
         assert (source / 'sample.toml').read_bytes() == b'cases = []\r\n'
         assert not (tmp_path / 'foreign').exists()
 
+    class TestHead:
+        def test_reads_the_current_remote_main_without_changing_pinned_sources(
+            self, repository: PrivateRepository, tmp_path: Path
+        ) -> None:
+            pinned = repository.client.head()
+            (repository.seed / 'cases' / 'sample.toml').write_text('cases = [1]\n')
+            git(repository.seed, 'add', '.')
+            git(repository.seed, 'commit', '--quiet', '-m', 'Change synthetic source')
+            git(repository.seed, 'push', '--quiet', 'origin', 'main')
+
+            current = repository.client.head()
+            source = repository.client.source(pinned, tmp_path / 'pinned')
+
+            assert pinned == repository.revision
+            assert current == git(repository.remote, 'rev-parse', 'main')
+            assert current != pinned
+            assert (source / 'sample.toml').read_bytes() == b'cases = []\r\n'
+
+        @pytest.mark.parametrize('failure', ['public', 'unreadable', 'missing-main'])
+        def test_refuses_an_unavailable_private_main(
+            self,
+            repository: PrivateRepository,
+            monkeypatch: pytest.MonkeyPatch,
+            failure: str,
+        ) -> None:
+            if failure == 'public':
+                metadata = json.loads(repository.metadata.read_text())
+                metadata['private'] = False
+                repository.metadata.write_text(json.dumps(metadata))
+            elif failure == 'unreadable':
+                monkeypatch.setenv('TEST_GH_STATUS', '1')
+            else:
+                git(repository.remote, 'update-ref', '-d', 'refs/heads/main')
+
+            with pytest.raises(InputError):
+                repository.client.head()
+
     class TestSource:
         def test_materializes_only_case_sources_at_the_requested_revision(
-            self, repository: Repository, tmp_path: Path
+            self, repository: PrivateRepository, tmp_path: Path
         ) -> None:
             (repository.seed / 'cases' / 'sample.toml').write_text('cases = [1]\n')
             git(repository.seed, 'add', '.')
@@ -344,14 +400,139 @@ class TestArtifactRepository:
             assert not (tmp_path / 'client' / 'unrelated.txt').exists()
             assert source.is_relative_to(tmp_path / 'client')
 
-    class TestPublishTrial:
+    class TestPublishTrials:
+        def test_publishes_the_whole_batch_in_one_native_commit_in_input_order(
+            self, repository: PrivateRepository, trial: Trial, tmp_path: Path
+        ) -> None:
+            second = trial.manifest.model_copy(update={'artifact_id': 'artifact-b'})
+            archives = [
+                MaterializedTrial(trial.job, second),
+                MaterializedTrial(trial.job, trial.manifest),
+            ]
+
+            references = repository.client.publish_trials(archives)
+
+            head = git(repository.remote, 'rev-parse', 'main')
+            assert [reference.path for reference in references] == [
+                archive.manifest.path for archive in archives
+            ]
+            assert {reference.commit_sha for reference in references} == {head}
+            assert (
+                git(repository.remote, 'rev-list', f'{repository.revision}..main')
+                == head
+            )
+            expected_paths = {
+                f'{archive.manifest.path}/{path}'
+                for archive in archives
+                for path in [
+                    *(entry.path for entry in archive.manifest.files),
+                    'manifest.json',
+                ]
+            }
+            assert (
+                set(
+                    git(
+                        repository.remote, 'diff', '--name-only', f'{head}^', head
+                    ).splitlines()
+                )
+                == expected_paths
+            )
+            for archive, reference in zip(archives, references, strict=True):
+                restored = repository.client.materialize(
+                    reference, tmp_path / archive.manifest.artifact_id
+                )
+                assert restored.manifest == archive.manifest
+                for entry in archive.manifest.files:
+                    relative = Path(entry.path).relative_to('job')
+                    assert contents(restored.job / relative) == contents(
+                        archive.job / relative
+                    ), entry.path
+
+        def test_a_mixed_batch_keeps_original_references_and_repeats_without_writes(
+            self, repository: PrivateRepository, trial: Trial
+        ) -> None:
+            original = publish(repository, trial)
+            second = trial.manifest.model_copy(update={'artifact_id': 'artifact-b'})
+            archives = [
+                MaterializedTrial(trial.job, second),
+                MaterializedTrial(trial.job, trial.manifest),
+            ]
+
+            references = repository.client.publish_trials(archives)
+            repeated = repository.client.publish_trials(archives)
+
+            assert references[1] == repeated[1] == original
+            assert references == repeated
+            assert references[0].commit_sha != original.commit_sha
+            assert (
+                git(repository.remote, 'rev-parse', 'main') == references[0].commit_sha
+            )
+            assert git(repository.remote, 'rev-parse', 'main^') == original.commit_sha
+            assert (
+                git(
+                    repository.remote,
+                    'show',
+                    f'{original.commit_sha}:{original.path}/manifest.json',
+                )
+                == trial.manifest.content().decode().strip()
+            )
+
+        def test_an_empty_batch_needs_no_remote_access(
+            self, repository: PrivateRepository, monkeypatch: pytest.MonkeyPatch
+        ) -> None:
+            monkeypatch.setenv('TEST_GH_STATUS', '1')
+
+            references = repository.client.publish_trials([])
+
+            assert references == ()
+            assert git(repository.remote, 'rev-parse', 'main') == repository.revision
+
+        @pytest.mark.parametrize(
+            'conflicting', [False, True], ids=['same', 'different']
+        )
+        def test_refuses_repeated_paths_before_publishing_either_archive(
+            self, repository: PrivateRepository, trial: Trial, conflicting: bool
+        ) -> None:
+            second = trial.manifest.model_copy(
+                update={'scope': 'other'} if conflicting else {}
+            )
+            archives = [
+                MaterializedTrial(trial.job, trial.manifest),
+                MaterializedTrial(trial.job, second),
+            ]
+
+            with pytest.raises(InputError):
+                repository.client.publish_trials(archives)
+
+            assert git(repository.remote, 'rev-parse', 'main') == repository.revision
+
+        def test_a_later_changed_archive_prevents_the_entire_batch_push(
+            self, repository: PrivateRepository, trial: Trial, tmp_path: Path
+        ) -> None:
+            second = trial.manifest.model_copy(update={'artifact_id': 'artifact-b'})
+            changed = tmp_path / 'changed-job'
+            shutil.copytree(trial.job, changed, symlinks=True)
+            (changed / trial.result.trial_name / 'agent' / 'output.txt').write_text(
+                'Changed after audit.\n'
+            )
+
+            with pytest.raises(InputError):
+                repository.client.publish_trials(
+                    [
+                        MaterializedTrial(trial.job, trial.manifest),
+                        MaterializedTrial(changed, second),
+                    ]
+                )
+
+            assert git(repository.remote, 'rev-parse', 'main') == repository.revision
+
         @pytest.mark.parametrize(
             'failure',
             ['public', 'unreadable', 'wrong-repository', 'coerced-visibility'],
         )
         def test_checks_private_visibility_before_pushing_any_artifact(
             self,
-            repository: Repository,
+            repository: PrivateRepository,
             trial: Trial,
             monkeypatch: pytest.MonkeyPatch,
             failure: str,
@@ -376,7 +557,7 @@ class TestArtifactRepository:
             assert git(repository.remote, 'rev-parse', 'main') == before
 
         def test_returns_only_a_remotely_readable_reference_and_is_idempotent(
-            self, repository: Repository, trial: Trial
+            self, repository: PrivateRepository, trial: Trial
         ) -> None:
             reference = publish(repository, trial)
 
@@ -402,7 +583,7 @@ class TestArtifactRepository:
         @pytest.mark.parametrize('ancestor', ['runs', 'runs/run-a/trials'])
         def test_remote_ancestor_symlinks_cannot_write_outside_the_clone(
             self,
-            repository: Repository,
+            repository: PrivateRepository,
             trial: Trial,
             tmp_path: Path,
             ancestor: str,
@@ -435,38 +616,67 @@ class TestArtifactRepository:
             assert git(repository.remote, 'rev-parse', 'main') == before
 
         def test_workspace_git_attributes_cannot_normalize_archived_bytes(
-            self, repository: Repository, trial: Trial, tmp_path: Path
+            self, repository: PrivateRepository, trial: Trial, tmp_path: Path
         ) -> None:
             workspace = trial.job / trial.result.trial_name / 'artifacts' / 'app'
             (workspace / '.gitattributes').write_text('* text eol=lf\n')
             manifest = snapshot(trial)
 
-            reference = repository.client.publish_trial(
-                manifest.run_id, manifest.artifact_id, trial.job, manifest
+            (reference,) = repository.client.publish_trials(
+                [MaterializedTrial(trial.job, manifest)]
             )
             restored = repository.client.materialize(reference, tmp_path / 'restored')
 
-            archived = restored / trial.result.trial_name / 'artifacts' / 'app'
+            archived = restored.job / trial.result.trial_name / 'artifacts' / 'app'
             assert (archived / 'answer.txt').read_bytes() == b'Answer.\r\n'
             assert (archived / '.gitattributes').read_bytes() == b'* text eol=lf\n'
 
         def test_does_not_return_a_durable_reference_when_the_push_is_rejected(
-            self, repository: Repository, trial: Trial
+            self, repository: PrivateRepository, trial: Trial
         ) -> None:
             before = git(repository.remote, 'rev-parse', 'main')
+            second = trial.manifest.model_copy(update={'artifact_id': 'artifact-b'})
             hook = repository.remote / 'hooks' / 'pre-receive'
             hook.write_text('#!/bin/sh\nexit 1\n')
             hook.chmod(0o755)
 
             with pytest.raises(InputError):
-                publish(repository, trial)
+                repository.client.publish_trials(
+                    [
+                        MaterializedTrial(trial.job, trial.manifest),
+                        MaterializedTrial(trial.job, second),
+                    ]
+                )
 
             assert git(repository.remote, 'rev-parse', 'main') == before
+
+        def test_a_successful_push_acknowledgment_requires_remote_confirmation(
+            self, repository: PrivateRepository, trial: Trial
+        ) -> None:
+            second = trial.manifest.model_copy(update={'artifact_id': 'artifact-b'})
+            hook = repository.remote / 'hooks' / 'post-receive'
+            hook.write_text(
+                '#!/bin/bash\n'
+                'set -euo pipefail\n'
+                'read -r old new ref\n'
+                'git update-ref "$ref" "$old" "$new"\n'
+            )
+            hook.chmod(0o755)
+
+            with pytest.raises(InputError):
+                repository.client.publish_trials(
+                    [
+                        MaterializedTrial(trial.job, trial.manifest),
+                        MaterializedTrial(trial.job, second),
+                    ]
+                )
+
+            assert git(repository.remote, 'rev-parse', 'main') == repository.revision
 
         @pytest.mark.parametrize('change', ['content', 'outside'])
         def test_commit_hooks_cannot_publish_changes_beyond_the_audited_tree(
             self,
-            repository: Repository,
+            repository: PrivateRepository,
             trial: Trial,
             tmp_path: Path,
             monkeypatch: pytest.MonkeyPatch,
@@ -491,7 +701,7 @@ class TestArtifactRepository:
             assert git(repository.remote, 'rev-parse', 'main') == before
 
         def test_refuses_overwriting_an_artifact_with_different_content(
-            self, repository: Repository, trial: Trial
+            self, repository: PrivateRepository, trial: Trial
         ) -> None:
             reference = publish(repository, trial)
             result = trial.job / trial.result.trial_name / 'agent' / 'output.txt'
@@ -509,28 +719,31 @@ class TestArtifactRepository:
             )
 
             with pytest.raises(InputError):
-                repository.client.publish_trial(
-                    'run-a', 'artifact-a', trial.job, changed
+                repository.client.publish_trials(
+                    [MaterializedTrial(trial.job, changed)]
                 )
 
             assert git(repository.remote, 'rev-parse', 'main') == reference.commit_sha
 
-        def test_rechecks_selected_files_after_the_manifest_was_built(
-            self, repository: Repository, trial: Trial
+        @pytest.mark.parametrize('change', ['file', 'directory'])
+        def test_rechecks_selected_files_and_directories_after_the_manifest_was_built(
+            self, repository: PrivateRepository, trial: Trial, change: str
         ) -> None:
             before = git(repository.remote, 'rev-parse', 'main')
-            (trial.job / trial.result.trial_name / 'agent' / 'output.txt').write_text(
-                'Changed after audit.\n'
-            )
+            root = trial.job / trial.result.trial_name
+            if change == 'file':
+                (root / 'agent' / 'output.txt').write_text('Changed after audit.\n')
+            else:
+                (root / 'artifacts' / 'new-empty').mkdir()
 
             with pytest.raises(InputError):
                 publish(repository, trial)
 
             assert git(repository.remote, 'rev-parse', 'main') == before
 
-        def test_concurrent_pushes_preserve_both_immutable_trials(
+        def test_concurrent_batches_preserve_every_immutable_trial(
             self,
-            repository: Repository,
+            repository: PrivateRepository,
             trial: Trial,
             tmp_path: Path,
             monkeypatch: pytest.MonkeyPatch,
@@ -551,15 +764,24 @@ class TestArtifactRepository:
                     'artifact_id': 'artifact-b',
                 }
             )
+            third = trial.manifest.model_copy(
+                update={'run_id': 'run-c', 'artifact_id': 'artifact-c'}
+            )
+            fourth = trial.manifest.model_copy(
+                update={'run_id': 'run-d', 'artifact_id': 'artifact-d'}
+            )
 
-            def push(manifest: TrialManifest) -> ArtifactRef:
-                return ArtifactRepository(SLUG).publish_trial(
-                    manifest.run_id, manifest.artifact_id, trial.job, manifest
+            def push(manifests: tuple[TrialManifest, ...]) -> tuple[ArtifactRef, ...]:
+                return ArtifactRepository(SLUG).publish_trials(
+                    [MaterializedTrial(trial.job, manifest) for manifest in manifests]
                 )
 
             with ThreadPoolExecutor(max_workers=2) as writers:
-                references = list(writers.map(push, [trial.manifest, second]))
+                batches = list(
+                    writers.map(push, [(trial.manifest, second), (third, fourth)])
+                )
 
+            references = [reference for batch in batches for reference in batch]
             for reference in references:
                 git(
                     repository.remote,
@@ -572,7 +794,7 @@ class TestArtifactRepository:
                     reference, tmp_path / reference.path.split('/')[1]
                 )
                 assert (
-                    restored / trial.result.trial_name / 'agent' / 'output.txt'
+                    restored.job / trial.result.trial_name / 'agent' / 'output.txt'
                 ).read_bytes() == (
                     trial.job / trial.result.trial_name / 'agent' / 'output.txt'
                 ).read_bytes()
@@ -581,8 +803,81 @@ class TestArtifactRepository:
             )
 
     class TestMaterialize:
+        def test_refuses_a_manifest_that_omits_a_retained_directory_parent(
+            self, repository: PrivateRepository, trial: Trial, tmp_path: Path
+        ) -> None:
+            outside = tmp_path / 'outside.txt'
+            outside.write_bytes(b'Leave this external file unchanged.\n')
+            workspace = trial.job / trial.result.trial_name / 'artifacts' / 'app'
+            (workspace / 'external').symlink_to(outside)
+            manifest = snapshot(trial)
+            (reference,) = repository.client.publish_trials(
+                [MaterializedTrial(trial.job, manifest)]
+            )
+            payload = manifest.model_dump(mode='json')
+            payload['directories'].remove(
+                f'job/{trial.result.trial_name}/artifacts/app'
+            )
+            content = f'{json.dumps(payload, indent=2)}\n'.encode()
+
+            with pytest.raises(ValidationError):
+                TrialManifest.model_validate_json(content)
+
+            git(repository.seed, 'pull', '--quiet', '--ff-only', 'origin', 'main')
+            (repository.seed / reference.path / 'manifest.json').write_bytes(content)
+            git(repository.seed, 'add', '.')
+            git(repository.seed, 'commit', '--quiet', '-m', 'Omit a directory parent')
+            git(repository.seed, 'push', '--quiet', 'origin', 'main')
+            changed = reference.model_copy(
+                update={
+                    'commit_sha': git(repository.seed, 'rev-parse', 'HEAD'),
+                    'manifest_digest': hashlib.sha256(content).hexdigest(),
+                }
+            )
+
+            with pytest.raises(InputError):
+                repository.client.materialize(changed, tmp_path / 'restored')
+
+            assert outside.read_bytes() == b'Leave this external file unchanged.\n'
+            assert not (tmp_path / 'restored').exists()
+
+        def test_preserves_frozen_empty_directories_after_the_original_client_is_gone(
+            self, repository: PrivateRepository, trial: Trial, tmp_path: Path
+        ) -> None:
+            root = trial.job / trial.result.trial_name
+            shutil.rmtree(root / 'artifacts')
+            empty = ('artifacts', 'agent/logs/artifacts', 'verifier/logs')
+            for relative in empty:
+                (root / relative).mkdir(parents=True, exist_ok=True)
+            frozen = tmp_path / 'frozen'
+            snapshot_trial(trial.job, frozen, trial.result.trial_name)
+            manifest = snapshot(replace(trial, job=frozen))
+            shutil.rmtree(trial.job.parent)
+
+            (reference,) = repository.client.publish_trials(
+                [MaterializedTrial(frozen, manifest)]
+            )
+            shutil.rmtree(frozen)
+            restored = repository.client.materialize(reference, tmp_path / 'fresh')
+
+            assert restored.manifest == manifest
+            for relative in empty:
+                directory = restored.job / trial.result.trial_name / relative
+                assert directory.is_dir() and not directory.is_symlink(), relative
+                assert list(directory.iterdir()) == [], relative
+                assert (
+                    f'job/{trial.result.trial_name}/{relative}' in manifest.directories
+                )
+            for relative in manifest.directories:
+                assert (restored.job / Path(relative).relative_to('job')).is_dir()
+            assert {
+                path.relative_to(restored.job).as_posix()
+                for path in restored.job.rglob('*')
+                if path.is_file() or path.is_symlink()
+            } == {entry.path.removeprefix('job/') for entry in manifest.files}
+
         def test_unknown_historical_revisions_survive_publication_and_restoration(
-            self, repository: Repository, trial: Trial, tmp_path: Path
+            self, repository: PrivateRepository, trial: Trial, tmp_path: Path
         ) -> None:
             manifest = TrialManifest.model_validate(
                 {
@@ -597,8 +892,8 @@ class TestArtifactRepository:
                         {**manifest.model_dump(), field: 'invalid-commit'}
                     )
 
-            reference = repository.client.publish_trial(
-                manifest.run_id, manifest.artifact_id, trial.job, manifest
+            (reference,) = repository.client.publish_trials(
+                [MaterializedTrial(trial.job, manifest)]
             )
             restored = repository.client.materialize(reference, tmp_path / 'restored')
 
@@ -610,22 +905,19 @@ class TestArtifactRepository:
                 )
             )
             assert archived['code_revision'] is archived['case_revision'] is None
-            assert (restored / 'config.json').read_bytes() == (
+            assert restored.manifest == manifest
+            assert (restored.job / 'config.json').read_bytes() == (
                 trial.job / 'config.json'
             ).read_bytes()
 
         def test_case_aliases_never_follow_a_previously_restored_symlink(
-            self, repository: Repository, trial: Trial, tmp_path: Path
+            self, repository: PrivateRepository, trial: Trial, tmp_path: Path
         ) -> None:
             outside = tmp_path / 'outside'
             outside.mkdir()
             (outside / 'sentinel.txt').write_bytes(
                 b'Leave this external tree unchanged.\n'
             )
-            probe = tmp_path / 'case-probe'
-            probe.mkdir()
-            (probe / 'A').touch()
-            aliases = (probe / 'a').exists()
             reference = publish(repository, trial)
             prefix = f'job/{trial.result.trial_name}/artifacts/app'
             additions = {
@@ -642,18 +934,15 @@ class TestArtifactRepository:
                 )
                 for path, (mode, content) in additions.items()
             ]
-            manifest = TrialManifest.model_validate(
-                {
-                    **trial.manifest.model_dump(),
-                    'files': tuple(
-                        sorted(
-                            [*trial.manifest.files, *entries],
-                            key=lambda item: item.path,
-                        )
-                    ),
-                }
-            )
-            additions['manifest.json'] = ('100644', manifest.content())
+            payload = trial.manifest.model_dump(mode='json')
+            payload['files'] = [
+                entry.model_dump(mode='json')
+                for entry in sorted(
+                    [*trial.manifest.files, *entries], key=lambda item: item.path
+                )
+            ]
+            content = f'{json.dumps(payload, indent=2)}\n'.encode()
+            additions['manifest.json'] = ('100644', content)
             git(repository.remote, 'read-tree', reference.commit_sha)
             for path, (mode, content) in additions.items():
                 blob = (
@@ -694,34 +983,24 @@ class TestArtifactRepository:
             changed = ArtifactRef(
                 commit_sha=commit,
                 path=reference.path,
-                manifest_digest=hashlib.sha256(manifest.content()).hexdigest(),
+                manifest_digest=hashlib.sha256(content).hexdigest(),
             )
 
-            restored = None
-            error = None
-            try:
-                restored = repository.client.materialize(changed, tmp_path / 'restored')
-            except InputError as failure:
-                error = failure
+            with pytest.raises(InputError):
+                repository.client.materialize(changed, tmp_path / 'restored')
 
             assert sorted(path.name for path in outside.iterdir()) == ['sentinel.txt']
             assert (
                 outside / 'sentinel.txt'
             ).read_bytes() == b'Leave this external tree unchanged.\n'
-            assert (error is not None) == aliases, error
-            if restored is not None:
-                workspace = restored / trial.result.trial_name / 'artifacts' / 'app'
-                assert (
-                    workspace / 'a' / 'file.txt'
-                ).read_bytes() == b'Keep these artifact bytes.\n'
-                assert (workspace / 'A').is_symlink()
+            assert not (tmp_path / 'restored').exists()
 
         @pytest.mark.parametrize(
             'failure', ['bytes', 'mode', 'manifest', 'extra', 'missing']
         )
         def test_refuses_remote_trees_that_differ_from_the_recorded_manifest(
             self,
-            repository: Repository,
+            repository: PrivateRepository,
             trial: Trial,
             tmp_path: Path,
             failure: str,
@@ -754,20 +1033,26 @@ class TestArtifactRepository:
             assert not (tmp_path / 'restored').exists()
 
         def test_external_symlinks_preserve_targets_without_reading_or_writing_them(
-            self, repository: Repository, trial: Trial, tmp_path: Path
+            self, repository: PrivateRepository, trial: Trial, tmp_path: Path
         ) -> None:
             outside = tmp_path / 'outside.txt'
             outside.write_bytes(b'Private sentinel, never archive this file.\n')
             workspace = trial.job / trial.result.trial_name / 'artifacts' / 'app'
             (workspace / 'external').symlink_to(outside)
             manifest = snapshot(trial)
-            reference = repository.client.publish_trial(
-                manifest.run_id, manifest.artifact_id, trial.job, manifest
+            (reference,) = repository.client.publish_trials(
+                [MaterializedTrial(trial.job, manifest)]
             )
 
             restored = repository.client.materialize(reference, tmp_path / 'restored')
 
-            link = restored / trial.result.trial_name / 'artifacts' / 'app' / 'external'
+            link = (
+                restored.job
+                / trial.result.trial_name
+                / 'artifacts'
+                / 'app'
+                / 'external'
+            )
             assert link.is_symlink()
             assert os.readlink(link) == str(outside)
             assert (
@@ -782,7 +1067,7 @@ class TestArtifactRepository:
             assert b'Private sentinel' not in archived
 
         def test_restores_original_bytes_modes_and_links_after_the_client_is_gone(
-            self, repository: Repository, trial: Trial, tmp_path: Path
+            self, repository: PrivateRepository, trial: Trial, tmp_path: Path
         ) -> None:
             reference = publish(repository, trial)
             originals = {
@@ -796,14 +1081,14 @@ class TestArtifactRepository:
             )
 
             for item in trial.manifest.files:
-                path = restored / Path(item.path).relative_to('job')
+                path = restored.job / Path(item.path).relative_to('job')
                 assert contents(path) == originals[item.path], item.path
                 assert path.is_symlink() == (item.mode == '120000'), item.path
                 if not path.is_symlink():
                     assert bool(path.stat().st_mode & stat.S_IXUSR) == (
                         item.mode == '100755'
                     ), item.path
-            workspace = restored / trial.result.trial_name / 'artifacts' / 'app'
+            workspace = restored.job / trial.result.trial_name / 'artifacts' / 'app'
             for name in [
                 'Cargo.lock',
                 'yarn.lock',
@@ -826,7 +1111,7 @@ class TestArtifactRepository:
         )
         def test_retains_the_files_harbor_needs_for_reuse_and_regrade(
             self,
-            repository: Repository,
+            repository: PrivateRepository,
             trial: Trial,
             tmp_path: Path,
             minor_bump: bool,
@@ -839,7 +1124,7 @@ class TestArtifactRepository:
                 reference, tmp_path / 'fresh'
             )
             prepared = tmp_path / 'prepared' / trial.manifest.job_name
-            shutil.copytree(restored, prepared, symlinks=True)
+            shutil.copytree(restored.job, prepared, symlinks=True)
             if minor_bump:
                 task = Task(trial.task, disable_verification=True)
                 assert task.config.task is not None
@@ -852,6 +1137,8 @@ class TestArtifactRepository:
                 trial.family,
                 jobs.family_systems(trial.family, [make_system()]),
                 [trial.task],
+                root=tmp_path,
+                sources=[],
             )
             plan = asyncio.run(JobPlan.from_config(current))
             source = SourceJobConfig(action='diff', type='local', path=prepared)

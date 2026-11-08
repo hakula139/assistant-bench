@@ -3,24 +3,26 @@
 import os
 import subprocess
 import sys
+import tempfile
 from collections import Counter
 from collections.abc import Mapping
+from contextlib import nullcontext
 from datetime import UTC, datetime
 from pathlib import Path
-from textwrap import dedent
 from typing import Annotated, Any, assert_never
+from uuid import uuid4
 
 import typer
 from dotenv import find_dotenv, load_dotenv
 from harbor.models.job.config import JobConfig
+from pydantic import TypeAdapter
 from typer.core import TyperGroup
 
-from assistant_bench import canaries, collection, jobs, report
-from assistant_bench.arena import commands, local, votes
+from assistant_bench import canaries, collection, execution, jobs, report
+from assistant_bench.arena import publication, votes
 from assistant_bench.arena.commands import app as arena_app
 from assistant_bench.arena.d1 import connect
 from assistant_bench.arguments import (
-    FamilyArgument,
     FamilyArguments,
     SystemOptions,
     known_names,
@@ -32,7 +34,7 @@ from assistant_bench.catalog import (
     load_export,
     load_systems,
 )
-from assistant_bench.database import D1Error
+from assistant_bench.database import D1Error, Database
 from assistant_bench.families import (
     CheckersSettings,
     Family,
@@ -48,16 +50,25 @@ from assistant_bench.harnesses import fingerprint
 from assistant_bench.harnesses.endpoint import SDK_HEADERS_VAR
 from assistant_bench.messages import InputError, code, count_of
 from assistant_bench.outputs import Output, pool_conflicts, read_outputs, tests_pass
+from assistant_bench.runtime import (
+    RunContext,
+    implementation_revision,
+    materialize_implementation,
+    open_context,
+    open_sources,
+)
 from assistant_bench.spend import (
+    Accounting,
     Basis,
     Projection,
     Spend,
     budget_problem,
     project,
+    read_ledger,
     summarize,
     total_usd,
-    update_ledger,
 )
+from assistant_bench.state import State
 from assistant_bench.tasks import (
     author_vendors,
     changed_tasks,
@@ -118,6 +129,10 @@ def check(
             help='Check only this task in one named task family. Repeat for several.',
         ),
     ] = None,
+    private: Annotated[
+        bool,
+        typer.Option('--private', help='Also validate pinned private case sources.'),
+    ] = False,
 ) -> None:
     """Validate every family, or the named ones.
 
@@ -128,7 +143,25 @@ def check(
     if task_names and (not families or len(families) != 1):
         raise InputError('Select exactly one task family with `--task`.')
 
-    check_case_entries()
+    with (
+        tempfile.TemporaryDirectory(prefix='bench-check-') as temporary,
+        open_sources() if private else nullcontext() as sources,
+    ):
+        _check(
+            families,
+            task_names,
+            Path(temporary),
+            sources.root if sources is not None else None,
+        )
+
+
+def _check(
+    families: list[str] | None,
+    task_names: list[str] | None,
+    root: Path,
+    private_root: Path | None,
+) -> None:
+    check_case_entries(private_root=private_root)
     export, systems = _catalog()
     task_families: list[tuple[Family, list[Path]]] = []
     for family in map(load_family, families or family_names()):
@@ -139,10 +172,13 @@ def check(
                     f'Family `{family.name}` has cases. Select a task family with '
                     '`--task`.'
                 )
-            cases = count_of(len(_render_tasks(family)), 'valid case')
+            cases = count_of(
+                len(_render_tasks(family, root=root, private_root=private_root)),
+                'valid case',
+            )
             typer.echo(f'Family `{family.name}`: {cases}.')
             continue
-        tasks = _task_dirs(family, export)
+        tasks = _task_dirs(family, export, private_root=private_root)
         if task_names:
             known_names(
                 task_names,
@@ -155,7 +191,11 @@ def check(
 
     failed = False
     for family, tasks in task_families:
-        outputs = collection.read_trials(family, _run(jobs.check_job(family, tasks)))
+        outputs = collection.read_trials(
+            family,
+            _run(jobs.check_job(family, tasks, root=root)),
+            private_root=private_root,
+        )
         problems = _check_problems(tasks, outputs)
         for problem in problems:
             typer.echo(f'Family `{family.name}`: {problem}.', err=True)
@@ -179,18 +219,34 @@ def run(families: FamilyArguments = None, names: SystemOptions = None) -> None:
     run prints each family's projected cost, and one family it would take past its
     `budget_usd` refuses the whole run.
     """
-    export, systems = _catalog()
-    prepared = _prepare(families, names, export, systems)
+    with open_context() as context:
+        export, systems = _catalog(context.public_root)
+        _run_families(families, names, export, systems, context)
+
+
+def _run_families(
+    families: list[str] | None,
+    names: list[str] | None,
+    export: NixosConfigExport,
+    systems: dict[str, System],
+    context: RunContext,
+) -> None:
+    prepared = _prepare(families, names, export, systems, context)
     problems: list[str] = []
     for family, selected, job in prepared:
-        spent, projections = _projection(family, selected, job, systems)
+        spent, projections = _projection(family, selected, job, context)
         _echo_projection(family, spent, projections)
         if (problem := budget_problem(family, spent, projections)) is not None:
             problems.append(problem)
     if problems:
         raise InputError('\n'.join(problems))
 
-    probes = canaries.prepare((job for _, _, job in prepared), systems)
+    probes = canaries.prepare(
+        (job for _, _, job in prepared),
+        systems,
+        root=context.root,
+        source_root=context.public_root,
+    )
     for probe in probes:
         ceiling = probe.ceiling_usd
         cost = f'${ceiling:.4f}' if ceiling is not None else 'unknown'
@@ -199,13 +255,46 @@ def run(families: FamilyArguments = None, names: SystemOptions = None) -> None:
             f'`{probe.actual.max_output_tokens}`-token completion allowance '
             f'including reasoning. Full-context cost ceiling: {cost}.'
         )
-    canaries.run(probes)
+    canaries.run(probes, context)
 
-    for family, _, job in prepared:
+    for family, selected, job in prepared:
+        run_id = str(uuid4())
+        failure: BaseException | None = None
         try:
-            _run(job)
+            execution.execute(
+                context,
+                job,
+                {system.name: Accounting.of(system) for system in selected},
+                scope=family.name,
+                run_id=run_id,
+                expected_source_revision=context.source_revision(family),
+            )
+        except subprocess.CalledProcessError as error:
+            failure = error
+            typer.echo(
+                f'Harbor exited with code {error.returncode} for run `{run_id}`. '
+                'Inspect its cloud records and trial artifacts.',
+                err=True,
+            )
+            raise typer.Exit(error.returncode) from error
+        except BaseException as error:
+            failure = error
+            raise
         finally:
-            _echo_conflicts(family, _collect(family, systems, export))
+            try:
+                context.refresh_sources(family)
+                _echo_conflicts(
+                    family, _collect(family, systems, export, context).outputs
+                )
+            except Exception:
+                if failure is None:
+                    raise
+                typer.echo(
+                    f'Run `{run_id}` could not be collected. '
+                    f'Retry `bench collect {family.name}` '
+                    'after inspecting its cloud state.',
+                    err=True,
+                )
 
 
 @app.command()
@@ -214,132 +303,178 @@ def spend(families: FamilyArguments = None, names: SystemOptions = None) -> None
 
     Nothing runs, and no request reaches the endpoint.
     """
-    export, systems = _catalog()
-    for family, selected, job in _prepare(families, names, export, systems):
-        spent, projections = _projection(family, selected, job, systems)
-        for entry in spent:
-            typer.echo(_spend_line(entry))
-        _echo_projection(family, spent, projections)
-        if (problem := budget_problem(family, spent, projections)) is not None:
-            typer.echo(problem)
+    with open_context() as context:
+        export, systems = _catalog(context.public_root)
+        for family, selected, job in _prepare(
+            families, names, export, systems, context
+        ):
+            spent, projections = _projection(family, selected, job, context)
+            for entry in spent:
+                typer.echo(_spend_line(entry))
+            _echo_projection(family, spent, projections)
+            if (problem := budget_problem(family, spent, projections)) is not None:
+                typer.echo(problem)
+
+
+@app.command()
+def reset_canary(system: str) -> None:
+    """Clear baseline contexts and preserve the system's probe and spend history."""
+    with connect('private') as database:
+        count = State(database).reset_baseline(system)
+    typer.echo(
+        f'System `{system}`: cleared {count_of(count, "canary baseline context")}.'
+    )
 
 
 @app.command()
 def collect(families: FamilyArguments = None) -> None:
     """Collect the trials of every family with jobs, or of the named ones.
 
-    The outputs go to outputs/<family>.jsonl in the data directory.
+    The outputs form an immutable generation in private cloud state.
     """
-    names = families if families is not None else _families_with_jobs()
-    if not names:
-        typer.echo('No family has jobs yet. Run `uv run bench run` first.')
-        return
-
-    export, systems = _catalog()
-    for name in names:
-        selected = load_family(name)
-        _echo_conflicts(selected, _collect(selected, systems, export))
-
-
-@app.command()
-def serve() -> None:
-    """Vote locally on cases that production does not publish."""
-    commands.serve()
+    with open_context() as context:
+        names = families if families is not None else _families_with_jobs(context)
+        if not names:
+            typer.echo('No family has jobs yet. Run `uv run bench run` first.')
+            return
+        export, systems = _catalog(context.public_root)
+        for name in names:
+            selected = load_family(name, root=context.public_root / 'families')
+            _echo_conflicts(
+                selected, _collect(selected, systems, export, context).outputs
+            )
 
 
 @app.command()
 def close(
-    family: FamilyArgument,
+    family: Annotated[str, typer.Argument(help='The family to close or replay.')],
     snapshot: Annotated[
-        Path | None,
+        str | None,
         typer.Option(
-            help='Close a saved vote snapshot instead of reading the store.',
-            exists=True,
-            dir_okay=False,
+            help='Replay this sealed cloud vote snapshot ID.',
         ),
     ] = None,
 ) -> None:
     """Close a round of the family and write its report.
 
-    A votes family takes the votes production can no longer undo, saves them to
-    votes/<family>/ in the data directory, and closes from that file. A tests
-    family aggregates its collected trials.
+    A voted round seals cloud vote cuts with their publication generations.
+    A tests family aggregates its collected trials and pinned source inputs.
     """
-    selected = load_family(family)
-    match selected.settings:
-        case VotesSettings():
-            closed = _close_votes(
-                selected,
-                _take_snapshot(selected) if snapshot is None else snapshot,
-            )
-        case TaskTestsSettings() | CheckersSettings():
-            if snapshot is not None:
-                raise InputError(
-                    f'Family `{family}` is scored by {selected.settings.scorer}, '
-                    'so it has no votes.'
-                )
-            closed = _close_tests(selected)
-        case _:
-            assert_never(selected.settings)
+    if snapshot is not None:
+        closed = _close_votes(family, snapshot)
+    else:
+        known_names([family], family_names(), 'No family named')
+        selected = load_family(family)
+        match selected.settings:
+            case VotesSettings():
+                closed = _close_votes(family, _take_snapshot(selected))
+            case TaskTestsSettings() | CheckersSettings():
+                closed = _close_tests(selected)
+            case _:
+                assert_never(selected.settings)
 
     typer.echo(f'Report written to `{report.write_report(closed)}`.')
 
 
-def _take_snapshot(family: Family) -> Path:
-    """Save the family's available store cuts at one closing timestamp."""
+def _take_snapshot(family: Family) -> str:
+    """Seal independently captured stores and their exact collection mappings."""
+    revision = implementation_revision()
+    with tempfile.TemporaryDirectory(prefix='bench-closing-') as temporary:
+        root = Path(temporary) / 'public'
+        materialize_implementation(revision, root)
+        selected = load_family(family.name, root=root / 'families')
+        return _capture_snapshot(selected, revision)
+
+
+def _capture_snapshot(family: Family, revision: str) -> str:
     assert isinstance(family.settings, VotesSettings)
     taken_at = datetime.now(UTC)
-    production = None
-    local_cut = None
-    with local.lock():
+    with connect('private') as database:
+        production = None
         if family.settings.public_voting:
-            with connect('production') as database:
-                production = votes.read_cut(database, family.name, taken_at)
-        if local.exists():
-            with local.database() as database:
-                local_cut = votes.read_cut(database, family.name, taken_at)
-
-    if production is None and local_cut is None:
-        raise InputError(
-            f'Family `{family.name}` has no active voting publication. '
-            'Publish production cases or run `uv run bench serve` first.'
+            with connect('production') as public_database:
+                production = _pin_cut(
+                    database, votes.read_cut(public_database, family.name, taken_at)
+                )
+        private = _pin_cut(database, votes.read_cut(database, family.name, taken_at))
+        if production is None and private is None:
+            raise InputError(
+                f'Family `{family.name}` has no active voting publication. '
+                'Prepare and publish a production or private voting round first.'
+            )
+        identity = votes.save_snapshot(
+            database,
+            votes.Snapshot(
+                family=family.name,
+                taken_at=taken_at,
+                closed_at=taken_at,
+                category_order=tuple(family.settings.categories),
+                closing_revision=revision,
+                production=production,
+                private=private,
+            ),
         )
+    typer.echo(f'Votes sealed as snapshot `{identity}`.')
+    return identity
 
-    path = votes.write_snapshot(
-        votes.Snapshot(
-            family=family.name,
-            taken_at=taken_at,
-            production=production,
-            local=local_cut,
+
+def _pin_cut(database: Database, cut: votes.Cut | None) -> votes.Cut | None:
+    if cut is None:
+        return None
+    prepared = publication.preparation(database, cut.inventory.id)
+    return cut.model_copy(
+        update={'output_generation': prepared.collection_id if prepared else None}
+    )
+
+
+def _close_votes(family: str, identity: str) -> report.Report:
+    with connect('private') as database:
+        snapshot = votes.read_snapshot(database, identity)
+        if snapshot.family != family:
+            raise InputError('The saved vote snapshot belongs to a different family.')
+        state = State(database)
+        outputs: dict[publication.VotingTarget, list[Output]] = {}
+        for target, cut in snapshot.cuts():
+            outputs[target] = (
+                read_outputs(
+                    family,
+                    state,
+                    generation=state.collection_generation(cut.output_generation),
+                )
+                if cut.output_generation is not None
+                else []
+            )
+        return report.close_votes(
+            votes.voting_input(snapshot, outputs),
+            snapshot.closed_at,
+            fingerprints=votes.fingerprints(snapshot),
+            system_names=votes.system_names(snapshot),
         )
-    )
-    typer.echo(f'Votes saved to `{path}`.')
-    return path
-
-
-def _close_votes(family: Family, path: Path) -> report.Report:
-    snapshot = votes.read_snapshot(path)
-    return report.close_votes(
-        votes.voting_input(snapshot, family, read_outputs(family.name)),
-        datetime.now(UTC),
-        fingerprints=votes.fingerprints(snapshot),
-        system_names=votes.system_names(snapshot),
-    )
 
 
 def _close_tests(family: Family) -> report.Report:
-    export, systems = _catalog()
-    _collect(family, systems, export)
-    close_round = (
-        report.close_checkers
-        if isinstance(family.settings, CheckersSettings)
-        else report.close_tests
-    )
-    return close_round(
-        family,
-        datetime.now(UTC),
-        system_names={name: system.display_name for name, system in systems.items()},
-    )
+    with open_context() as context:
+        family = load_family(family.name, root=context.public_root / 'families')
+        export, systems = _catalog(context.public_root)
+        collected = _collect(family, systems, export, context)
+        sources = context.closing_sources(collected.generation)
+        metadata = context.state.collection(collected.generation)
+        if metadata.system_names_json is None:
+            raise InputError('The collection has no frozen public system names.')
+        names = TypeAdapter(dict[str, str]).validate_json(metadata.system_names_json)
+        generation = context.state.collection_generation(collected.generation)
+        close_round = (
+            report.close_checkers
+            if isinstance(sources.family.settings, CheckersSettings)
+            else report.close_tests
+        )
+        return close_round(
+            sources.family,
+            sources.cases,
+            read_outputs(family.name, context.state, generation=generation),
+            datetime.now(UTC),
+            system_names=names,
+        )
 
 
 @app.command()
@@ -359,53 +494,34 @@ def fingerprints() -> None:
 # ── Helpers ──
 
 
-def _catalog() -> tuple[NixosConfigExport, dict[str, System]]:
+def _catalog(root: Path | None = None) -> tuple[NixosConfigExport, dict[str, System]]:
     export = load_export()
-    return export, load_systems(export)
+    return export, load_systems(
+        export, root=root
+    ) if root is not None else load_systems(export)
 
 
-def _render_tasks(family: Family) -> list[Path]:
-    """Render a case family's tasks, refusing any that would abort its job."""
-    tasks = render_tasks(family, load_cases(family))
-    changed = changed_tasks(family, tasks)
-    if changed:
-        raise InputError(
-            f'Family `{family.name}` has cases whose rendered task changed under a '
-            f'version a trial recorded: {code([case for case, _ in changed])}. A '
-            'Harbor upgrade that changes a `task.toml` default does this, and '
-            "Harbor aborts the job until the family's earlier job directories "
-            f'are removed, as `{HARBOR_DOC}` describes.'
-        )
-    return tasks
+def _render_tasks(
+    family: Family, *, root: Path, private_root: Path | None = None
+) -> list[Path]:
+    """Render a case family's tasks under this command's temporary root."""
+    return render_tasks(
+        family, load_cases(family, private_root=private_root), root=root
+    )
 
 
-def _task_dirs(family: Family, export: NixosConfigExport) -> list[Path]:
+def _task_dirs(
+    family: Family, export: NixosConfigExport, *, private_root: Path | None = None
+) -> list[Path]:
     """Return a task family's task directories once each is fit to run."""
-    tasks = [case_task(family, case.id) for case in load_cases(family)]
-    check_tasks(family, tasks)
+    tasks = [
+        case_task(family, case.id, private_root=private_root)
+        for case in load_cases(family, private_root=private_root)
+    ]
+    check_tasks(family, tasks, private_root=private_root)
     if family.settings.systems:
-        author_vendors(family, tasks, export)
+        author_vendors(family, tasks, export, private_root=private_root)
 
-    changed = changed_tasks(family, tasks)
-    if changed:
-        detail = '\n'.join(
-            f'Task `{task}` changed since a trial ran it at version `{version}`.'
-            for task, version in changed
-        )
-        raise InputError(
-            dedent(
-                """
-                Family `{family}` has tasks to bump:
-                {detail}
-                Bump each task's `[task] version`: the patch for a change no trial
-                depends on, such as its solution, the minor for a change to `tests/`
-                alone, which regrades its trials, or the major for anything the agent
-                sees, which reruns them.
-                """
-            )
-            .strip()
-            .format(family=family.name, detail=detail)
-        )
     return tasks
 
 
@@ -464,8 +580,12 @@ def _named_systems(
     return [system for system in systems if system.name in names]
 
 
-def _families_with_jobs() -> list[str]:
-    return [name for name in family_names() if jobs.has_jobs(load_family(name))]
+def _families_with_jobs(context: RunContext) -> list[str]:
+    return [
+        name
+        for name in family_names(root=context.public_root / 'families')
+        if context.state.artifact_generation(name).artifacts
+    ]
 
 
 def _prepare(
@@ -473,22 +593,53 @@ def _prepare(
     names: list[str] | None,
     export: NixosConfigExport,
     systems: Mapping[str, System],
+    context: RunContext,
 ) -> list[tuple[Family, list[System], JobConfig]]:
     """Return each family to run with its systems and its job."""
     prepared: list[tuple[Family, list[System], JobConfig]] = []
-    for family, selected in _run_targets(families, names, systems):
+    check_case_entries(
+        private_root=context.private_root,
+        families_root=context.public_root / 'families',
+    )
+    for family, selected in _run_targets(
+        families, names, systems, root=context.public_root / 'families'
+    ):
         if not selected:
             raise InputError(
                 f'Family `{family.name}` lists no systems. Add them to `systems` in '
                 f'`families/{family.name}/family.toml`.'
             )
-        _refuse_drift(family, selected)
+        _refuse_drift(family, selected, context)
         tasks = (
-            _render_tasks(family)
+            _render_tasks(family, root=context.root, private_root=context.private_root)
             if family.source == 'cases'
-            else _task_dirs(family, export)
+            else _task_dirs(family, export, private_root=context.private_root)
         )
-        prepared.append((family, selected, jobs.job(family, selected, tasks)))
+        sources = context.sources(family)
+        if changed := changed_tasks(family, tasks, sources):
+            raise InputError(
+                '\n'.join(
+                    [
+                        f'Family `{family.name}` has tasks to bump:',
+                        *(
+                            f'Task `{task}` changed since a trial ran it '
+                            f'at version `{version}`.'
+                            for task, version in changed
+                        ),
+                        "Bump each task's `[task] version`: the patch for a change "
+                        'no trial\ndepends on, such as its solution, the minor for '
+                        'a change to `tests/`\n'
+                        'and the major for a change to inputs the agent sees.',
+                    ]
+                )
+            )
+        prepared.append(
+            (
+                family,
+                selected,
+                jobs.job(family, selected, tasks, root=context.root, sources=sources),
+            )
+        )
     return prepared
 
 
@@ -496,12 +647,14 @@ def _run_targets(
     families: list[str] | None,
     names: list[str] | None,
     systems: Mapping[str, System],
+    *,
+    root: Path | None = None,
 ) -> list[tuple[Family, list[System]]]:
     """Return each family to run with the systems to send it."""
     if families is not None:
         targets: list[tuple[Family, list[System]]] = []
         for name in families:
-            family = load_family(name)
+            family = load_family(name, root=root)
             listed = _family_systems(family, systems)
             targets.append(
                 (family, _named_systems(family, listed, names) if names else listed)
@@ -509,7 +662,9 @@ def _run_targets(
         return targets
 
     every = [
-        family for family in map(load_family, family_names()) if family.settings.systems
+        family
+        for name in family_names(root=root)
+        if (family := load_family(name, root=root)).settings.systems
     ]
 
     if names is None:
@@ -543,9 +698,11 @@ def _run_targets(
     return targets
 
 
-def _refuse_drift(family: Family, systems: list[System]) -> None:
-    drifted = jobs.drifted_systems(family, systems)
-    frozen = report.reported_fingerprints(family.name)
+def _refuse_drift(family: Family, systems: list[System], context: RunContext) -> None:
+    drifted = jobs.drifted_systems(family, systems, context.sources(family))
+    frozen = report.reported_fingerprints(
+        family.name, root=context.public_root / 'reports'
+    )
     moved = _moved(frozen, systems)
     if not drifted and not moved:
         return
@@ -568,8 +725,7 @@ def _refuse_drift(family: Family, systems: list[System]) -> None:
         )
     if rerun:
         lines.append(
-            f'Delete the stale trials of {code(rerun)} under `jobs/{family.name}/` '
-            'in the data directory before the next run.'
+            f'Give the changed systems {code(rerun)} new names before the next run.'
         )
     raise InputError('\n'.join(lines))
 
@@ -595,9 +751,12 @@ def _moved_line(family: str, name: str, recorded: str, current: str) -> str:
 
 
 def _collect(
-    family: Family, systems: dict[str, System], export: NixosConfigExport
-) -> list[Output]:
-    collected = collection.collect(family, systems)
+    family: Family,
+    systems: dict[str, System],
+    export: NixosConfigExport,
+    context: RunContext,
+) -> collection.Collection:
+    collected = collection.collect(family, systems, context)
     outputs = collected.outputs
     errors = Counter(output.error for output in outputs if output.error)
     typer.echo(
@@ -631,7 +790,13 @@ def _collect(
         typer.echo(f'No system solved {code(unsolved)}.')
 
     if family.source == 'tasks' and family.settings.systems:
-        _author_rates(family, outputs, _family_systems(family, systems), export)
+        _author_rates(
+            family,
+            outputs,
+            _family_systems(family, systems),
+            export,
+            private_root=context.private_root,
+        )
 
     versions = sorted(
         {output.harness_version for output in outputs if output.harness_version}
@@ -639,7 +804,7 @@ def _collect(
     if len(versions) > 1:
         typer.echo(f'The outputs span Harbor versions {code(versions)}.')
 
-    return outputs
+    return collected
 
 
 def _echo_conflicts(family: Family, outputs: list[Output]) -> None:
@@ -681,9 +846,9 @@ def _projection(
     family: Family,
     selected: list[System],
     job: JobConfig,
-    systems: Mapping[str, System],
+    context: RunContext,
 ) -> tuple[list[Spend], list[Projection]]:
-    spent = summarize(update_ledger(family, systems))
+    spent = summarize(read_ledger(family.name, context.state))
     return spent, project(jobs.pending_trials(job), spent, selected)
 
 
@@ -728,9 +893,14 @@ def _author_rates(
     outputs: list[Output],
     systems: list[System],
     export: NixosConfigExport,
+    *,
+    private_root: Path,
 ) -> None:
-    tasks = [case_task(family, case.id) for case in load_cases(family)]
-    vendors = author_vendors(family, tasks, export)
+    tasks = [
+        case_task(family, case.id, private_root=private_root)
+        for case in load_cases(family, private_root=private_root)
+    ]
+    vendors = author_vendors(family, tasks, export, private_root=private_root)
 
     for system in systems:
         rates: list[str] = []

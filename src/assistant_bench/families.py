@@ -16,7 +16,7 @@ from pydantic import (
 )
 
 from assistant_bench.messages import InputError, code, error_lines, validated_toml
-from assistant_bench.paths import FAMILIES_DIR, data_dir
+from assistant_bench.paths import FAMILIES_DIR
 
 
 # ── Names and Votes ──
@@ -264,6 +264,9 @@ class Family(BaseModel):
     name: str
     source: Literal['cases', 'tasks']
     settings: Settings
+    source_root: Path = Field(
+        default_factory=lambda: FAMILIES_DIR, exclude=True, repr=False
+    )
 
 
 class Case(BaseModel):
@@ -325,12 +328,13 @@ _TASK_MANIFEST = TypeAdapter(_TaskManifest)
 # ── Loading ──
 
 
-def family_names() -> list[str]:
+def family_names(*, root: Path | None = None) -> list[str]:
     """Return the name of every directory under `families/` holding a `family.toml`."""
-    return sorted(path.parent.name for path in FAMILIES_DIR.glob('*/family.toml'))
+    directory = FAMILIES_DIR if root is None else root
+    return sorted(path.parent.name for path in directory.glob('*/family.toml'))
 
 
-def load_family(name: str) -> Family:
+def load_family(name: str, *, root: Path | None = None) -> Family:
     """Read `family.toml` and infer where the family's tasks come from.
 
     Raises
@@ -341,10 +345,12 @@ def load_family(name: str) -> Family:
         public family's name does not start with its aspect, or the settings do
         not fit the source.
     """
-    directory = FAMILIES_DIR / name
+    source_root = FAMILIES_DIR if root is None else root
+    directory = source_root / name
     if not (directory / 'family.toml').is_file():
         raise InputError(
-            f'No family named `{name}`. Choose among {code(family_names())}.'
+            f'No family named `{name}`. '
+            f'Choose among {code(family_names(root=source_root))}.'
         )
 
     has_cases = (directory / 'cases.toml').is_file()
@@ -371,7 +377,10 @@ def load_family(name: str) -> Family:
             )
 
     family = Family(
-        name=name, source='cases' if has_cases else 'tasks', settings=settings
+        name=name,
+        source='cases' if has_cases else 'tasks',
+        settings=settings,
+        source_root=source_root,
     )
 
     _check_source_settings(family)
@@ -425,8 +434,8 @@ def _check_source_settings(family: Family) -> None:
         )
 
 
-def load_cases(family: Family) -> list[Case]:
-    """Return the committed cases followed by the local ones, if the family has any.
+def load_cases(family: Family, *, private_root: Path | None = None) -> list[Case]:
+    """Return committed cases followed by explicitly selected private sources.
 
     A task family's cases are its task directories, each taking its ID from the
     directory name and its category, source, and instruction from the task.
@@ -440,7 +449,9 @@ def load_cases(family: Family) -> list[Case]:
         from the family's `categories`.
     """
     entries = (
-        _task_entries(family) if family.source == 'tasks' else _case_entries(family)
+        _task_entries(family, private_root)
+        if family.source == 'tasks'
+        else _case_entries(family, private_root)
     )
     cases: dict[str, Case] = {}
     locations: dict[str, str] = {}
@@ -480,8 +491,10 @@ def _hidden(path: Path) -> bool:
     return path.name.startswith('.')
 
 
-def check_case_entries() -> None:
-    """Refuse a visible entry under the data cases directory that no family reads.
+def check_case_entries(
+    *, private_root: Path | None = None, families_root: Path | None = None
+) -> None:
+    """Refuse a visible private source entry that no family reads.
 
     A case family reads `cases/<family>.toml` and a task family each directory
     under `cases/<family>/`. Hidden entries are ignored, so backups can remain.
@@ -491,10 +504,14 @@ def check_case_entries() -> None:
     InputError
         A visible entry is one no family reads.
     """
-    unread = _unread_case_entries()
+    unread = (
+        _unread_case_entries(private_root, families_root)
+        if private_root is not None
+        else []
+    )
     if unread:
         raise InputError(
-            f"No family reads {code(unread)} under the data directory's "
+            f'No family reads {code(unread)} under the private source '
             '`cases/`. A `cases.toml` family reads `cases/<family>.toml` and a '
             '`tasks/` family reads `cases/<family>/<task>/`, so move each entry '
             'to one of those paths, out of `cases/`, or under a hidden directory '
@@ -502,15 +519,15 @@ def check_case_entries() -> None:
         )
 
 
-def _unread_case_entries() -> list[Path]:
+def _unread_case_entries(root: Path, families_root: Path | None) -> list[Path]:
     """Return each unread entry, listing a task family's loose files one by one."""
-    root = data_dir() / 'cases'
     if not root.is_dir():
         return []
 
-    names = family_names()
+    directory = FAMILIES_DIR if families_root is None else families_root
+    names = family_names(root=directory)
     case_families = {
-        name for name in names if (FAMILIES_DIR / name / 'cases.toml').is_file()
+        name for name in names if (directory / name / 'cases.toml').is_file()
     }
     task_families = set(names) - case_families
 
@@ -532,11 +549,12 @@ def _unread_case_entries() -> list[Path]:
     return unread
 
 
-def _case_entries(family: Family) -> Iterator[tuple[str, Case]]:
-    paths = [
-        FAMILIES_DIR / family.name / 'cases.toml',
-        data_dir() / 'cases' / f'{family.name}.toml',
-    ]
+def _case_entries(
+    family: Family, private_root: Path | None
+) -> Iterator[tuple[str, Case]]:
+    paths = [family.source_root / family.name / 'cases.toml']
+    if private_root is not None:
+        paths.append(private_root / f'{family.name}.toml')
 
     for path in paths:
         if not path.exists():
@@ -548,8 +566,10 @@ def _case_entries(family: Family) -> Iterator[tuple[str, Case]]:
             yield f'{path}:cases.{index}', case
 
 
-def _task_entries(family: Family) -> Iterator[tuple[str, Case]]:
-    for root, prefix in _task_roots(family):
+def _task_entries(
+    family: Family, private_root: Path | None
+) -> Iterator[tuple[str, Case]]:
+    for root, prefix in _task_roots(family, private_root):
         if not root.is_dir():
             continue
         for directory in sorted(
@@ -602,31 +622,30 @@ def _task_case(family: Family, directory: Path, location: str) -> Case:
 # ── Task Paths ──
 
 
-def _task_roots(family: Family) -> list[tuple[Path, str]]:
+def _task_roots(family: Family, private_root: Path | None) -> list[tuple[Path, str]]:
     """Return each root of a task family's tasks and the label it reports with."""
-    return [
-        (FAMILIES_DIR / family.name / 'tasks', 'tasks'),
-        (data_dir() / 'cases' / family.name, f'cases/{family.name}'),
-    ]
+    roots = [(family.source_root / family.name / 'tasks', 'tasks')]
+    if private_root is not None:
+        roots.append((private_root / family.name, f'cases/{family.name}'))
+    return roots
 
 
-def task_location(family: Family, task: Path) -> str:
+def task_location(
+    family: Family, task: Path, *, private_root: Path | None = None
+) -> str:
     """Return the label that a task's own directory reports with."""
     return next(
         f'{prefix}/{task.name}'
-        for root, prefix in _task_roots(family)
+        for root, prefix in _task_roots(family, private_root)
         if task.parent == root
     )
 
 
-def tasks_dir(family: Family) -> Path:
-    """Return the directory that `tasks.render_tasks` installs the family's tasks in."""
-    return data_dir() / 'tasks' / family.name
-
-
-def case_task(family: Family, case_id: str) -> Path:
-    """Return a task family's own directory for a task, committed or local."""
-    (committed, _), (local, _) = _task_roots(family)
-    if (committed / case_id).is_dir():
+def case_task(
+    family: Family, case_id: str, *, private_root: Path | None = None
+) -> Path:
+    """Return a task's committed or explicitly selected private source directory."""
+    committed = family.source_root / family.name / 'tasks'
+    if (committed / case_id).is_dir() or private_root is None:
         return committed / case_id
-    return local / case_id
+    return private_root / family.name / case_id

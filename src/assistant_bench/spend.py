@@ -3,17 +3,15 @@
 from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Literal, Self
+from typing import Literal, Self, cast
 
 from pydantic import BaseModel, ConfigDict
 
 from assistant_bench.catalog import Price, System
 from assistant_bench.families import Family
-from assistant_bench.harnesses.usage import ATTEMPTS_FILE, Attempt, MeasuredUsage
-from assistant_bench.jobs import jobs_dir
-from assistant_bench.messages import InputError
-from assistant_bench.paths import data_dir
+from assistant_bench.harnesses.accounting import RequestReceipt
+from assistant_bench.harnesses.usage import Attempt, MeasuredUsage
+from assistant_bench.state import State
 
 
 # ── Ledger ──
@@ -24,49 +22,15 @@ class Entry(Attempt):
 
     job: str
     price: Price | None
-    """The price frozen when the attempt entered the ledger or its probe started."""
+    """The price frozen before the attempt's claim admitted requests."""
 
     ceiling_usd: float | None
     """The cost of one response at a full context window and completion allowance,
     at `price` and its dearest input rate, `None` when unpriced."""
 
-    @classmethod
-    def of(cls, attempt: Attempt, job: str, system: System | None) -> Self:
-        """Return the attempt priced as the system's catalog entry prices it now."""
-        price = system.price if system else None
-        ceiling = (
-            (
-                system.context_window * max(price.input, price.cache_write or 0)
-                + system.max_output_tokens * price.output
-            )
-            / 1_000_000
-            if system and price
-            else None
-        )
-        return cls(**attempt.model_dump(), job=job, price=price, ceiling_usd=ceiling)
 
-
-def update_ledger(family: Family, systems: Mapping[str, System]) -> list[Entry]:
-    """Add each job's unrecorded attempts to the family's ledger, and return it.
-
-    The ledger is the data directory's `spend/<family>.jsonl`, so the spend of a
-    deleted trial or job stays recorded. An attempt is keyed by its job, trial,
-    and start time, and the ledger holds each key once. Each added attempt keeps
-    its system's current price, so a later price change or a system leaving the
-    catalog leaves its cost as it was.
-    """
-    return _update_ledger(
-        _ledger_file(family.name),
-        (
-            entry
-            for path in sorted(jobs_dir(family).glob(f'*/{ATTEMPTS_FILE}'))
-            for entry in _read_attempts(path, systems)
-        ),
-    )
-
-
-class CanaryAccounting(BaseModel):
-    """The immutable price and actual response ceiling saved before a probe starts."""
+class Accounting(BaseModel):
+    """The price and response ceiling frozen before a paid attempt is admitted."""
 
     model_config = ConfigDict(extra='forbid', frozen=True)
 
@@ -74,96 +38,67 @@ class CanaryAccounting(BaseModel):
     price: Price | None
     ceiling_usd: float | None
 
+    @classmethod
+    def of(cls, system: System) -> Self:
+        price = system.price
+        return cls(
+            system=system.name,
+            price=price,
+            ceiling_usd=(
+                (
+                    system.context_window * max(price.input, price.cache_write or 0)
+                    + system.max_output_tokens * price.output
+                )
+                / 1_000_000
+                if price is not None
+                else None
+            ),
+        )
 
-def write_canary_accounting(
-    job: Path, system: System, ceiling_usd: float | None
-) -> None:
-    """Create the probe's accounting snapshot without creating its Harbor job."""
-    snapshot = CanaryAccounting(
-        system=system.name, price=system.price, ceiling_usd=ceiling_usd
-    )
-    job.parent.mkdir(parents=True, exist_ok=True)
-    with _canary_accounting_file(job).open('x') as file:
-        file.write(snapshot.model_dump_json() + '\n')
+
+@dataclass(frozen=True)
+class PendingAttempt:
+    """Admitted responses without a final Entry, including unknown usage."""
+
+    job: str
+    trial: str
+    system: str
+    price: Price | None
+    ceiling_usd: float | None
+    responses: list[MeasuredUsage | None]
 
 
-def update_canary_ledger() -> list[Entry]:
-    """Reconcile every retained probe attempt at its immutable accounting snapshot."""
-    return _update_ledger(
-        _ledger_file('canaries'),
-        (
-            entry
-            for path in sorted(
-                (data_dir() / 'canaries' / 'jobs').glob(f'*/{ATTEMPTS_FILE}')
+type AccountedAttempt = Entry | PendingAttempt
+
+
+def read_ledger(scope: str, state: State) -> list[AccountedAttempt]:
+    """Price one atomic snapshot of final entries and uncovered admissions."""
+    entries: list[AccountedAttempt] = []
+    pending: dict[str, PendingAttempt] = {}
+    for row in state.accounting(scope):
+        if row['kind'] == 'entry':
+            entries.append(Entry.model_validate_json(cast(str, row['entry_json'])))
+            continue
+        attempt_id = cast(str, row['attempt_id'])
+        if attempt_id not in pending:
+            accounting = Accounting.model_validate_json(
+                cast(str, row['accounting_json'])
             )
-            for entry in _read_canary_attempts(path)
-        ),
-    )
-
-
-def _update_ledger(path: Path, additions: Iterable[Entry]) -> list[Entry]:
-    entries = _unique(
-        [Entry.model_validate_json(line) for line in path.read_text().splitlines()]
-        if path.exists()
-        else []
-    )
-    seen = {_key(entry) for entry in entries}
-    added = [entry for entry in _unique(additions) if _key(entry) not in seen]
-    if added:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open('a') as file:
-            file.writelines(entry.model_dump_json() + '\n' for entry in added)
-
-    return entries + added
-
-
-def _ledger_file(family: str) -> Path:
-    return data_dir() / 'spend' / f'{family}.jsonl'
-
-
-def _read_attempts(path: Path, systems: Mapping[str, System]) -> list[Entry]:
-    attempts = [
-        Attempt.model_validate_json(line) for line in path.read_text().splitlines()
-    ]
-    return [
-        Entry.of(attempt, path.parent.name, systems.get(attempt.system))
-        for attempt in attempts
-    ]
-
-
-def _canary_accounting_file(job: Path) -> Path:
-    return job.parent / f'{job.name}.accounting.json'
-
-
-def _read_canary_attempts(path: Path) -> list[Entry]:
-    snapshot = _canary_accounting_file(path.parent)
-    if not snapshot.exists():
-        raise InputError(
-            'A canary accounting snapshot is missing. The run was refused.'
+            pending[attempt_id] = PendingAttempt(
+                job=cast(str, row['job']),
+                trial=cast(str, row['trial']),
+                system=accounting.system,
+                price=accounting.price,
+                ceiling_usd=accounting.ceiling_usd,
+                responses=[],
+            )
+        receipt = row['receipt_json']
+        pending[attempt_id].responses.append(
+            RequestReceipt.model_validate_json(cast(str, receipt)).usage
+            if receipt is not None
+            else None
         )
-    accounting = CanaryAccounting.model_validate_json(snapshot.read_text())
-    attempts = [
-        Attempt.model_validate_json(line) for line in path.read_text().splitlines()
-    ]
-    if any(attempt.system != accounting.system for attempt in attempts):
-        raise InputError('A canary accounting system differs. The run was refused.')
-    return [
-        Entry(
-            **attempt.model_dump(),
-            job=path.parent.name,
-            price=accounting.price,
-            ceiling_usd=accounting.ceiling_usd,
-        )
-        for attempt in attempts
-    ]
-
-
-def _unique(entries: Iterable[Entry]) -> list[Entry]:
-    return list({_key(entry): entry for entry in entries}.values())
-
-
-def _key(entry: Entry) -> tuple[str, str, str]:
-    return entry.job, entry.trial, entry.started_at.isoformat()
+    return entries + list(pending.values())
 
 
 # ── Summary ──
@@ -280,7 +215,7 @@ class Spend:
         return self.tokens.scaled(self.responses / self.measured / self.answered)
 
 
-def summarize(entries: Iterable[Entry]) -> list[Spend]:
+def summarize(entries: Iterable[AccountedAttempt]) -> list[Spend]:
     """Price each system's ledger entries at the prices they keep.
 
     A response has no known cost when its usage is invalid or its price cannot
@@ -292,7 +227,7 @@ def summarize(entries: Iterable[Entry]) -> list[Spend]:
     anywhere, it is counted at its ceiling, which the spend leaves out until a
     later run measures usage to impute from.
     """
-    by_system: defaultdict[str, list[Entry]] = defaultdict(list)
+    by_system: defaultdict[str, list[AccountedAttempt]] = defaultdict(list)
     for entry in entries:
         by_system[entry.system].append(entry)
 
@@ -308,7 +243,7 @@ def summarize(entries: Iterable[Entry]) -> list[Spend]:
     ]
 
 
-def _measured(entry: Entry) -> list[tuple[MeasuredUsage, float]]:
+def _measured(entry: AccountedAttempt) -> list[tuple[MeasuredUsage, float]]:
     """Return each measured response with its cost, zero when unpriced."""
     price = entry.price
     if price is None:
@@ -324,7 +259,7 @@ def _measured(entry: Entry) -> list[tuple[MeasuredUsage, float]]:
     ]
 
 
-def _rate(attempts: list[Entry]) -> Tokens | None:
+def _rate(attempts: list[AccountedAttempt]) -> Tokens | None:
     """Return the mean tokens per measured response, `None` without one."""
     measured = [usage for attempt in attempts for usage, _ in _measured(attempt)]
     if not measured:
@@ -333,7 +268,10 @@ def _rate(attempts: list[Entry]) -> Tokens | None:
 
 
 def _spend(
-    name: str, attempts: list[Entry], own: Tokens | None, others: list[Tokens]
+    name: str,
+    attempts: list[AccountedAttempt],
+    own: Tokens | None,
+    others: list[Tokens],
 ) -> Spend:
     measured: list[MeasuredUsage] = []
     known_usd = 0.0

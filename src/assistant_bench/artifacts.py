@@ -36,6 +36,25 @@ TRIAL_DIRECTORIES = ('agent', 'verifier', 'artifacts')
 GIT_MODES: tuple[str, ...] = ('100644', '100755', '120000')
 
 
+def audit_trial(root: Path, secrets: set[str]) -> None:
+    """Refuse known credentials in artifact bytes, paths and symlink targets."""
+    known = [value.encode() for value in secrets if value]
+    for path in root.rglob('*'):
+        if path.is_symlink():
+            content = os.fsencode(os.readlink(path))
+        elif path.is_file():
+            content = path.read_bytes()
+        elif path.is_dir():
+            content = b''
+        else:
+            continue
+        location = os.fsencode(path.relative_to(root))
+        if any(value in content or value in location for value in known):
+            raise InputError(
+                'A selected artifact contains a known credential. Publication refused.'
+            )
+
+
 # ── Models ──
 
 
@@ -78,6 +97,7 @@ class TrialManifest(_Model):
     trial_name: Component
     code_revision: Commit | None
     case_revision: Commit | None
+    directories: tuple[str, ...]
     files: tuple[FileEntry, ...]
 
     @property
@@ -93,6 +113,38 @@ class TrialManifest(_Model):
         paths = [entry.path for entry in self.files]
         if paths != sorted(set(paths)):
             raise ValueError('manifest files must be unique and sorted by path')
+        directories = set(self.directories)
+        if list(self.directories) != sorted(directories):
+            raise ValueError('manifest directories must be unique and sorted by path')
+        for directory in self.directories:
+            parts = _path_parts(directory)
+            if (
+                len(parts) < 3
+                or parts[:2] != ('job', self.trial_name)
+                or parts[2] not in TRIAL_DIRECTORIES
+            ):
+                raise ValueError(
+                    'manifest directories must belong to the selected trial'
+                )
+        file_paths = set(paths)
+        aliases: dict[str, str] = {}
+        for path in (*self.directories, *paths):
+            parts = _path_parts(path)
+            if path in directories and path in file_paths:
+                raise ValueError('a manifest path cannot be both a file and directory')
+            for index in range(1, len(parts) + 1):
+                ancestor = '/'.join(parts[:index])
+                if index < len(parts) and ancestor in file_paths:
+                    raise ValueError("a manifest file cannot be another path's parent")
+                if (
+                    3 <= index < len(parts)
+                    and parts[2] in TRIAL_DIRECTORIES
+                    and ancestor not in directories
+                ):
+                    raise ValueError('manifest directory parents must be listed')
+                previous = aliases.setdefault(ancestor.casefold(), ancestor)
+                if previous != ancestor:
+                    raise ValueError('manifest paths cannot contain case aliases')
         required = {
             'job/config.json',
             *(
@@ -104,19 +156,38 @@ class TrialManifest(_Model):
             raise ValueError(
                 'a trial needs its job config and trial config, lock, and result'
             )
-        seen: set[str] = set()
         for entry in self.files:
             parts = _path_parts(entry.path)
             if not _selected_path(parts, self.trial_name):
                 raise ValueError(
                     'manifest files must belong to the selected job and trial'
                 )
-            if any('/'.join(parts[:index]) in seen for index in range(1, len(parts))):
-                raise ValueError("a manifest file cannot be another file's parent")
             if entry.path in required and entry.mode == '120000':
                 raise ValueError('required trial records must be regular files')
-            seen.add(entry.path)
         return self
+
+
+@dataclass(frozen=True)
+class MaterializedTrial:
+    job: Path
+    manifest: TrialManifest
+
+
+def snapshot_trial(source_job_dir: Path, destination: Path, trial_name: str) -> None:
+    """Freeze the selected bytes and modes once into an empty scratch job tree."""
+    destination.mkdir(parents=True, exist_ok=False)
+    for directory in _selected_directories(source_job_dir, trial_name):
+        (destination / directory.removeprefix('job/')).mkdir(
+            parents=True, exist_ok=True
+        )
+    for entry, content in _selected_files(source_job_dir, trial_name):
+        path = destination / entry.path.removeprefix('job/')
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if entry.mode == '120000':
+            path.symlink_to(os.fsdecode(content))
+        else:
+            path.write_bytes(content)
+            path.chmod(0o755 if entry.mode == '100755' else 0o644)
 
 
 def build_manifest(
@@ -147,6 +218,7 @@ def build_manifest(
             trial_name=trial_name,
             code_revision=code_revision,
             case_revision=case_revision,
+            directories=tuple(_selected_directories(source_job_dir, trial_name)),
             files=tuple(
                 entry for entry, _ in _selected_files(source_job_dir, trial_name)
             ),
@@ -181,6 +253,19 @@ class ArtifactRepository:
             )
         self.repository_slug = repository_slug
 
+    def head(self) -> str:
+        """Resolve private remote `main` to an immutable source revision."""
+        repository = self._metadata()
+        output = _git(
+            Path.cwd(),
+            ['ls-remote', '--heads', '--', repository.ssh_url, 'refs/heads/main'],
+        ).stdout
+        if not output:
+            raise InputError('The private repository has no `main` source revision.')
+        revision = output.decode().split()[0]
+        _commit(revision)
+        return revision
+
     def source(self, revision: str, destination: Path) -> Path:
         """Restore only `cases/` from an immutable commit into an empty directory."""
         _commit(revision)
@@ -196,43 +281,58 @@ class ArtifactRepository:
             _restore(destination, entries)
         return destination / 'cases'
 
-    def publish_trial(
-        self,
-        run_id: str,
-        artifact_id: str,
-        source_job_dir: Path,
-        manifest: TrialManifest,
-    ) -> ArtifactRef:
-        """Publish an audited immutable trial and confirm it exists on remote `main`.
+    def publish_trials(
+        self, archives: Sequence[MaterializedTrial]
+    ) -> tuple[ArtifactRef, ...]:
+        """Publish audited trials in one commit and confirm every remote reference.
 
-        Repeated publication of the same files returns their original commit.
-        A competing writer is reconciled only by adding this trial's new path.
-        A returned reference never names an unconfirmed local commit.
+        Archives must name distinct immutable paths. Existing identical trials
+        retain their original commits. A competing writer is reconciled only by
+        appending missing paths, and no unconfirmed references are returned.
         """
-        if (run_id, artifact_id) != (manifest.run_id, manifest.artifact_id):
-            raise InputError('The publication identifiers do not match the manifest.')
-        selected = list(_selected_files(source_job_dir, manifest.trial_name))
-        if tuple(entry for entry, _ in selected) != manifest.files:
-            raise InputError(
-                'The selected trial files differ from their audited manifest.'
+        if not archives:
+            return ()
+        expected: dict[str, dict[str, tuple[GitMode, bytes]]] = {}
+        contents: dict[str, bytes] = {}
+        for archive in archives:
+            manifest = archive.manifest
+            if manifest.path in expected:
+                raise InputError('A publication batch must name distinct trial paths.')
+            selected = list(_selected_files(archive.job, manifest.trial_name))
+            if tuple(entry for entry, _ in selected) != manifest.files:
+                raise InputError(
+                    'The selected trial files differ from their audited manifest.'
+                )
+            if (
+                tuple(_selected_directories(archive.job, manifest.trial_name))
+                != manifest.directories
+            ):
+                raise InputError(
+                    'The selected trial directories differ from their audited manifest.'
+                )
+            content = manifest.content()
+            contents[manifest.path] = content
+            expected[manifest.path] = {
+                f'{manifest.path}/{entry.path}': (entry.mode, value)
+                for entry, value in selected
+            }
+            expected[manifest.path][f'{manifest.path}/manifest.json'] = (
+                '100644',
+                content,
             )
-        content = manifest.content()
-        digest = sha256(content).hexdigest()
         repository = self._metadata()
         with tempfile.TemporaryDirectory(prefix='bench-artifacts-') as temporary:
             clone = _clone(repository, Path(temporary))
             while True:
                 parent = _remote_head(clone)
+                references: dict[str, ArtifactRef] = {}
                 if parent is not None:
                     _git(clone, ['fetch', '--no-tags', 'origin', parent])
-                    existing = _tree_files(clone, parent, manifest.path)
-                    if existing:
-                        expected = {
-                            f'{manifest.path}/{entry.path}': (entry.mode, value)
-                            for entry, value in selected
-                        }
-                        expected[f'{manifest.path}/manifest.json'] = ('100644', content)
-                        if existing != expected:
+                    for path, files in expected.items():
+                        existing = _tree_files(clone, parent, path)
+                        if not existing:
+                            continue
+                        if existing != files:
                             raise InputError(
                                 'The trial path contains different immutable artifacts.'
                             )
@@ -245,17 +345,27 @@ class ArtifactRepository:
                                     '--format=%H',
                                     parent,
                                     '--',
-                                    manifest.path,
+                                    path,
                                 ],
                             )
                             .stdout.decode()
                             .strip()
                         )
-                        return ArtifactRef(
+                        references[path] = ArtifactRef(
                             commit_sha=commit,
-                            path=manifest.path,
-                            manifest_digest=digest,
+                            path=path,
+                            manifest_digest=sha256(contents[path]).hexdigest(),
                         )
+                missing = {
+                    path: files
+                    for path, files in expected.items()
+                    if path not in references
+                }
+                if not missing:
+                    self._confirm(clone, tuple(references.values()), contents)
+                    return tuple(
+                        references[archive.manifest.path] for archive in archives
+                    )
                 _git(
                     clone,
                     [
@@ -263,28 +373,36 @@ class ArtifactRepository:
                         'set',
                         '--cone',
                         '--skip-checks',
-                        manifest.path,
+                        *missing,
                     ],
                 )
                 if parent is not None:
                     _git(clone, ['switch', '--detach', parent])
                 else:
                     _git(clone, ['symbolic-ref', 'HEAD', 'refs/heads/main'])
-                ancestor = clone
-                for component in manifest.path.split('/')[:-1]:
-                    ancestor /= component
-                    if ancestor.is_symlink() or (
-                        ancestor.exists() and not ancestor.is_dir()
-                    ):
-                        raise InputError(
-                            'The trial path cannot traverse a tracked file or symlink.'
-                        )
-                trial_files: dict[str, tuple[GitMode, bytes]] = {
-                    entry.path: (entry.mode, value) for entry, value in selected
+                for path, files in missing.items():
+                    ancestor = clone
+                    for component in path.split('/')[:-1]:
+                        ancestor /= component
+                        if ancestor.is_symlink() or (
+                            ancestor.exists() and not ancestor.is_dir()
+                        ):
+                            raise InputError(
+                                'The trial path cannot traverse a tracked file '
+                                'or symlink.'
+                            )
+                    _restore(
+                        clone / path,
+                        {
+                            name.removeprefix(f'{path}/'): value
+                            for name, value in files.items()
+                        },
+                    )
+                staged = {
+                    name: value
+                    for files in missing.values()
+                    for name, value in files.items()
                 }
-                trial_files['manifest.json'] = ('100644', content)
-                _restore(clone / manifest.path, trial_files)
-                staged_paths = [f'{manifest.path}/{path}' for path in trial_files]
                 _git(
                     clone,
                     [
@@ -294,20 +412,17 @@ class ArtifactRepository:
                         '--pathspec-from-file=-',
                         '--pathspec-file-nul',
                     ],
-                    content=b''.join(
-                        os.fsencode(path) + b'\0' for path in staged_paths
-                    ),
+                    content=b''.join(os.fsencode(path) + b'\0' for path in staged),
                 )
-                _git(clone, ['commit', '-m', 'feat(artifacts): record immutable trial'])
+                _git(
+                    clone, ['commit', '-m', 'feat(artifacts): record immutable trials']
+                )
                 commit = _git(clone, ['rev-parse', 'HEAD']).stdout.decode().strip()
-                expected = {
-                    f'{manifest.path}/{path}': value
-                    for path, value in trial_files.items()
-                }
-                if _tree_files(clone, commit, manifest.path) != expected:
-                    raise InputError(
-                        'The artifact commit changed the audited trial files.'
-                    )
+                for path, files in missing.items():
+                    if _tree_files(clone, commit, path) != files:
+                        raise InputError(
+                            'The artifact commit changed the audited trial files.'
+                        )
                 changed = _git(
                     clone,
                     [
@@ -321,10 +436,10 @@ class ArtifactRepository:
                     ],
                 ).stdout
                 if {os.fsdecode(path) for path in changed.split(b'\0') if path} != set(
-                    expected
+                    staged
                 ):
                     raise InputError(
-                        'The artifact commit changed paths outside this trial.'
+                        'The artifact commit changed paths outside this batch.'
                     )
                 self._metadata()
                 pushed = _git(
@@ -336,12 +451,18 @@ class ArtifactRepository:
                     raise InputError(
                         'The immutable trial could not be pushed to the repository.'
                     )
-                self._confirm(clone, commit, manifest, content)
-                return ArtifactRef(
-                    commit_sha=commit, path=manifest.path, manifest_digest=digest
-                )
+                for path in missing:
+                    references[path] = ArtifactRef(
+                        commit_sha=commit,
+                        path=path,
+                        manifest_digest=sha256(contents[path]).hexdigest(),
+                    )
+                self._confirm(clone, tuple(references.values()), contents)
+                return tuple(references[archive.manifest.path] for archive in archives)
 
-    def materialize(self, reference: ArtifactRef, destination: Path) -> Path:
+    def materialize(
+        self, reference: ArtifactRef, destination: Path
+    ) -> MaterializedTrial:
         """Restore verified raw job files into an empty private directory.
 
         No JSON paths are rewritten. The execution layer prepares Harbor's
@@ -381,8 +502,8 @@ class ArtifactRepository:
                         'An artifact file differs from its recorded mode or digest.'
                     )
                 restored[entry.path] = (mode, value)
-            _restore(destination, restored)
-        return destination / 'job'
+            _restore(destination, restored, directories=manifest.directories)
+        return MaterializedTrial(job=destination / 'job', manifest=manifest)
 
     def _metadata(self) -> _Repository:
         response = _command(['gh', 'api', f'repos/{self.repository_slug}'])
@@ -406,24 +527,30 @@ class ArtifactRepository:
         return repository
 
     def _confirm(
-        self, clone: Path, commit: str, manifest: TrialManifest, content: bytes
+        self,
+        clone: Path,
+        references: Sequence[ArtifactRef],
+        contents: Mapping[str, bytes],
     ) -> None:
         head = _remote_head(clone)
         if head is None:
-            raise InputError('The published trial is missing from remote `main`.')
+            raise InputError('The published trials are missing from remote `main`.')
         _git(clone, ['fetch', '--no-tags', 'origin', head])
-        ancestor = _git(
-            clone, ['merge-base', '--is-ancestor', commit, head], check=False
-        )
-        if ancestor.returncode:
-            raise InputError('The published trial is not retained by remote `main`.')
-        confirmed = _git(
-            clone, ['show', f'{commit}:{manifest.path}/manifest.json']
-        ).stdout
-        if confirmed != content:
-            raise InputError(
-                'The remote trial manifest differs from the published manifest.'
+        for commit in {reference.commit_sha for reference in references}:
+            ancestor = _git(
+                clone, ['merge-base', '--is-ancestor', commit, head], check=False
             )
+            if ancestor.returncode:
+                raise InputError('A published trial is not retained by remote `main`.')
+        for reference in references:
+            confirmed = _git(
+                clone,
+                ['show', f'{reference.commit_sha}:{reference.path}/manifest.json'],
+            ).stdout
+            if confirmed != contents[reference.path]:
+                raise InputError(
+                    'The remote trial manifest differs from the published manifest.'
+                )
 
 
 # ── File Selection ──
@@ -458,6 +585,35 @@ def _selected_path(parts: tuple[str, ...], trial_name: str) -> bool:
 
 
 def _selected_files(root: Path, trial_name: str) -> Iterator[tuple[FileEntry, bytes]]:
+    for path in _selected_paths(root, trial_name):
+        mode = path.lstat().st_mode
+        if stat.S_ISDIR(mode):
+            continue
+        if stat.S_ISLNK(mode):
+            git_mode: GitMode = '120000'
+            content = os.fsencode(os.readlink(path))
+        elif stat.S_ISREG(mode):
+            git_mode = '100755' if mode & stat.S_IXUSR else '100644'
+            content = path.read_bytes()
+        else:
+            raise InputError('Trial artifacts must be regular files or symlinks.')
+        yield (
+            FileEntry(
+                path=f'job/{path.relative_to(root).as_posix()}',
+                mode=git_mode,
+                sha256=sha256(content).hexdigest(),
+            ),
+            content,
+        )
+
+
+def _selected_directories(root: Path, trial_name: str) -> Iterator[str]:
+    for path in _selected_paths(root, trial_name):
+        if not path.is_symlink() and path.is_dir():
+            yield f'job/{path.relative_to(root).as_posix()}'
+
+
+def _selected_paths(root: Path, trial_name: str) -> Iterator[Path]:
     if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]*', trial_name):
         raise InputError('A trial name must be a single path component.')
     if root.is_symlink() or not root.is_dir():
@@ -480,34 +636,17 @@ def _selected_files(root: Path, trial_name: str) -> Iterator[tuple[FileEntry, by
         if directory.is_symlink():
             raise InputError('A selected trial artifact directory cannot be a symlink.')
         if directory.exists():
+            paths.append(directory)
             paths.extend(_walk(directory))
-    for path in sorted(paths):
-        mode = path.lstat().st_mode
-        if stat.S_ISLNK(mode):
-            git_mode: GitMode = '120000'
-            content = os.fsencode(os.readlink(path))
-        elif stat.S_ISREG(mode):
-            git_mode = '100755' if mode & stat.S_IXUSR else '100644'
-            content = path.read_bytes()
-        else:
-            raise InputError('Trial artifacts must be regular files or symlinks.')
-        yield (
-            FileEntry(
-                path=f'job/{path.relative_to(root).as_posix()}',
-                mode=git_mode,
-                sha256=sha256(content).hexdigest(),
-            ),
-            content,
-        )
+    yield from sorted(paths)
 
 
 def _walk(root: Path) -> Iterator[Path]:
     for path in sorted(root.iterdir()):
         if path.name in LEFT_OUT or path.name.casefold() == '.git':
             continue
-        if path.is_symlink() or not path.is_dir():
-            yield path
-        else:
+        yield path
+        if not path.is_symlink() and path.is_dir():
             yield from _walk(path)
 
 
@@ -535,7 +674,10 @@ def _command(
     except FileNotFoundError as error:
         raise InputError('Private artifacts require `git` and `gh` on PATH.') from error
     if check and result.returncode:
-        raise InputError(f'Private artifact `{arguments[0]}` command failed.')
+        raise InputError(
+            f'Private artifact `{arguments[0]}` command failed. '
+            'Check native Git access over SSH and GitHub CLI authentication.'
+        )
     return result
 
 
@@ -624,7 +766,12 @@ def _tree_files(root: Path, commit: str, path: str) -> dict[str, tuple[GitMode, 
     return files
 
 
-def _restore(destination: Path, files: dict[str, tuple[GitMode, bytes]]) -> None:
+def _restore(
+    destination: Path,
+    files: dict[str, tuple[GitMode, bytes]],
+    *,
+    directories: Sequence[str] = (),
+) -> None:
     if destination.is_symlink() or (
         destination.exists()
         and (not destination.is_dir() or any(destination.iterdir()))
@@ -641,13 +788,25 @@ def _restore(destination: Path, files: dict[str, tuple[GitMode, bytes]]) -> None
     ) as temporary:
         staged = Path(temporary) / 'contents'
         staged.mkdir(mode=0o700)
-        directories = {staged}
+        created = {staged}
+        for relative in directories:
+            directory = staged
+            for component in _path_parts(relative):
+                child = directory / component
+                if child not in created:
+                    if child.is_symlink() or child.exists():
+                        raise InputError(
+                            'Artifact paths collide on the destination filesystem.'
+                        )
+                    child.mkdir()
+                    created.add(child)
+                directory = child
         for relative, (mode, content) in sorted(files.items()):
             parts = _path_parts(relative)
             directory = staged
             for component in parts[:-1]:
                 child = directory / component
-                if child not in directories:
+                if child not in created:
                     if child.is_symlink():
                         raise InputError(
                             'An artifact directory cannot traverse a symlink.'
@@ -657,7 +816,7 @@ def _restore(destination: Path, files: dict[str, tuple[GitMode, bytes]]) -> None
                             'Artifact paths collide on the destination filesystem.'
                         )
                     child.mkdir()
-                    directories.add(child)
+                    created.add(child)
                 directory = child
             path = directory / parts[-1]
             if path.is_symlink() or path.exists():

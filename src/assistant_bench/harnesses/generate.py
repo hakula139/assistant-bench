@@ -14,12 +14,13 @@ from openai.types.chat import ChatCompletionMessageParam
 
 from assistant_bench.catalog import load_export
 from assistant_bench.generation import load_generation
+from assistant_bench.harnesses.accounting import current_trial
 from assistant_bench.harnesses.endpoint import Endpoint, preflight
 from assistant_bench.harnesses.labels import Labels
 from assistant_bench.harnesses.messages import MessageResult, request_messages
 from assistant_bench.harnesses.options import ApiOptions
 from assistant_bench.harnesses.responses import ResponseResult
-from assistant_bench.harnesses.usage import MeasuredUsage, append_attempt, measure
+from assistant_bench.harnesses.usage import MeasuredUsage, measure
 
 
 OUTPUT_FILE = 'output.txt'
@@ -73,12 +74,12 @@ class Generate(BaseAgent):
     ) -> None:
         assert isinstance(self.options, GenerateOptions)
         started_at = datetime.now(UTC)
+        recorder = current_trial()
+        recorder.begin(started_at)
         try:
             await self._generate(instruction, context)
         finally:
-            append_attempt(
-                self.logs_dir, self.options, started_at, [context.metadata or {}]
-            )
+            recorder.finish(datetime.now(UTC))
 
     async def _generate(self, instruction: str, context: AgentContext) -> None:
         assert isinstance(self.options, GenerateOptions)
@@ -94,7 +95,7 @@ class Generate(BaseAgent):
                 }
             return
 
-        async with endpoint.client() as client:
+        async with endpoint.client(self.options.api) as client:
             started = time.monotonic()
             try:
                 match self.options.api:

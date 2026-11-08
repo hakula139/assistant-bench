@@ -3,26 +3,19 @@
 import json
 from collections.abc import Sequence
 from datetime import UTC, datetime
-from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 import typer
+from pydantic import TypeAdapter, ValidationError
 
-from assistant_bench import collection, jobs
-from assistant_bench.arena import local, publication, votes
-from assistant_bench.arena.stores import TargetName, connect
+from assistant_bench.arena import d1, publication, votes
 from assistant_bench.arguments import FamilyArgument, OptionalFamilyArgument
-from assistant_bench.catalog import load_export, load_systems
 from assistant_bench.database import Database
-from assistant_bench.families import (
-    Choice,
-    VotesSettings,
-    family_names,
-    load_cases,
-    load_family,
-)
-from assistant_bench.messages import InputError, code, count_of
-from assistant_bench.paths import data_dir
+from assistant_bench.families import Choice
+from assistant_bench.messages import InputError, code, count_of, error_lines
+from assistant_bench.outputs import Output, read_outputs
+from assistant_bench.runtime import open_context
+from assistant_bench.state import State
 
 
 app = typer.Typer(no_args_is_help=True)
@@ -37,7 +30,8 @@ CLEARED = '(cleared)'
 """Stands for the network tag of a vote older than the tags' retention."""
 
 Target = Annotated[
-    TargetName, typer.Argument(help='The vote store: staging, production or local.')
+    d1.TargetName,
+    typer.Argument(help='The vote store: staging, production or private.'),
 ]
 IpTag = Annotated[
     str | None, typer.Option(help='A network tag, as `bench arena votes` lists it.')
@@ -52,50 +46,117 @@ VoteIds = Annotated[
 
 
 @app.command()
-def prepare(family: FamilyArgument) -> None:
-    """Write the family's production publication from its current outputs.
-
-    The file goes to publications/<family>/ in the data directory with a Markdown
-    listing beside it. Reviewing the listing and publishing that exact file
-    approves it.
-    """
-    selected = load_family(family)
-    systems = load_systems(load_export())
-    listed = jobs.listed_systems(selected, systems)
-    outputs = collection.collect(selected, systems).outputs
-    prepared = publication.prepare(
-        selected,
-        load_cases(selected),
-        outputs,
-        {system.name: system.display_name for system in listed},
-        target='production',
-    )
-    path = publication.write(prepared, outputs)
+def prepare(family: FamilyArgument, target: Literal['production', 'private']) -> None:
+    """Prepare a cloud publication for review and print its immutable ID."""
+    with open_context() as context, d1.connect('private') as database:
+        generation = context.state.output_generation(family)
+        if generation.id is None:
+            raise InputError(f'Family `{family}` has no sealed output collection.')
+        metadata = context.state.collection(generation.id)
+        if metadata.system_names_json is None:
+            raise InputError(
+                f'Collection `{generation.id}` has no frozen system names. '
+                f'Collect `{family}` again before preparing a publication.'
+            )
+        try:
+            names = TypeAdapter(dict[str, str]).validate_json(
+                metadata.system_names_json
+            )
+        except ValidationError as error:
+            raise InputError(error_lines(error, 'Collection system names')) from error
+        sources = context.closing_sources(generation.id)
+        outputs = read_outputs(family, context.state, generation=generation)
+        prepared = publication.prepare(
+            sources.family,
+            sources.cases,
+            outputs,
+            names,
+            target=target,
+        )
+        now = datetime.now(UTC)
+        publication.stage(database, prepared, now)
+        previous = publication.preparation(database, prepared.id)
+        if previous is not None:
+            original = context.state.collection_generation(previous.collection_id)
+            original_outputs = read_outputs(family, context.state, generation=original)
+            if _published_outputs(prepared, outputs) != _published_outputs(
+                prepared, original_outputs
+            ):
+                raise InputError(
+                    f'Publication `{prepared.id}` already pins collection '
+                    f'`{previous.collection_id}`, whose output facts differ. '
+                    'Explicitly regrade or rerun the changed outputs before publishing.'
+                )
+            typer.echo(
+                f'Reused prepared publication `{prepared.id}` with its original '
+                f'collection `{previous.collection_id}` and case revision '
+                f'`{previous.case_revision}`.'
+            )
+            return
+        publication.record_preparation(
+            database,
+            publication.Preparation(
+                publication_id=prepared.id,
+                target=target,
+                collection_id=generation.id,
+                case_revision=metadata.case_revision,
+                prepared_at=now,
+            ),
+        )
     typer.echo(
-        f'Publication of `{family}` with {count_of(len(prepared.cases), "case")} '
-        f'and {count_of(len(prepared.outputs), "output")} written to `{path}`. Review '
-        f'`{path.with_suffix(".md")}`, then publish that file.'
+        f'Prepared `{prepared.id}` for `{target}` with '
+        f'{count_of(len(prepared.cases), "case")} and '
+        f'{count_of(len(prepared.outputs), "output")}. '
+        f'Review it with `bench arena inspect {prepared.id}`.'
     )
+
+
+def _published_outputs(
+    prepared: publication.Publication, outputs: Sequence[Output]
+) -> dict[str, str]:
+    keys = {output.key for output in prepared.outputs}
+    projected: dict[str, str] = {}
+    for output in outputs:
+        key = publication.output_key(prepared.family, output)
+        if key not in keys:
+            continue
+        if key in projected:
+            raise InputError(
+                f'Publication `{prepared.id}` has duplicate output `{key}`.'
+            )
+        projected[key] = json.dumps(
+            output.model_dump(mode='json'), sort_keys=True, separators=(',', ':')
+        )
+    if projected.keys() != keys:
+        raise InputError(
+            f'Publication `{prepared.id}` is missing outputs '
+            'from its pinned collection.'
+        )
+    return projected
 
 
 @app.command()
 def publish(
     target: Target,
-    file: Annotated[
-        Path,
-        typer.Argument(
-            help='A reviewed publication written by `prepare`.',
-            exists=True,
-            dir_okay=False,
-        ),
+    identity: Annotated[
+        str, typer.Argument(help='A reviewed prepared publication ID.')
     ],
 ) -> None:
     """Stage a reviewed publication in the vote store and activate it."""
-    prepared = publication.read(file)
-    with connect(target) as database:
-        changed = publication.publish(
-            database, prepared, datetime.now(UTC), target=target
-        )
+    with d1.connect('private') as database:
+        prepared = publication.read_prepared(database, identity)
+        expected = 'private' if target == 'private' else 'production'
+        if expected != prepared.target:
+            raise InputError(
+                f'Publication `{identity}` was prepared for `{prepared.target}`.'
+            )
+        if target == 'private':
+            changed = publication.activate(database, identity, datetime.now(UTC))
+        else:
+            with d1.connect(target) as destination:
+                now = datetime.now(UTC)
+                publication.stage(destination, prepared, now)
+                changed = publication.activate(destination, identity, now)
 
     if not changed:
         typer.echo(
@@ -111,51 +172,17 @@ def publish(
     )
 
 
-def serve() -> None:
-    """Publish local cases and serve their vote page until interrupted."""
-    with local.interrupts(), local.lock():
-        systems = load_systems(load_export())
-        prepared: list[publication.Publication] = []
-        for name in family_names():
-            family = load_family(name)
-            if not isinstance(family.settings, VotesSettings):
-                continue
-            cases = load_cases(family)
-            listed = jobs.listed_systems(family, systems)
-            outputs = (
-                collection.collect(family, systems).outputs
-                if jobs.has_jobs(family)
-                else []
-            )
-            try:
-                prepared.append(
-                    publication.prepare(
-                        family,
-                        cases,
-                        outputs,
-                        {system.name: system.display_name for system in listed},
-                        target='local',
-                    )
-                )
-            except publication.NoPairsError:
-                continue
-
-        local.build()
-        local.migrate()
-        with local.database() as database:
-            for item in prepared:
-                publication.publish(database, item, datetime.now(UTC), target='local')
-            database.execute(
-                'DELETE FROM active '
-                'WHERE family NOT IN (SELECT value FROM json_each(?))',
-                [json.dumps([item.family for item in prepared])],
-            )
-        if not prepared:
-            raise InputError(
-                f'No local case has two different passing outputs. Add cases under '
-                f'`{data_dir() / "cases"}`, then run `uv run bench run`.'
-            )
-        local.serve(local.keys())
+@app.command()
+def inspect(identity: str) -> None:
+    """Show a prepared publication and the gates of its pinned collection."""
+    with d1.connect('private') as database:
+        prepared = publication.read_prepared(database, identity)
+        metadata = publication.preparation(database, identity)
+        assert metadata is not None
+        state = State(database)
+        generation = state.collection_generation(metadata.collection_id)
+        outputs = read_outputs(prepared.family, state, generation=generation)
+        typer.echo(publication.listing(prepared, outputs))
 
 
 @app.command()
@@ -164,7 +191,7 @@ def status(
     family: OptionalFamilyArgument = None,
 ) -> None:
     """Show each active family's publication and votes, or only the named family's."""
-    with connect(target) as database:
+    with d1.connect(target) as database:
         rows = votes.status(database, family)
 
     if not rows:
@@ -210,7 +237,7 @@ def list_votes(
             'Pass `--by` only to summarize, without `--ip-tag` or `--actor`.'
         )
 
-    with connect(target) as database:
+    with d1.connect(target) as database:
         if selector is None:
             text = _summary(database, family, by or 'ip')
         else:
@@ -237,7 +264,7 @@ def exclude(
     """
     selector = _required_selector(ip_tag=ip_tag, actor=actor, vote=vote)
     votes.check_reason(reason)
-    with connect(target) as database:
+    with d1.connect(target) as database:
         changed = votes.exclude(database, family, selector, reason)
 
     typer.echo(f'Excluded {count_of(changed, "vote")} of `{family}` in `{target}`.')
@@ -253,7 +280,7 @@ def restore(
 ) -> None:
     """Count the excluded votes of one network tag, one browser, or the given IDs."""
     selector = _required_selector(ip_tag=ip_tag, actor=actor, vote=vote)
-    with connect(target) as database:
+    with d1.connect(target) as database:
         changed = votes.restore(database, family, selector)
 
     typer.echo(f'Restored {count_of(changed, "vote")} of `{family}` in `{target}`.')

@@ -1,6 +1,7 @@
 """Builders and the stub endpoint shared by the tests."""
 
 import asyncio
+import gzip
 import ipaddress
 import json
 import math
@@ -13,21 +14,24 @@ import textwrap
 import threading
 import tomllib
 from collections import defaultdict
-from collections.abc import Generator, Iterator, Mapping
-from contextlib import closing, contextmanager, suppress
+from collections.abc import AsyncGenerator, Generator, Iterator, Mapping
+from contextlib import asynccontextmanager, closing, contextmanager, suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from importlib.resources import files
 from pathlib import Path
 from random import Random
 from typing import Any, Literal
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import tomli_w
+from harbor.job import Job
 from harbor.job_plan import JobPlan
 from harbor.models.agent.context import AgentContext
 from harbor.models.job.config import JobConfig
 from harbor.models.job.lock import TaskLock, TrialLock, VerifierLock
+from harbor.models.job.result import JobResult, JobStats
 from harbor.models.task import config as harbor_task_config
 from harbor.models.task.id import LocalTaskId
 from harbor.models.trial.config import (
@@ -37,6 +41,7 @@ from harbor.models.trial.config import (
     TaskConfig,
     TrialConfig,
 )
+from harbor.models.trial.paths import TrialPaths
 from harbor.models.trial.result import (
     AgentInfo,
     ExceptionInfo,
@@ -44,6 +49,7 @@ from harbor.models.trial.result import (
     TrialResult,
 )
 from harbor.models.verifier.result import VerifierResult
+from harbor.trial.hooks import TrialEvent, TrialHookEvent
 from harbor.trial.regrade import local_task_name
 
 from assistant_bench.arena.publication import (
@@ -54,8 +60,10 @@ from assistant_bench.arena.publication import (
     output_key,
 )
 from assistant_bench.arena.votes import Cut, Snapshot, TaggedDefects, Vote
+from assistant_bench.artifacts import ArtifactRepository
 from assistant_bench.catalog import Price, System, SystemConfig
 from assistant_bench.database import SQLiteDatabase
+from assistant_bench.execution import ExecutionInput, ExecutionPlugin
 from assistant_bench.families import (
     Case,
     CaseSource,
@@ -69,6 +77,12 @@ from assistant_bench.families import (
 )
 from assistant_bench.generation import Generation
 from assistant_bench.harnesses import fingerprint
+from assistant_bench.harnesses.accounting import (
+    TrialAccounting,
+    bind_trial,
+    current_trial,
+    reset_trial,
+)
 from assistant_bench.harnesses.endpoint import (
     ANTHROPIC_BASE_URL_VAR,
     BASE_URL_VAR,
@@ -79,6 +93,9 @@ from assistant_bench.harnesses.generate import OUTPUT_FILE
 from assistant_bench.jobs import runnable_systems
 from assistant_bench.outputs import Output
 from assistant_bench.paths import FAMILIES_DIR, data_dir
+from assistant_bench.runtime import RunContext
+from assistant_bench.spend import Accounting
+from assistant_bench.state import Claim, Run, State
 from assistant_bench.tasks import render_task_config
 
 
@@ -517,13 +534,157 @@ def _record_trial(job_dir: Path, result: TrialResult, lock: TrialLock) -> None:
     (job_dir / 'result.json').touch()
 
 
+@dataclass(frozen=True)
+class RecordedTrial:
+    config: TrialConfig
+    paths: TrialPaths
+    result: TrialResult
+    recorder: TrialAccounting
+
+
+def run_host_job(
+    config: JobConfig,
+    *,
+    log: Path | None = None,
+    plugin_context: Path | None = None,
+    source_root: Path | None = None,
+) -> Path:
+    """Replace only the Harbor subprocess, retaining its job and cloud plugin."""
+    assert plugin_context is not None
+    if source_root is not None:
+        assert (source_root / 'src' / 'assistant_bench').is_dir()
+
+    async def run() -> None:
+        job = await Job.create(config)
+        plugin = ExecutionPlugin(context_file=str(plugin_context))
+        result = JobResult(
+            id=job.id,
+            started_at=datetime.now(UTC),
+            n_total_trials=len(job),
+            stats=JobStats(),
+        )
+        try:
+            await plugin.on_job_start(job)
+            result = await job.run()
+        finally:
+            await plugin.on_job_end(result)
+
+    asyncio.run(run())
+    return config.jobs_dir / config.job_name
+
+
+@asynccontextmanager
+async def executed_trial(
+    context: RunContext,
+    config: JobConfig,
+    system: System,
+    *,
+    scope: str,
+    run_id: str | None = None,
+    max_requests: int | None = None,
+) -> AsyncGenerator[RecordedTrial]:
+    """Run one real planned trial's admission and publication around an agent call."""
+    run = Run(
+        id=run_id or str(uuid4()),
+        scope=scope,
+        job=config.job_name,
+        code_revision=context.code_revision,
+        case_revision=context.case_revision,
+        created_at=datetime.now(UTC).isoformat(),
+        max_requests=max_requests,
+    )
+    context.state.create_run(run)
+    payload = ExecutionInput(
+        run=run,
+        expected_source_revision=context.state.artifact_generation(scope).revision,
+        accounting={
+            system.name: Accounting(
+                system=system.name, price=system.price, ceiling_usd=None
+            )
+        },
+    )
+    path = context.root / f'execution-{run.id}.json'
+    path.write_text(payload.model_dump_json())
+    job = await Job.create(config)
+    (job.job_dir / 'config.json').write_text(job.config.model_dump_json())
+    plugin = ExecutionPlugin(context_file=str(path))
+    started_at = datetime.now(UTC)
+    result: TrialResult | None = None
+    try:
+        await plugin.on_job_start(job)
+        plan = await JobPlan.from_config(
+            job.config.model_copy(deep=True), job_id=job.id
+        )
+        (trial,) = job._remaining_trial_configs  # pyright: ignore[reportPrivateUsage]
+        (lock,) = plan.trial_locks
+        assert trial.task.path is not None
+        paths = TrialPaths(trial_dir=job.job_dir / trial.trial_name)
+        paths.agent_dir.mkdir(parents=True)
+        result = TrialResult(
+            task_name=local_task_name(trial.task.path),
+            trial_name=trial.trial_name,
+            trial_uri=paths.trial_dir.as_uri(),
+            task_id=trial.task.get_task_id(),
+            task_checksum=lock.task.digest,
+            config=trial,
+            agent_info=AgentInfo(name=system.harness, version='test'),
+            agent_result=AgentContext(),
+            started_at=started_at,
+        )
+        event = TrialHookEvent(
+            event=TrialEvent.START,
+            task_name=result.task_name,
+            config=trial,
+            result=result,
+            lock=lock,
+        )
+        await plugin._started(event)  # pyright: ignore[reportPrivateUsage]
+        try:
+            yield RecordedTrial(trial, paths, result, current_trial())
+        except BaseException as error:
+            result.exception_info = ExceptionInfo(
+                exception_type=type(error).__name__,
+                exception_message=str(error),
+                exception_traceback='',
+                occurred_at=datetime.now(UTC),
+            )
+            raise
+        finally:
+            result.finished_at = datetime.now(UTC)
+            _record_trial(job.job_dir, result, lock)
+            (paths.trial_dir / 'config.json').write_text(trial.model_dump_json())
+            await plugin._ended(  # pyright: ignore[reportPrivateUsage]
+                event.model_copy(update={'event': TrialEvent.END})
+            )
+        assert context.state.complete_run(run.id)
+    finally:
+        await plugin.on_job_end(
+            JobResult(
+                id=job.id,
+                started_at=started_at,
+                n_total_trials=1,
+                stats=JobStats(),
+                trial_results=[] if result is None else [result],
+            )
+        )
+
+
 # ── Git Repositories ──
 
 
-def _git(root: Path, *args: str) -> str:
+@dataclass(frozen=True)
+class PrivateRepository:
+    client: ArtifactRepository
+    remote: Path
+    seed: Path
+    metadata: Path
+    revision: str
+
+
+def git(root: Path, *args: str) -> str:
     """Run git in `root` and return its output, stripped."""
     return subprocess.run(
-        ['git', *args], cwd=root, check=True, stdout=subprocess.PIPE, text=True
+        ['git', *args], cwd=root, check=True, capture_output=True, text=True
     ).stdout.strip()
 
 
@@ -533,17 +694,17 @@ def new_repository(root: Path, files: Mapping[str, str]) -> str:
         file = root / path
         file.parent.mkdir(parents=True, exist_ok=True)
         file.write_text(content)
-    _git(root, 'init', '--quiet')
-    _git(root, 'config', 'user.email', 'test@example.com')
-    _git(root, 'config', 'user.name', 'Test')
+    git(root, 'init', '--quiet')
+    git(root, 'config', 'user.email', 'test@example.com')
+    git(root, 'config', 'user.name', 'Test')
     return commit_all(root, 'Initial files')
 
 
 def commit_all(root: Path, message: str) -> str:
     """Commit every change in the repository at `root`, and return the commit."""
-    _git(root, 'add', '.')
-    _git(root, 'commit', '--quiet', '-m', message)
-    return _git(root, 'rev-parse', 'HEAD')
+    git(root, 'add', '.')
+    git(root, 'commit', '--quiet', '-m', message)
+    return git(root, 'rev-parse', 'HEAD')
 
 
 # ── Stub Endpoint ──
@@ -779,10 +940,12 @@ class StubEndpoint:
     status: int = 200
     statuses: list[int] = field(default_factory=list)
     response_headers: dict[str, str] = field(default_factory=dict)
+    content_type: str | None = None
     response: dict[str, Any] = field(default_factory=completion)
     responses: list[dict[str, Any]] = field(default_factory=list)
     stream: list[bytes] | None = None
     streams: list[list[bytes]] = field(default_factory=list)
+    gzip: bool = False
     stream_gate: threading.Event | None = None
     stream_gate_after: int = 0
     stream_waiting: threading.Event = field(default_factory=threading.Event)
@@ -838,19 +1001,25 @@ def serve_stub(
             payload = (
                 b''.join(stream) if stream is not None else json.dumps(reply).encode()
             )
+            if stub.gzip:
+                payload = gzip.compress(payload)
             self.send_response(stub.statuses.pop(0) if stub.statuses else stub.status)
             self.send_header(
                 'Content-Type',
-                'text/event-stream' if stream is not None else 'application/json',
+                stub.content_type
+                or ('text/event-stream' if stream is not None else 'application/json'),
             )
             self.send_header('Content-Length', str(len(payload)))
             self.send_header('x-request-id', 'req-1')
             self.send_header('request-id', 'req-1')
+            if stub.gzip:
+                self.send_header('Content-Encoding', 'gzip')
             for name, value in stub.response_headers.items():
                 self.send_header(name, value)
             with suppress(BrokenPipeError, ConnectionResetError):
                 self.end_headers()
-                for index, chunk in enumerate(stream or [payload]):
+                chunks = [payload] if stub.gzip else stream or [payload]
+                for index, chunk in enumerate(chunks):
                     if stub.stream_gate is not None and index == stub.stream_gate_after:
                         stub.stream_waiting.set()
                         stub.stream_gate.wait()
@@ -1025,6 +1194,72 @@ def arena_database() -> Generator[SQLiteDatabase]:
         for path in sorted(MIGRATIONS_DIR.glob('*.sql')):
             connection.executescript(path.read_text())
         yield SQLiteDatabase(connection)
+
+
+@contextmanager
+def private_database(path: Path | None = None) -> Generator[SQLiteDatabase]:
+    """Open private state, initializing a new database from the shipped schemas."""
+    initialize = path is None or not path.exists()
+    if path is not None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    with closing(
+        sqlite3.connect(path if path is not None else ':memory:', autocommit=True)
+    ) as connection:
+        connection.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, 100)
+        connection.execute('PRAGMA foreign_keys = ON')
+        if initialize:
+            for migration in sorted(MIGRATIONS_DIR.glob('*.sql')):
+                connection.executescript(migration.read_text())
+            schemas = files('assistant_bench').joinpath('sql/private')
+            for schema in sorted(schemas.iterdir(), key=lambda path: path.name):
+                if schema.name.endswith('.sql'):
+                    connection.executescript(schema.read_text())
+        yield SQLiteDatabase(connection)
+
+
+@contextmanager
+def accounted_trial(
+    state: State,
+    *,
+    system: str = 'acme-large',
+    fingerprint: str = 'f' * 12,
+    trial: str = 'trial',
+    scope: str = 'sample',
+    max_requests: int | None = None,
+) -> Generator[TrialAccounting]:
+    """Bind a real claimed trial without starting its paid attempt."""
+    identifier = str(uuid4())
+    parent = Run(
+        id=identifier,
+        scope=scope,
+        job=f'job-{identifier}',
+        code_revision='a' * 40,
+        case_revision='b' * 40,
+        created_at=START.isoformat(),
+        max_requests=max_requests,
+    )
+    claim = Claim(
+        id=str(uuid4()),
+        run_id=parent.id,
+        scope=scope,
+        slot_key=f'{trial}/{system}/{identifier}',
+        trial=trial,
+        system=system,
+        fingerprint=fingerprint,
+        accounting_json=Accounting(
+            system=system, price=None, ceiling_usd=None
+        ).model_dump_json(),
+        expected_source_revision=state.source_revision(scope),
+        created_at=START.isoformat(),
+    )
+    state.create_run(parent)
+    assert state.claim_attempt(claim)
+    recorder = TrialAccounting(state, claim)
+    token = bind_trial(recorder)
+    try:
+        yield recorder
+    finally:
+        reset_trial(token)
 
 
 # ── Synthetic Round ──
@@ -1213,6 +1448,15 @@ def make_round(days: int, taken_at: datetime) -> tuple[Snapshot, list[Output]]:
         inventory=inventory,
         votes=tuple(votes),
         excluded=2 * days,
+        output_generation='round-generation',
     )
-    snapshot = Snapshot(family='arena', taken_at=taken_at, production=cut, local=None)
+    snapshot = Snapshot(
+        family='arena',
+        taken_at=taken_at,
+        closed_at=taken_at + timedelta(hours=1),
+        category_order=ROUND_CATEGORIES,
+        closing_revision='1' * 40,
+        production=cut,
+        private=None,
+    )
     return snapshot, outputs

@@ -7,7 +7,7 @@ This file specifies the rules for every change and points to the conventions for
 ```bash
 uv run bench check                               # Validate every family and its reference solutions
 uv run bench run --system <name>                  # Generate a system's missing trials
-uv run bench serve                               # Vote locally on private cases
+uv run bench arena prepare writing-zh private    # Prepare private voting from collected outputs
 uv run bench arena status production writing-zh  # Inspect the published voting family
 uv run bench close writing-zh                    # Close a voted round from the production votes
 ```
@@ -50,11 +50,11 @@ The tree lists only the top-level entries whose names leave their purpose unclea
 - Run pre-commit hooks on every commit, and never bypass them with `--no-verify` or `PRE_COMMIT_ALLOW_NO_CONFIG`. In each new checkout or worktree, run `nix develop -c true`, `pnpm install`, and `uv sync` once to provide the generated config, the Node tools, and the virtualenv. On each host, and again after each Playwright update, run `pnpm --filter web exec playwright install --only-shell chromium` for the site test's browser.
 - Run the [verification](#verification) block before review.
 - Add new words to `.cspell/words.txt`, as `cspell` scans Python sources too.
-- Commit only synthetic or public cases. Keep transcript-derived and held-out cases, all outputs, and Harbor jobs in the data directory, as [Data](docs/conventions/data.md) describes.
-- Keep internal hostnames, the endpoint's operator and product names, its specific headers, registry mirrors, tokens, and local paths out of committed files, fixtures, log lines, issues, and PRs. Such headers go in `BENCH_API_HEADERS`, and committed text calls the endpoint an OpenAI-compatible endpoint configured in `.env`.
+- Commit only synthetic or public cases to this repository. Keep transcript-derived and held-out cases and trial artifacts in the private repository, and runtime state and outputs in private D1, as [Data](docs/conventions/data.md) describes.
+- Keep internal hostnames, the endpoint's operator and product names, its specific headers, registry mirrors, tokens, and local paths out of committed files, fixtures, log lines, issues, and PRs. Configure endpoint-specific headers through the inputs in [Running](docs/guide/running.md#the-model-endpoint), and committed text calls the endpoint an OpenAI-compatible endpoint configured in `.env`.
 - Keep lockfiles and requirements files throughout the repository, including `families/`, on public registries, with `pyproject.toml` naming PyPI and `.npmrc` naming npm.
 - Name a key file by path in `.env`, and never put a key value in `.env`, a fixture, a log line, or a Harbor job config. Harbor writes each agent's `kwargs` and `env` into the job's `config.json`, so a secret reaches an agent only through a file one of those values names.
-- In docs, issues, and PRs, name systems by their `systems.toml` table names, which are public model names plus a suffix naming a variant's prompt or effort, or the model's snapshot. Routes and channel IDs stay in `systems.toml`, the nixos-config export, and the data directory.
+- In docs, issues, and PRs, name systems by their `systems.toml` table names, which are public model names plus a suffix naming a variant's prompt or effort, or the model's snapshot. Routes and channel IDs stay in `systems.toml`, the nixos-config export, and private records.
 - Only `bench close` writes under `reports/`, and a report holds aggregates under public system names alone.
 - Never run paid model calls in CI, as tests reach models only through the stub endpoint in `tests/support.py`.
 - Keep commands minimal and settings in config files: `bench` takes only the arguments that pick what a command acts on and reads every setting from `systems.toml` and `family.toml`, while environment variables hold only secrets and per-environment values, as [Development](docs/conventions/development.md#where-settings-live) lists.

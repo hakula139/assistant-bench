@@ -1,9 +1,8 @@
 """Validate reported token counters before they enter trial accounting."""
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, fields
-from datetime import UTC, datetime
-from pathlib import Path
+from datetime import datetime
 from typing import Annotated, Any, Self, assert_never
 
 from harbor.models.agent.context import AgentContext
@@ -11,10 +10,7 @@ from harbor.models.metric import UsageInfo
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 from assistant_bench.catalog import Api, Price
-from assistant_bench.harnesses.labels import Labels
 
-
-ATTEMPTS_FILE = 'attempts.jsonl'
 
 _count = TypeAdapter(Annotated[int, Field(strict=True, ge=0)])
 _reported = TypeAdapter(dict[str, Any])
@@ -72,6 +68,26 @@ class MeasuredUsage:
         context.n_input_tokens = self.input_tokens
         context.n_cache_tokens = self.cache_tokens
         context.n_output_tokens = self.output_tokens
+
+
+def combined_usage(responses: Sequence[MeasuredUsage | None]) -> MeasuredUsage | None:
+    """Sum measured requests only when every admitted request reports valid usage."""
+    if not responses or any(usage is None for usage in responses):
+        return None
+    measured = [usage for usage in responses if usage is not None]
+    reasoning = [usage.reasoning_tokens for usage in measured]
+    return MeasuredUsage(
+        input_tokens=sum(usage.input_tokens for usage in measured),
+        cache_tokens=sum(usage.cache_tokens for usage in measured),
+        cache_write_tokens=sum(usage.cache_write_tokens for usage in measured),
+        output_tokens=sum(usage.output_tokens for usage in measured),
+        reasoning_tokens=(
+            sum(value for value in reasoning if value is not None)
+            if all(value is not None for value in reasoning)
+            else None
+        ),
+        cache_write_unpriced=any(usage.cache_write_unpriced for usage in measured),
+    )
 
 
 def measure(api: Api, reported: object) -> dict[str, Any]:
@@ -213,34 +229,6 @@ class Attempt(BaseModel):
     finished_at: datetime
     responses: list[MeasuredUsage | None]
     """`None` for a response without valid usage."""
-
-
-def append_attempt(
-    logs_dir: Path,
-    labels: Labels,
-    started_at: datetime,
-    requests: Iterable[Mapping[str, Any]],
-) -> None:
-    """Append the attempt to its job's `attempts.jsonl`.
-
-    The file sits in the job directory, since Harbor deletes a failed attempt's
-    trial directory before retrying it. `requests` holds the details of each
-    request the attempt sent, and those without a true `responded` got no reply.
-    """
-    attempt = Attempt(
-        trial=logs_dir.parent.name,
-        system=labels.system,
-        fingerprint=labels.fingerprint,
-        started_at=started_at,
-        finished_at=datetime.now(UTC),
-        responses=[
-            MeasuredUsage.from_details(request)
-            for request in requests
-            if request.get('responded', False)
-        ],
-    )
-    with (logs_dir.parent.parent / ATTEMPTS_FILE).open('a') as file:
-        file.write(attempt.model_dump_json() + '\n')
 
 
 def _payload(reported: object) -> object:

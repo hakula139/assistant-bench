@@ -1,4 +1,3 @@
-import json
 from contextlib import AbstractContextManager, nullcontext
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -6,24 +5,24 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner, Result
 
-from assistant_bench import cli, collection, jobs
-from assistant_bench.arena import commands, local, publication
-from assistant_bench.catalog import System
-from assistant_bench.collection import Collection
+from assistant_bench import cli, runtime
+from assistant_bench.arena import commands, d1, publication
 from assistant_bench.database import D1Error, SQLiteDatabase
 from assistant_bench.families import (
-    Case,
     Family,
-    TaskTestsSettings,
-    VotesSettings,
     load_cases,
     load_family,
 )
-from assistant_bench.messages import InputError
-from assistant_bench.outputs import Output
+from assistant_bench.outputs import Output, write_outputs
+from assistant_bench.runtime import RunContext
+from assistant_bench.state import State
 from support import (
+    PrivateRepository,
+    commit_all,
+    git,
     make_system,
     make_trial,
+    new_repository,
     record_vote,
     write_votes_family,
 )
@@ -64,42 +63,57 @@ def family(families_dir: Path) -> Family:
 
 
 @pytest.fixture
-def prepared(family: Family) -> Path:
-    return publication.write(
-        publication.prepare(
-            family,
-            load_cases(family),
-            collected(),
-            {name: system.display_name for name, system in SYSTEMS.items()},
-            target='production',
-        ),
-        collected(),
-    )
-
-
-@pytest.fixture
 def store(
-    arena_store: SQLiteDatabase, monkeypatch: pytest.MonkeyPatch
+    private_store: SQLiteDatabase, monkeypatch: pytest.MonkeyPatch
 ) -> tuple[SQLiteDatabase, list[str]]:
-    """Serve one in-memory store for every target, recording the targets."""
     targets: list[str] = []
 
     def connect(target: str) -> AbstractContextManager[SQLiteDatabase]:
         targets.append(target)
-        return nullcontext(arena_store)
+        return nullcontext(private_store)
 
-    monkeypatch.setattr(commands, 'connect', connect)
-    return arena_store, targets
+    monkeypatch.setattr(d1, 'connect', connect)
+    return private_store, targets
 
 
 @pytest.fixture
-def voted(prepared: Path, store: tuple[SQLiteDatabase, list[str]]) -> SQLiteDatabase:
-    """Publish the prepared file and record two votes from one network tag."""
+def prepared(family: Family, store: tuple[SQLiteDatabase, list[str]]) -> str:
     database, _ = store
-    published = publication.read(prepared)
-    publication.publish(
-        database, published, NOW - timedelta(days=1), target='production'
+    draft = publication.prepare(
+        family,
+        load_cases(family),
+        collected(),
+        {name: system.display_name for name, system in SYSTEMS.items()},
+        target='production',
     )
+    publication.stage(database, draft, NOW)
+    generation = write_outputs(
+        family.name,
+        collected(),
+        State(database),
+        previous=None,
+        code_revision='a' * 40,
+        case_revision='b' * 40,
+        system_names={name: system.display_name for name, system in SYSTEMS.items()},
+    )
+    publication.record_preparation(
+        database,
+        publication.Preparation(
+            publication_id=draft.id,
+            target='production',
+            collection_id=generation,
+            case_revision='b' * 40,
+            prepared_at=NOW,
+        ),
+    )
+    return draft.id
+
+
+@pytest.fixture
+def voted(prepared: str, store: tuple[SQLiteDatabase, list[str]]) -> SQLiteDatabase:
+    database, _ = store
+    published = publication.read_prepared(database, prepared)
+    publication.activate(database, prepared, NOW - timedelta(days=1))
     record_vote(
         database,
         published,
@@ -124,22 +138,53 @@ def voted(prepared: Path, store: tuple[SQLiteDatabase, list[str]]) -> SQLiteData
 
 
 @pytest.fixture
-def collections(monkeypatch: pytest.MonkeyPatch) -> list[Family]:
-    """Serve `SYSTEMS` as the catalog and `collected()` as every family's outputs."""
-    families: list[Family] = []
+def context(
+    family: Family,
+    families_dir: Path,
+    private_repository: PrivateRepository,
+    store: tuple[SQLiteDatabase, list[str]],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> RunContext:
+    public = tmp_path / 'public'
+    code_revision = new_repository(
+        public,
+        {
+            f'families/{family.name}/{path.name}': path.read_text()
+            for path in (families_dir / family.name).iterdir()
+        },
+    )
+    root = tmp_path / 'execution'
+    private = private_repository.client.source(
+        private_repository.revision, root / 'private'
+    )
+    result = RunContext(
+        root=root,
+        public_root=public,
+        private_root=private / 'cases',
+        case_revision=private_repository.revision,
+        code_revision=code_revision,
+        state=State(store[0]),
+        artifacts=private_repository.client,
+    )
+    monkeypatch.setattr(runtime, 'REPO_ROOT', public)
+    monkeypatch.setattr(runtime, 'PUBLIC_REPOSITORY', str(public))
+    monkeypatch.setattr(commands, 'open_context', lambda: nullcontext(result))
+    return result
 
-    def load_systems(export: object) -> dict[str, System]:
-        return SYSTEMS
 
-    def collect(family: Family, systems: dict[str, System]) -> Collection:
-        assert systems == SYSTEMS
-        families.append(family)
-        return Collection(collected(), [])
-
-    monkeypatch.setattr(commands, 'load_export', lambda: None)
-    monkeypatch.setattr(commands, 'load_systems', load_systems)
-    monkeypatch.setattr(collection, 'collect', collect)
-    return families
+def collect(
+    context: RunContext, outputs: list[Output], *, case_revision: str | None = None
+) -> str:
+    return write_outputs(
+        'writing-f',
+        outputs,
+        context.state,
+        previous=context.state.output_generation('writing-f').id,
+        code_revision=context.code_revision,
+        case_revision=case_revision or context.case_revision,
+        system_names={name: system.display_name for name, system in SYSTEMS.items()},
+    )
 
 
 class TestKnownFamily:
@@ -167,280 +212,180 @@ class TestKnownFamily:
 
 
 class TestPrepare:
-    def test_writes_the_publication_and_its_listing_from_current_outputs(
-        self, family: Family, data_dir: Path, collections: list[Family]
+    def test_prepares_from_pinned_sources_and_inspects_from_cloud(
+        self,
+        context: RunContext,
+        families_dir: Path,
+        store: tuple[SQLiteDatabase, list[str]],
     ) -> None:
-        result = invoke('prepare', 'writing-f')
-
-        assert result.exit_code == 0, result.output
-        (path,) = (data_dir / 'publications' / 'writing-f').glob('*.json')
-        written = publication.read(path)
-        assert written.systems == {'large': 'Public Large', 'small': 'Public Small'}
-        assert path.with_suffix('.md').is_file()
-        assert f'written to `{path}`' in result.stdout
-        assert collections == [family]
-
-    def test_refuses_a_family_without_public_voting(
-        self, families_dir: Path, collections: list[Family]
-    ) -> None:
-        write_votes_family(
-            families_dir, list(SYSTEMS), CATEGORIES, name='writing-f', samples=2
+        generation = collect(context, collected())
+        current = families_dir / 'writing-f' / 'family.toml'
+        current.write_text(
+            current.read_text().replace('public_voting = true', 'public_voting = false')
         )
 
-        result = invoke('prepare', 'writing-f')
+        result = invoke('prepare', 'writing-f', 'production')
 
-        assert result.exit_code == 1
-        assert 'sets no `public_voting`' in result.stderr
+        assert result.exit_code == 0, result.output
+        database, _ = store
+        metadata = database.execute(
+            'SELECT publication_id FROM publication_preparations'
+        ).rows
+        identity = str(metadata[0]['publication_id'])
+        pinned = publication.preparation(database, identity)
+        assert pinned is not None and pinned.collection_id == generation
+        assert database.execute('SELECT * FROM active').rows == []
+        listing = invoke('inspect', identity)
+        assert listing.exit_code == 0, listing.output
+        assert 'Public Large' in listing.stdout
+        assert 'large on first' in listing.stdout
+
+    def test_reuses_original_preparation_and_votes_after_equivalent_recollection(
+        self,
+        context: RunContext,
+        store: tuple[SQLiteDatabase, list[str]],
+        private_repository: PrivateRepository,
+    ) -> None:
+        original = collect(context, collected())
+        assert invoke('prepare', 'writing-f', 'production').exit_code == 0
+        database, _ = store
+        identity = str(
+            database.execute(
+                'SELECT publication_id FROM publication_preparations'
+            ).rows[0]['publication_id']
+        )
+        pinned = publication.preparation(database, identity)
+        published = publication.read_prepared(database, identity)
+        publication.activate(database, identity, NOW)
+        identifier = record_vote(
+            database, published, NOW, actor='reader', age=timedelta(hours=1)
+        )
+        (private_repository.seed / 'unrelated.txt').write_text(
+            'A new unrelated source revision.\n'
+        )
+        revision = commit_all(private_repository.seed, 'Update unrelated source')
+        git(private_repository.seed, 'push', '--quiet', 'origin', 'main')
+        fresh = collect(
+            context,
+            [*collected(), make_trial('first', 'unlisted', cost_usd=99.0)],
+            case_revision=revision,
+        )
+
+        result = invoke('prepare', 'writing-f', 'production')
+
+        assert result.exit_code == 0, result.output
+        assert 'Reused prepared publication' in result.stdout
+        assert fresh != original
+        assert publication.preparation(database, identity) == pinned
+        assert pinned is not None and pinned.collection_id == original
+        assert database.execute('SELECT id FROM votes').rows == [{'id': identifier}]
+        assert database.execute('SELECT publication_id FROM active').rows == [
+            {'publication_id': identity}
+        ]
+
+    @pytest.mark.parametrize(
+        'field',
+        [
+            'cost_usd',
+            'input_tokens',
+            'output_tokens',
+            'cached_tokens',
+            'cache_write_tokens',
+            'reasoning_tokens',
+            'latency_sec',
+            'reward',
+        ],
+    )
+    def test_refuses_changed_metrics_with_the_same_publication_identity(
+        self, context: RunContext, store: tuple[SQLiteDatabase, list[str]], field: str
+    ) -> None:
+        collect(context, collected())
+        assert invoke('prepare', 'writing-f', 'production').exit_code == 0
+        database, _ = store
+        identity = str(
+            database.execute(
+                'SELECT publication_id FROM publication_preparations'
+            ).rows[0]['publication_id']
+        )
+        pinned = publication.preparation(database, identity)
+        outputs = collected()
+        outputs[0] = outputs[0].model_copy(update={field: 77})
+        collect(context, outputs)
+
+        result = invoke('prepare', 'writing-f', 'production')
+
+        assert result.exit_code == 1, result.output
+        assert 'whose output facts differ' in result.stderr
+        assert publication.preparation(database, identity) == pinned
 
 
 class TestPublish:
-    def test_activates_the_file_once_and_reports_a_repeat(
-        self, prepared: Path, store: tuple[SQLiteDatabase, list[str]]
+    def test_activates_the_reviewed_cloud_id_once_and_reports_a_repeat(
+        self, prepared: str, store: tuple[SQLiteDatabase, list[str]]
     ) -> None:
         database, targets = store
-        identifier = prepared.stem
 
-        first = invoke('publish', 'staging', str(prepared))
-        second = invoke('publish', 'staging', str(prepared))
+        first = invoke('publish', 'staging', prepared)
+        second = invoke('publish', 'staging', prepared)
 
         assert first.exit_code == second.exit_code == 0, first.output
-        assert targets == ['staging', 'staging']
-        assert first.stdout == (
-            f'Published `writing-f` to `staging`: publication `{identifier}` with '
-            '2 cases and 4 outputs.\n'
+        assert targets == ['private', 'staging', 'private', 'staging']
+        assert (
+            f'Published `writing-f` to `staging`: publication `{prepared}`'
+            in first.stdout
         )
-        assert second.stdout == (
-            f'Publication `{identifier}` is already active for `writing-f` in '
-            '`staging`, so nothing changed.\n'
-        )
+        assert 'already active' in second.stdout
         assert database.execute('SELECT publication_id FROM active').rows == [
-            {'publication_id': identifier}
+            {'publication_id': prepared}
         ]
 
-    def test_refuses_an_edited_file_before_connecting(
-        self, prepared: Path, store: tuple[SQLiteDatabase, list[str]]
+    def test_refuses_corrupted_cloud_content_before_destination_connection(
+        self, prepared: str, store: tuple[SQLiteDatabase, list[str]]
     ) -> None:
-        payload = json.loads(prepared.read_text())
-        payload['display_name'] = 'Edited'
-        prepared.write_text(json.dumps(payload))
+        database, targets = store
+        database.execute('UPDATE publications SET display_name = ?', ['Edited'])
 
-        result = invoke('publish', 'production', str(prepared))
+        result = invoke('publish', 'production', prepared)
 
         assert result.exit_code == 1
-        assert 'was edited' in result.stderr
-        assert store[1] == []
+        assert 'does not match its immutable snapshot' in result.stderr
+        assert targets == ['private']
+        assert database.execute('SELECT * FROM active').rows == []
 
-    def test_names_a_file_that_is_not_a_publication(
-        self, prepared: Path, store: tuple[SQLiteDatabase, list[str]]
+    def test_refuses_an_id_without_verified_preparation(
+        self, family: Family, store: tuple[SQLiteDatabase, list[str]]
     ) -> None:
-        prepared.write_text('{')
-
-        result = invoke('publish', 'production', str(prepared))
-
-        assert (result.exit_code, result.stderr) == (
-            1,
-            f'Publication `{prepared}`: Invalid JSON: EOF while parsing an object at '
-            'line 1 column 1.\n',
-        )
-        assert store[1] == []
-
-    def test_prints_what_d1_refused(
-        self, prepared: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        def refuse(target: str) -> AbstractContextManager[SQLiteDatabase]:
-            raise D1Error('D1 refused the statement with HTTP 403. Forbidden.')
-
-        monkeypatch.setattr(commands, 'connect', refuse)
-
-        result = invoke('publish', 'production', str(prepared))
+        result = invoke('publish', 'production', 'absent')
 
         assert result.exit_code == 1
-        assert result.stderr == 'D1 refused the statement with HTTP 403. Forbidden.\n'
+        assert 'has no verified preparation' in result.stderr
+        assert store[1] == ['private']
 
-    def test_rejects_an_unknown_target_by_name(self, prepared: Path) -> None:
-        result = invoke('publish', 'prod', str(prepared))
+    def test_refuses_a_prepared_target_mismatch_before_activation(
+        self, prepared: str, store: tuple[SQLiteDatabase, list[str]]
+    ) -> None:
+        result = invoke('publish', 'private', prepared)
+
+        assert result.exit_code == 1, result.output
+        assert 'was prepared for `production`' in result.stderr
+        assert store[1] == ['private']
+        assert store[0].execute('SELECT * FROM active').rows == []
+
+    def test_rejects_an_unknown_target_by_name(self, prepared: str) -> None:
+        result = invoke('publish', 'prod', prepared)
 
         assert result.exit_code == 2
         assert "'staging'" in result.stderr and "'production'" in result.stderr
 
 
-class TestServe:
-    @pytest.mark.parametrize('change', ['removed', 'tests', 'no-pairs'])
-    @pytest.mark.usefixtures('collections')
-    def test_synchronizes_active_families_while_another_remains_pairable(
-        self,
-        change: str,
-        family: Family,
-        arena_store: SQLiteDatabase,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        assert isinstance(family.settings, VotesSettings)
-        selected = family.model_copy(
-            update={
-                'settings': family.settings.model_copy(update={'public_voting': False})
-            }
-        )
-        changed = False
-
-        def names() -> list[str]:
-            return ['kept'] if changed and change == 'removed' else ['kept', 'old']
-
-        def load(name: str) -> Family:
-            settings = selected.settings
-            if changed and name == 'old' and change == 'tests':
-                settings = TaskTestsSettings.model_validate(
-                    family.settings.model_dump(
-                        exclude={
-                            'public_voting',
-                            'reference',
-                            'render',
-                            'language',
-                            'gates',
-                            'defects',
-                        }
-                    )
-                    | {'scorer': 'tests'}
-                )
-            return selected.model_copy(update={'name': name, 'settings': settings})
-
-        def has_jobs(item: Family) -> bool:
-            return not (changed and item.name == 'old' and change == 'no-pairs')
-
-        cases = load_cases(family)
-
-        def load_selected_cases(item: Family) -> list[Case]:
-            return cases
-
-        def keys() -> dict[str, str]:
-            return {}
-
-        def serve(signing: dict[str, str]) -> None:
-            pass
-
-        monkeypatch.setattr(commands, 'family_names', names)
-        monkeypatch.setattr(commands, 'load_family', load)
-        monkeypatch.setattr(commands, 'load_cases', load_selected_cases)
-        monkeypatch.setattr(jobs, 'has_jobs', has_jobs)
-        monkeypatch.setattr(local, 'build', lambda: None)
-        monkeypatch.setattr(local, 'migrate', lambda: None)
-        monkeypatch.setattr(local, 'database', lambda: nullcontext(arena_store))
-        monkeypatch.setattr(local, 'keys', keys)
-        monkeypatch.setattr(local, 'serve', serve)
-
-        first = runner.invoke(cli.app, ['serve'])
-        assert first.exit_code == 0, first.output
-        assert arena_store.execute(
-            'SELECT family FROM active ORDER BY family'
-        ).rows == [
-            {'family': 'kept'},
-            {'family': 'old'},
-        ]
-        changed = True
-        second = runner.invoke(cli.app, ['serve'])
-
-        assert second.exit_code == 0, second.output
-        assert arena_store.execute('SELECT family FROM active').rows == [
-            {'family': 'kept'},
-        ]
-
-    @pytest.mark.usefixtures('collections')
-    def test_serves_local_content_and_deactivates_a_family_that_loses_its_pairs(
-        self,
-        family: Family,
-        arena_store: SQLiteDatabase,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        assert isinstance(family.settings, VotesSettings)
-        selected = family.model_copy(
-            update={
-                'settings': family.settings.model_copy(update={'public_voting': False})
-            }
-        )
-        calls: list[str] = []
-        generated = True
-
-        def load_family(name: str) -> Family:
-            return selected
-
-        def has_jobs(selected: Family) -> bool:
-            return generated
-
-        monkeypatch.setattr(commands, 'load_family', load_family)
-        monkeypatch.setattr(jobs, 'has_jobs', has_jobs)
-        monkeypatch.setattr(local, 'build', lambda: calls.append('build'))
-        monkeypatch.setattr(local, 'migrate', lambda: calls.append('migrate'))
-        monkeypatch.setattr(local, 'database', lambda: nullcontext(arena_store))
-        monkeypatch.setattr(local, 'keys', lambda: {'ACTOR_KEY': 'synthetic-key'})
-
-        def serve(keys: dict[str, str]) -> None:
-            calls.append('serve')
-            assert keys == {'ACTOR_KEY': 'synthetic-key'}
-            assert arena_store.execute('SELECT split FROM cases').rows == [
-                {'split': 'public'},
-                {'split': 'public'},
-            ]
-            with pytest.raises(InputError, match='Stop `bench serve`'), local.lock():
-                pytest.fail('The server released its lock before exiting.')
-
-        monkeypatch.setattr(local, 'serve', serve)
-
-        first = runner.invoke(cli.app, ['serve'])
-        assert first.exit_code == 0, first.output
-        generated = False
-        second = runner.invoke(cli.app, ['serve'])
-
-        assert second.exit_code == 1
-        assert 'No local case has two different passing outputs' in second.stderr
-        assert arena_store.execute('SELECT family FROM active').rows == []
-        assert calls == ['build', 'migrate', 'serve', 'build', 'migrate']
-
-    @pytest.mark.parametrize('failure', ['collection', 'build', 'migration'])
-    @pytest.mark.usefixtures('collections')
-    def test_stops_preparation_failures_before_starting_the_server(
-        self,
-        failure: str,
-        family: Family,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        calls: list[str] = []
-
-        def fail(*args: object) -> None:
-            raise InputError('The preparation input is invalid.')
-
-        def has_jobs(selected: Family) -> bool:
-            return True
-
-        def serve(keys: dict[str, str]) -> None:
-            pytest.fail('Server started.')
-
-        monkeypatch.setattr(jobs, 'has_jobs', has_jobs)
-        monkeypatch.setattr(local, 'build', lambda: calls.append('build'))
-        monkeypatch.setattr(local, 'migrate', lambda: calls.append('migration'))
-        monkeypatch.setattr(local, 'serve', serve)
-        if failure == 'collection':
-            monkeypatch.setattr(collection, 'collect', fail)
-        else:
-            monkeypatch.setattr(
-                local, 'build' if failure == 'build' else 'migrate', fail
-            )
-
-        result = runner.invoke(cli.app, ['serve'])
-
-        assert result.exit_code == 1
-        assert result.stderr == 'The preparation input is invalid.\n'
-        assert calls == (['build'] if failure == 'migration' else [])
-        with local.lock():
-            pass
-
-
 class TestStatus:
     def test_summarizes_the_active_families(
-        self, prepared: Path, store: tuple[SQLiteDatabase, list[str]]
+        self, prepared: str, store: tuple[SQLiteDatabase, list[str]]
     ) -> None:
         database, _ = store
-        published = publication.read(prepared)
+        published = publication.read_prepared(database, prepared)
         now = datetime.now(UTC)
-        publication.publish(database, published, now, target='production')
+        publication.activate(database, prepared, now)
         record_vote(database, published, now, actor='voter', age=timedelta(hours=1))
 
         result = invoke('status', 'production', 'writing-f')
@@ -638,7 +583,7 @@ class TestFail:
         def refuse(target: str) -> AbstractContextManager[SQLiteDatabase]:
             raise D1Error('D1 refused the statement with HTTP 403. Forbidden.')
 
-        monkeypatch.setattr(commands, 'connect', refuse)
+        monkeypatch.setattr(d1, 'connect', refuse)
 
         result = invoke(*args)
 

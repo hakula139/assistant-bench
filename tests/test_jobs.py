@@ -225,7 +225,9 @@ class TestDriftedSystems:
             task='f/a',
         )
 
-        drifted = jobs.drifted_systems(VOTES, [self.CURRENT])
+        drifted = jobs.drifted_systems(
+            VOTES, [self.CURRENT], [jobs.job_source(data_dir / 'jobs' / 'f' / 'job-1')]
+        )
 
         assert drifted == expected
 
@@ -249,7 +251,9 @@ class TestDriftedSystems:
                 task=f'f/{trial}',
             )
 
-        drifted = jobs.drifted_systems(VOTES, [small, large])
+        drifted = jobs.drifted_systems(
+            VOTES, [small, large], [jobs.job_source(data_dir / 'jobs' / 'f' / 'job-1')]
+        )
 
         assert drifted == [
             ('acme-large', 'fp-old', fingerprint(large)),
@@ -268,7 +272,7 @@ class TestJob:
         ids=['failed', 'filtered', 'refused'],
     )
     def test_retries_infrastructure_failures_without_regenerating_bad_responses(
-        self, status: str, reason: str | None, refusal: str | None
+        self, data_dir: Path, status: str, reason: str | None, refusal: str | None
     ) -> None:
         result = ResponseResult(
             Response.model_validate(
@@ -276,7 +280,9 @@ class TestJob:
             ),
             'req-1',
         )
-        config = jobs.job(VOTES, [make_system(api='openai-responses')], [])
+        config = jobs.job(
+            VOTES, [make_system(api='openai-responses')], [], root=data_dir, sources=[]
+        )
         queue = RetryProbe(n_concurrent=1, retry_config=config.retry)
 
         with pytest.raises(NativeCompletionError) as error:
@@ -285,6 +291,7 @@ class TestJob:
         assert not queue.retries(type(error.value).__name__)
         assert queue.retries('APIConnectionError')
         assert queue.retries('InternalServerError')
+        assert config.retry.max_retries == 0
         assert not queue.retries('AgentTimeoutError')
         assert not queue.retries('VerifierTimeoutError')
 
@@ -295,7 +302,7 @@ class TestJob:
         small = make_system(name='small', route='acme/small', effort=None)
         task = data_dir / 'tasks' / 'f' / 'c'
 
-        job = jobs.job(VOTES, [large, small], [task])
+        job = jobs.job(VOTES, [large, small], [task], root=data_dir, sources=[])
 
         assert [
             (agent.import_path, agent.model_name, agent.concurrency_group)
@@ -314,7 +321,7 @@ class TestJob:
         }
         assert job.n_attempts == 2
         assert job.n_concurrent_trials == jobs.N_CONCURRENT_TRIALS
-        assert job.retry.max_retries == 1
+        assert job.retry.max_retries == 0
         assert job.verifier.disable
         assert job.environment == trial_config.EnvironmentConfig(
             import_path=HOST_ENVIRONMENT, kwargs={'auto_mounting': True}
@@ -329,7 +336,7 @@ class TestJob:
         systems = jobs.family_systems(family, [make_system()])
         task = case_task(family, 'echo')
 
-        job = jobs.job(family, systems, [task])
+        job = jobs.job(family, systems, [task], root=data_dir, sources=[])
 
         (agent,) = job.agents
         assert (agent.import_path, agent.model_name, agent.concurrency_group) == (
@@ -355,19 +362,21 @@ class TestJob:
         assert [t.path for t in job.tasks] == [task]
 
     def test_keeps_a_successful_authored_task_reusable_at_its_declared_deadline(
-        self, families_dir: Path, monkeypatch: pytest.MonkeyPatch
+        self, families_dir: Path, data_dir: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         family = voted_tasks(families_dir, 'echo')
         systems = jobs.family_systems(family, [make_system()])
         task = case_task(family, 'echo')
         monkeypatch.setattr('assistant_bench.tasks.AGENT_TIMEOUT_SEC', 900.0)
-        old = jobs.job(family, systems, [task]).model_copy(
+        old = jobs.job(family, systems, [task], root=data_dir, sources=[]).model_copy(
             update={'job_name': 'old-deadline'}
         )
         first = finish_job(old)
         monkeypatch.setattr('assistant_bench.tasks.AGENT_TIMEOUT_SEC', 3600.0)
 
-        current = jobs.job(family, systems, [task])
+        current = jobs.job(
+            family, systems, [task], root=data_dir, sources=[jobs.job_source(first)]
+        )
         plan = asyncio.run(JobPlan.from_config(current))
         (source,) = current.source_jobs
         diff = compare_job_trials(plan, load_source_trials([(source, first)]))
@@ -385,7 +394,8 @@ class TestJob:
         for name in ('job-1', 'job-3'):
             (jobs_dir / name / 'result.json').write_text('{}')
 
-        job = jobs.job(VOTES, [make_system()], [])
+        sources = [jobs.job_source(jobs_dir / name) for name in ('job-1', 'job-3')]
+        job = jobs.job(VOTES, [make_system()], [], root=data_dir, sources=sources)
 
         assert job.source_jobs == [
             SourceJobConfig(action='diff', type='local', path=jobs_dir / name)
@@ -393,7 +403,7 @@ class TestJob:
         ]
 
     def test_names_jobs_in_start_order_within_one_second(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, data_dir: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         starts = iter(START + timedelta(milliseconds=ms) for ms in range(3))
 
@@ -407,7 +417,10 @@ class TestJob:
 
         names = [
             JobConfig().job_name,
-            *(jobs.job(VOTES, [make_system()], []).job_name for _ in range(2)),
+            *(
+                jobs.job(VOTES, [make_system()], [], root=data_dir, sources=[]).job_name
+                for _ in range(2)
+            ),
         ]
 
         assert names[0] < names[1] < names[2]
@@ -423,7 +436,7 @@ class TestCheckJob:
         family = load_family('smoke')
         task = case_task(family, 'echo')
 
-        job = jobs.check_job(family, [task])
+        job = jobs.check_job(family, [task], root=data_dir)
 
         assert [(agent.name, agent.import_path) for agent in job.agents] == [
             ('oracle', None),
@@ -441,26 +454,40 @@ class TestCheckJob:
 
 
 class TestPendingTrials:
-    def test_counts_the_trials_harbor_would_rerun(self) -> None:
+    def test_counts_the_trials_harbor_would_rerun(self, data_dir: Path) -> None:
         family = load_family('smoke-text')
         large = make_system()
         small = make_system(name='small', route='acme/small')
-        tasks = render_tasks(family, load_cases(family)[:2])
-        finish_job(
-            jobs.job(family, [large], tasks[:1]).model_copy(update={'job_name': 'old'})
+        tasks = render_tasks(family, load_cases(family)[:2], root=data_dir)
+        first = finish_job(
+            jobs.job(family, [large], tasks[:1], root=data_dir, sources=[]).model_copy(
+                update={'job_name': 'old'}
+            )
         )
 
-        pending = jobs.pending_trials(jobs.job(family, [large, small], tasks))
+        pending = jobs.pending_trials(
+            jobs.job(
+                family,
+                [large, small],
+                tasks,
+                root=data_dir,
+                sources=[jobs.job_source(first)],
+            )
+        )
 
         assert pending == Counter({'acme-large': 1, 'small': 2})
 
-    def test_counts_no_regrade_of_a_minor_bumped_task(self, families_dir: Path) -> None:
+    def test_counts_no_regrade_of_a_minor_bumped_task(
+        self, families_dir: Path, data_dir: Path
+    ) -> None:
         family = voted_tasks(families_dir, 'again', 'echo')
         systems = jobs.family_systems(family, [make_system()])
         tasks = [case_task(family, task_id) for task_id in ('again', 'echo')]
-        first = finish_job(jobs.job(family, systems, tasks))
+        first = finish_job(jobs.job(family, systems, tasks, root=data_dir, sources=[]))
         break_setting(tasks[1], ('task', 'version'), '1.1.0')
-        job = jobs.job(family, systems, tasks)
+        job = jobs.job(
+            family, systems, tasks, root=data_dir, sources=[jobs.job_source(first)]
+        )
         plan = asyncio.run(JobPlan.from_config(job))
         (source,) = job.source_jobs
         diff = compare_job_trials(plan, load_source_trials([(source, first)]))
@@ -473,40 +500,12 @@ class TestPendingTrials:
 
         assert pending == Counter()
 
-    def test_counts_nothing_without_tasks(self) -> None:
-        pending = jobs.pending_trials(jobs.job(VOTES, [make_system()], []))
+    def test_counts_nothing_without_tasks(self, data_dir: Path) -> None:
+        pending = jobs.pending_trials(
+            jobs.job(VOTES, [make_system()], [], root=data_dir, sources=[])
+        )
 
         assert pending == Counter()
-
-
-class TestHasJobs:
-    @pytest.mark.parametrize(
-        ('directory', 'result', 'expected'),
-        [(False, False, False), (True, False, False), (True, True, True)],
-        ids=['no-job', 'job-without-a-result', 'finished-job'],
-    )
-    def test_reports_whether_the_family_has_a_job(
-        self, data_dir: Path, directory: bool, result: bool, expected: bool
-    ) -> None:
-        family = load_family('smoke-text')
-        job = data_dir / 'jobs' / 'smoke-text' / 'job-1'
-        if directory:
-            job.mkdir(parents=True)
-        if result:
-            (job / 'result.json').touch()
-
-        found = jobs.has_jobs(family)
-
-        assert found is expected
-
-    def test_ignores_a_check_job(self, data_dir: Path) -> None:
-        job = data_dir / 'checks' / 'smoke' / 'job-1'
-        job.mkdir(parents=True)
-        (job / 'result.json').touch()
-
-        found = jobs.has_jobs(load_family('smoke'))
-
-        assert found is False
 
 
 class TestRunJob:
@@ -563,7 +562,7 @@ class TestRunJob:
     ) -> None:
         harbor = self.stub_harbor(tmp_path, monkeypatch, 0)
         family = load_family('smoke')
-        job = jobs.check_job(family, [case_task(family, 'echo')])
+        job = jobs.check_job(family, [case_task(family, 'echo')], root=data_dir)
 
         job_dir = jobs.run_job(job)
 
@@ -578,7 +577,7 @@ class TestRunJob:
     ) -> None:
         self.stub_harbor(tmp_path, monkeypatch, 3)
         family = load_family('smoke')
-        job = jobs.check_job(family, [case_task(family, 'echo')])
+        job = jobs.check_job(family, [case_task(family, 'echo')], root=tmp_path)
 
         with pytest.raises(subprocess.CalledProcessError) as error:
             jobs.run_job(job)
@@ -605,7 +604,7 @@ class TestRunJob:
             )
         )
         family = load_family('smoke')
-        job = jobs.check_job(family, [case_task(family, 'echo')])
+        job = jobs.check_job(family, [case_task(family, 'echo')], root=tmp_path)
         log = job.jobs_dir / f'{job.job_name}.log' if captured else None
         run = Mock(wraps=subprocess.run)
         monkeypatch.setattr(subprocess, 'run', run)

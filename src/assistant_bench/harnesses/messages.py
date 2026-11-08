@@ -13,6 +13,8 @@ from harbor.llms.base import ContextLengthExceededError
 from pydantic import TypeAdapter
 
 from assistant_bench.generation import load_generation
+from assistant_bench.harnesses.accounting import REQUEST_ID, current_trial
+from assistant_bench.harnesses.endpoint import receipt
 from assistant_bench.harnesses.native import (
     ITEMS_KEY,
     NativeCompletionError,
@@ -132,6 +134,8 @@ async def request_messages(
     """Persist any received message snapshot when streaming ends or fails."""
     started = time.monotonic()
     stopped = False
+    streaming = False
+    recorder = current_trial()
     try:
         async with client.messages.stream(
             model=model,
@@ -143,6 +147,7 @@ async def request_messages(
             if effort
             else omit,
         ) as stream:
+            streaming = True
             result.request_id = stream.request_id
             async for event in stream:
                 if event.type == 'message_start':
@@ -152,11 +157,34 @@ async def request_messages(
                 if event.type == 'message_delta':
                     result.final_usage = True
                 if event.type == 'message_stop':
+                    await recorder.confirm(
+                        stream.response.request.extensions[REQUEST_ID],
+                        receipt(
+                            'anthropic-messages',
+                            {
+                                'type': 'message',
+                                'id': result.message.id,
+                                'model': result.message.model,
+                                'stop_reason': result.message.stop_reason,
+                                'usage': result.message.usage.model_dump(mode='json')
+                                if result.final_usage
+                                else None,
+                            }
+                            if result.message is not None
+                            else None,
+                            stream.response.status_code,
+                            stream.request_id,
+                        ),
+                    )
                     stopped = True
             if stopped:
                 result.message = await stream.get_final_message()
         result.complete = stopped
         result.check(complete=False)
+    except BaseException:
+        if streaming and not stopped:
+            await recorder.uncertain()
+        raise
     finally:
         result.latency_sec = round(time.monotonic() - started, 3)
         if result.message is not None:

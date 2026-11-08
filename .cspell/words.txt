@@ -1,5 +1,6 @@
 acompletion
 aiohttp
+aread
 asciinema
 asyncio
 ATIF
@@ -138,6 +139,7 @@ unpushed
 unranked
 unrouted
 unscored
+unstarted
 unstub
 untabled
 untimed

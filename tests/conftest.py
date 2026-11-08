@@ -1,8 +1,13 @@
+import json
 import os
+import shutil
 import ssl
-from collections.abc import Callable, Iterator
+import sys
+from collections.abc import Callable, Generator, Iterator
+from contextlib import contextmanager
+from datetime import timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 import httpx2
@@ -11,16 +16,28 @@ import trustme
 from anthropic import AsyncAnthropic
 from openai import AsyncOpenAI
 
-from assistant_bench import families, jobs, report
+from assistant_bench import execution, families, jobs, report
 from assistant_bench.arena.d1 import ENV_FILE_VAR, TOKEN_FILE_VAR
+from assistant_bench.artifacts import ArtifactRepository
 from assistant_bench.catalog import EXPORT_VAR, NixosConfigExport
 from assistant_bench.database import SQLiteDatabase
+from assistant_bench.harnesses import fingerprint
+from assistant_bench.harnesses.accounting import TrialAccounting
 from assistant_bench.harnesses.endpoint import ENDPOINT_VARS, SDK_HEADERS_VAR, Endpoint
 from assistant_bench.paths import DATA_DIR_VAR
+from assistant_bench.runtime import REPOSITORY_VAR, RunContext
+from assistant_bench.state import State
 from support import (
     EXPORT_FILE,
+    FIXTURES,
+    START,
+    PrivateRepository,
     StubEndpoint,
+    accounted_trial,
     arena_database,
+    git,
+    make_system,
+    private_database,
     serve_stub,
 )
 
@@ -126,8 +143,11 @@ def endpoint_clients(monkeypatch: pytest.MonkeyPatch) -> list[AsyncOpenAI]:
     clients: list[AsyncOpenAI] = []
     build = Endpoint.client
 
-    def record(endpoint: Endpoint) -> AsyncOpenAI:
-        client = build(endpoint)
+    def record(
+        endpoint: Endpoint,
+        api: Literal['openai-chat-completions', 'openai-responses'],
+    ) -> AsyncOpenAI:
+        client = build(endpoint, api)
         clients.append(client)
         return client
 
@@ -190,8 +210,156 @@ def arena_store() -> Iterator[SQLiteDatabase]:
 
 
 @pytest.fixture
+def private_store() -> Iterator[SQLiteDatabase]:
+    with private_database() as database:
+        yield database
+
+
+@pytest.fixture
+def private_state(private_store: SQLiteDatabase) -> State:
+    return State(private_store)
+
+
+@pytest.fixture
+def private_repository(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> PrivateRepository:
+    for name in (
+        'GIT_DIR',
+        'GIT_WORK_TREE',
+        'GIT_INDEX_FILE',
+        'GIT_OBJECT_DIRECTORY',
+        'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+        'GIT_CONFIG_COUNT',
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv('GIT_CONFIG_GLOBAL', os.devnull)
+    monkeypatch.setenv('GIT_CONFIG_NOSYSTEM', '1')
+    for name in ('GIT_AUTHOR_NAME', 'GIT_COMMITTER_NAME'):
+        monkeypatch.setenv(name, 'Test')
+    for name in ('GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_EMAIL'):
+        monkeypatch.setenv(name, 'test@example.com')
+    remote = tmp_path / 'remote.git'
+    git(tmp_path, 'init', '--quiet', '--bare', '--initial-branch=main', str(remote))
+    seed = tmp_path / 'seed'
+    seed.mkdir()
+    git(seed, 'init', '--quiet', '--initial-branch=main')
+    cases = seed / 'cases'
+    cases.mkdir()
+    (cases / 'sample.toml').write_bytes(b'cases = []\r\n')
+    (seed / 'unrelated.txt').write_text('Not a case source.\n')
+    git(seed, 'add', '.')
+    git(seed, 'commit', '--quiet', '-m', 'Add synthetic sources')
+    git(seed, 'remote', 'add', 'origin', str(remote))
+    git(seed, 'push', '--quiet', 'origin', 'main')
+    revision = git(seed, 'rev-parse', 'HEAD')
+    slug = 'example/private-data'
+    metadata = tmp_path / 'metadata.json'
+    metadata.write_text(
+        json.dumps(
+            {
+                'full_name': slug,
+                'private': True,
+                'ssh_url': str(remote),
+                'default_branch': 'main',
+            }
+        )
+    )
+    binary = tmp_path / 'bin'
+    binary.mkdir()
+    stub = binary / 'gh'
+    stub.write_text(
+        f'#!{sys.executable}\n' + (FIXTURES / 'artifacts' / 'gh.py').read_text()
+    )
+    stub.chmod(0o755)
+    monkeypatch.setenv('PATH', f'{binary}{os.pathsep}{os.environ["PATH"]}')
+    monkeypatch.setenv('TEST_GH_METADATA', str(metadata))
+    monkeypatch.delenv('TEST_GH_STATUS', raising=False)
+    return PrivateRepository(ArtifactRepository(slug), remote, seed, metadata, revision)
+
+
+@pytest.fixture
+def run_context(
+    request: pytest.FixtureRequest,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    private_store: SQLiteDatabase,
+    private_state: State,
+    private_repository: PrivateRepository,
+) -> RunContext:
+    @contextmanager
+    def connect(
+        target: str, *, credential: str | None = None
+    ) -> Generator[SQLiteDatabase]:
+        assert target == 'private'
+        assert credential == 'synthetic-database-credential'
+        yield private_store
+
+    monkeypatch.setattr(execution, 'connect', connect)
+    monkeypatch.setattr(execution, 'd1_token', lambda: 'synthetic-database-credential')
+    monkeypatch.setenv(REPOSITORY_VAR, private_repository.client.repository_slug)
+    root = tmp_path / 'execution'
+    root.mkdir()
+    public = tmp_path / 'public'
+    public.mkdir(exist_ok=True)
+    source = Path(__file__).parents[1]
+    for name in ('pyproject.toml', 'uv.lock', 'systems.toml'):
+        shutil.copyfile(source / name, public / name)
+    shutil.copytree(
+        source / 'src',
+        public / 'src',
+        ignore=shutil.ignore_patterns('__pycache__', '*.pyc'),
+    )
+    if 'families_dir' not in request.fixturenames:
+        shutil.copytree(source / 'families', public / 'families')
+    cases = private_repository.seed / 'cases'
+    (cases / 'sample.toml').unlink()
+    (cases / '.gitkeep').touch()
+    git(private_repository.seed, 'add', 'cases')
+    git(
+        private_repository.seed,
+        'commit',
+        '--quiet',
+        '-m',
+        'Start without private cases',
+    )
+    git(private_repository.seed, 'push', '--quiet', 'origin', 'main')
+    revision = git(private_repository.seed, 'rev-parse', 'HEAD')
+    private_root = private_repository.client.source(
+        revision, tmp_path / 'private-source'
+    )
+    return RunContext(
+        root=root,
+        public_root=public,
+        private_root=private_root,
+        code_revision='1' * 40,
+        case_revision=revision,
+        state=private_state,
+        artifacts=private_repository.client,
+    )
+
+
+@pytest.fixture
+def bound_trial(private_state: State) -> Iterator[TrialAccounting]:
+    system = make_system()
+    with accounted_trial(
+        private_state, system=system.name, fingerprint=fingerprint(system)
+    ) as recorder:
+        yield recorder
+
+
+@pytest.fixture
+def begun_trial(bound_trial: TrialAccounting) -> Iterator[TrialAccounting]:
+    bound_trial.begin(START)
+    try:
+        yield bound_trial
+    finally:
+        bound_trial.finish(START + timedelta(seconds=1))
+
+
+@pytest.fixture
 def families_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    directory = tmp_path / 'families'
+    directory = tmp_path / 'public' / 'families'
     monkeypatch.setattr(families, 'FAMILIES_DIR', directory)
     return directory
 

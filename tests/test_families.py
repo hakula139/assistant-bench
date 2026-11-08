@@ -736,12 +736,12 @@ class TestLoadCases:
         assert str(error.value).startswith(f'Family `f`: `{path}` is not valid TOML:')
         assert 'line 1, column' in str(error.value)
 
-    def test_appends_local_cases_to_the_committed_ones(self, data_dir: Path) -> None:
+    def test_appends_private_cases_to_the_committed_ones(self, data_dir: Path) -> None:
         local = data_dir / 'cases' / 'smoke-text.toml'
         local.parent.mkdir(parents=True)
         local.write_text(case_entry('zh-local', source='held-out'))
 
-        cases = load_cases(load_family('smoke-text'))
+        cases = load_cases(load_family('smoke-text'), private_root=local.parent)
 
         assert [case.id for case in cases] == ['en-greeting', 'zh-greeting', 'zh-local']
         assert cases[-1].source == 'held-out'
@@ -755,7 +755,7 @@ class TestLoadCases:
         committed = FAMILIES_DIR / 'smoke-text' / 'cases.toml'
 
         with pytest.raises(ValueError) as error:
-            load_cases(load_family('smoke-text'))
+            load_cases(load_family('smoke-text'), private_root=local.parent)
 
         assert str(error.value) == (
             'Family `smoke-text`: case `en-greeting` appears at '
@@ -770,7 +770,7 @@ class TestLoadCases:
         unread.parent.mkdir(parents=True)
         unread.write_text('cases = []\n')
 
-        cases = load_cases(load_family('smoke-text'))
+        cases = load_cases(load_family('smoke-text'), private_root=unread.parent)
 
         assert [case.id for case in cases] == ['en-greeting', 'zh-greeting']
 
@@ -781,7 +781,7 @@ class TestLoadCases:
         backup.mkdir(parents=True)
         (backup / 'notes.md').write_text('Notes.')
 
-        cases = load_cases(load_family('smoke'))
+        cases = load_cases(load_family('smoke'), private_root=data_dir / 'cases')
 
         assert [case.id for case in cases] == ['echo']
 
@@ -854,7 +854,7 @@ class TestLoadCases:
         write_task(families_dir / 'f' / 'tasks' / 'a')
         write_task(data_dir / 'cases' / 'f' / 'b', source='held-out')
 
-        cases = load_cases(load_family('f'))
+        cases = load_cases(load_family('f'), private_root=data_dir / 'cases')
 
         assert [(case.id, case.source) for case in cases] == [
             ('a', 'synthetic'),
@@ -869,7 +869,7 @@ class TestLoadCases:
         write_task(data_dir / 'cases' / 'f' / 'a', source='held-out')
 
         with pytest.raises(ValueError) as error:
-            load_cases(load_family('f'))
+            load_cases(load_family('f'), private_root=data_dir / 'cases')
 
         assert str(error.value) == (
             'Family `f`: case `a` appears at `tasks/a` and `cases/f/a`.'
@@ -1042,11 +1042,11 @@ class TestCheckCaseEntries:
             path.write_text('cases = []\n')
 
         with pytest.raises(ValueError) as error:
-            check_case_entries()
+            check_case_entries(private_root=root)
 
         entries = ', '.join(f'`{root / name}`' for name in reported)
         assert str(error.value) == (
-            f"No family reads {entries} under the data directory's `cases/`. A "
+            f'No family reads {entries} under the private source `cases/`. A '
             '`cases.toml` family reads `cases/<family>.toml` and a `tasks/` family '
             'reads `cases/<family>/<task>/`, so move each entry to one of those '
             'paths, out of `cases/`, or under a hidden directory such as '
@@ -1069,7 +1069,7 @@ class TestCheckCaseEntries:
         local.parent.mkdir(parents=True, exist_ok=True)
         local.write_text('cases = []\n')
 
-        check_case_entries()
+        check_case_entries(private_root=data_dir / 'cases')
 
 
 class TestCaseTask:
@@ -1083,6 +1083,9 @@ class TestCaseTask:
         write_task(local, source='held-out')
         family = load_family('f')
 
-        found = (case_task(family, 'a'), case_task(family, 'b'))
+        found = (
+            case_task(family, 'a', private_root=data_dir / 'cases'),
+            case_task(family, 'b', private_root=data_dir / 'cases'),
+        )
 
         assert found == (committed, local)

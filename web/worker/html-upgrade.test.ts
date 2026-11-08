@@ -16,6 +16,49 @@ const tables = [
   'publications',
 ] as const;
 
+async function seedLegacyPublications(): Promise<void> {
+  const systems = ['acme-large', 'acme-pro', 'acme-small'];
+  for (const [family, render] of [
+    [WRITING, 'text'],
+    [CODING, 'diff'],
+  ] as const) {
+    const publication = `legacy-${family}`;
+    const statements = [
+      env.DB.prepare(
+        `INSERT INTO publications (id, family, display_name, aspect, render, defects,
+           reference, systems, case_count, output_count, created_at)
+         VALUES (?, ?, 'Synthetic', 'writing', ?, '["facts"]', 'acme-large', '{}', 1, 3, 0)`,
+      ).bind(publication, family, render),
+      env.DB.prepare(
+        `INSERT INTO cases (publication_id, case_key, category, instruction, checklist)
+         VALUES (?, 'legacy-case', 'reply', 'Write a reply.', '[]')`,
+      ).bind(publication),
+    ];
+    for (const system of systems) {
+      const content = render === 'diff' ? `--- a/x\n+++ b/x\n+${system}\n` : system;
+      statements.push(
+        env.DB.prepare(
+          `INSERT INTO outputs (publication_id, output_key, case_key, system, fingerprint,
+             verdict, errored, length, content_digest, content)
+           VALUES (?, ?, 'legacy-case', ?, ?, 'pass', 0, 1, ?, ?)`,
+        ).bind(publication, system, system, `fp-${system}`, content, content),
+      );
+    }
+    statements.push(
+      env.DB.prepare(
+        `INSERT INTO publication_pair_cases (publication_id, low_system, high_system, case_keys)
+         SELECT a.publication_id, a.system, b.system, '["legacy-case"]'
+         FROM outputs AS a JOIN outputs AS b ON b.publication_id = a.publication_id
+         WHERE a.publication_id = ? AND a.system < b.system`,
+      ).bind(publication),
+      env.DB.prepare(
+        'INSERT INTO active (family, publication_id, activated_at) VALUES (?, ?, 0)',
+      ).bind(family, publication),
+    );
+    await env.DB.batch(statements);
+  }
+}
+
 async function storedRows(): Promise<Record<string, Record<string, unknown>[]>> {
   return Object.fromEntries(
     await Promise.all(
@@ -63,10 +106,7 @@ describe('0005_html_outputs', () => {
       env.TEST_MIGRATIONS.filter(({ name }) => name < migration.name),
       'upgrade_migrations',
     );
-    const fixture = env.TEST_PUBLICATION.split(/;\n(?=INSERT|$)/).filter(
-      (statement) => statement.trim() !== '',
-    );
-    await env.DB.batch(fixture.map((statement) => env.DB.prepare(statement)));
+    await seedLegacyPublications();
     await expect(
       env.DB.prepare("UPDATE publications SET render = 'html' WHERE family = ?")
         .bind(WRITING)
@@ -95,7 +135,7 @@ describe('0005_html_outputs', () => {
     const text = await pairOf(textActor, WRITING);
     const diff = await pairOf(diffActor, CODING);
     expect((await vote(textActor, text.pair?.id ?? '')).status).toBe(204);
-    await pairOf(textActor, WRITING);
+    expect((await pairOf(textActor, WRITING)).pair).not.toBeNull();
     const before = await storedRows();
     const oldIndexes = await indexes();
     await expectCountedVotes();

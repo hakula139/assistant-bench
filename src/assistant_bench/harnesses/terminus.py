@@ -1,9 +1,11 @@
 """Harbor's terminus-2 agent, sending its model calls to the bench endpoint."""
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from importlib import metadata
+from inspect import unwrap
 from pathlib import Path
+from types import CoroutineType
 from typing import Any, ClassVar, Self, assert_never, override
 
 from anthropic import AsyncAnthropic
@@ -20,10 +22,11 @@ from harbor.models.metric import UsageInfo
 from harbor.models.trajectories import Step, SubagentTrajectoryRef
 from openai import AsyncOpenAI
 from pydantic import TypeAdapter
-from tenacity import retry_if_not_exception_type
+from tenacity import stop_after_attempt
 
 from assistant_bench.catalog import load_export
 from assistant_bench.generation import load_generation
+from assistant_bench.harnesses.accounting import current_trial
 from assistant_bench.harnesses.endpoint import Endpoint, preflight
 from assistant_bench.harnesses.labels import Labels
 from assistant_bench.harnesses.messages import MessagesLLM
@@ -38,7 +41,6 @@ from assistant_bench.harnesses.options import ApiOptions
 from assistant_bench.harnesses.responses import ResponsesLLM
 from assistant_bench.harnesses.usage import (
     MeasuredUsage,
-    append_attempt,
     measure,
     record_calls,
 )
@@ -57,6 +59,8 @@ class ChatCompletionsLLM(LiteLLM):
     _context_limit: int
     _output_limit: int
     calls: list[dict[str, Any]]
+
+    call: Callable[..., CoroutineType[Any, Any, LLMResponse]] = unwrap(LiteLLM.call)
 
     @classmethod
     def configured(
@@ -170,13 +174,13 @@ class Terminus(Terminus2):
                     self._native_settings(model_name, reasoning_effort, model_info),
                 )
             case 'openai-responses':
-                self._endpoint_client = endpoint.client()
+                self._endpoint_client = endpoint.client('openai-responses')
                 return ResponsesLLM(
                     self._endpoint_client,
                     self._native_settings(model_name, reasoning_effort, model_info),
                 )
             case 'openai-chat-completions':
-                self._endpoint_client = endpoint.client()
+                self._endpoint_client = endpoint.client('openai-chat-completions')
                 constructor_kwargs: dict[str, Any] = {
                     **(llm_kwargs or {}),
                     'client': self._endpoint_client,
@@ -212,10 +216,7 @@ class Terminus(Terminus2):
             logs_dir=self.logs_dir,
         )
 
-    _query_llm = Terminus2._query_llm.retry_with(
-        retry=Terminus2._query_llm.retry.retry
-        & retry_if_not_exception_type(NativeCompletionError)
-    )
+    _query_llm = Terminus2._query_llm.retry_with(stop=stop_after_attempt(1))
 
     @override
     async def _run_agent_loop(
@@ -280,6 +281,19 @@ class Terminus(Terminus2):
     ) -> None:
         assert isinstance(self.options, TerminusOptions)
         started_at = datetime.now(UTC)
+        recorder = current_trial()
+        recorder.begin(started_at)
+        try:
+            await self._run(instruction, environment, context)
+        finally:
+            recorder.finish(datetime.now(UTC))
+
+    async def _run(
+        self,
+        instruction: str,
+        environment: BaseEnvironment,
+        context: AgentContext,
+    ) -> None:
         nixos_config_rev = load_export(self._get_env).rev
         harbor_version = metadata.version('harbor')
         llm = self._llm
@@ -304,9 +318,3 @@ class Terminus(Terminus2):
                 context.metadata['attempts'] = llm.attempts
             calls = llm.calls
             record_calls(context, calls)
-            append_attempt(
-                self.logs_dir,
-                self.options,
-                started_at,
-                llm.attempts if isinstance(llm, NativeLLM) else calls,
-            )

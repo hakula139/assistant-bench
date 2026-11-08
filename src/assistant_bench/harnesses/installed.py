@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import os
+import re
 import shlex
 from collections import ChainMap
 from collections.abc import Mapping
@@ -22,14 +23,15 @@ from harbor.agents.installed.codex import (
 )
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from assistant_bench.catalog import load_export
 from assistant_bench.harnesses import cache, proxy
+from assistant_bench.harnesses.accounting import TrialAccounting, current_trial
 from assistant_bench.harnesses.docker import check_local_context
 from assistant_bench.harnesses.endpoint import Endpoint, preflight
 from assistant_bench.harnesses.labels import Labels
-from assistant_bench.harnesses.usage import append_attempt, record_calls
+from assistant_bench.harnesses.usage import record_calls
 
 
 class PinnedVersion(BaseModel):
@@ -49,6 +51,15 @@ class ClaudeCodeOptions(PinnedVersion, HarborClaudeCodeOptions, Labels):
 
 class CodexOptions(PinnedVersion, HarborCodexOptions, Labels):
     pass
+
+
+class _SessionKey(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+
+    peer_token: str = Field(alias='peerToken', pattern=r'^[0-9a-f]{32}$')
+    proc_start: str = Field(default='', alias='procStart')
+    proc_start_ft: str = Field(default='', alias='procStartFt')
+    pid_domain: str = Field(default='', alias='pidDomain')
 
 
 async def _install(
@@ -117,12 +128,14 @@ class ClaudeCode(HarborClaudeCode):
         endpoint = Endpoint.read(self._get_env, 'anthropic-messages')
         assert isinstance(self.options, ClaudeCodeOptions)
         started_at = datetime.now(UTC)
+        recorder = current_trial()
+        recorder.begin(started_at)
         model = self.model_name.removeprefix('anthropic/') if self.model_name else ''
         calls: list[dict[str, Any]] = []
         failed = True
         try:
             async with proxy.connect(
-                endpoint, 'anthropic-messages', model
+                endpoint, 'anthropic-messages', model, recorder=recorder
             ) as connection:
                 calls = connection.calls
                 self._base_url = connection.url
@@ -135,7 +148,10 @@ class ClaudeCode(HarborClaudeCode):
                 await super().run(instruction, environment, context)
             failed = False
         finally:
-            await _finish(self, environment, context, started_at, calls, failed=failed)
+            try:
+                await _finish(self, environment, context, calls, failed=failed)
+            finally:
+                recorder.finish(datetime.now(UTC))
 
 
 class Codex(HarborCodex):
@@ -171,11 +187,15 @@ class Codex(HarborCodex):
         endpoint = Endpoint.read(self._get_env, 'openai-responses')
         assert isinstance(self.options, CodexOptions)
         started_at = datetime.now(UTC)
+        recorder = current_trial()
+        recorder.begin(started_at)
         model = self.model_name.removeprefix('openai/') if self.model_name else ''
         calls: list[dict[str, Any]] = []
         failed = True
         try:
-            async with proxy.connect(endpoint, 'openai-responses', model) as connection:
+            async with proxy.connect(
+                endpoint, 'openai-responses', model, recorder=recorder
+            ) as connection:
                 calls = connection.calls
                 self._base_url = f'{connection.url}/v1'
                 self._extra_env.update(
@@ -187,14 +207,16 @@ class Codex(HarborCodex):
                 await super().run(instruction, environment, context)
             failed = False
         finally:
-            await _finish(self, environment, context, started_at, calls, failed=failed)
+            try:
+                await _finish(self, environment, context, calls, failed=failed)
+            finally:
+                recorder.finish(datetime.now(UTC))
 
 
 async def _finish(
     agent: ClaudeCode | Codex,
     environment: BaseEnvironment,
     context: AgentContext,
-    started_at: datetime,
     calls: list[dict[str, Any]],
     *,
     failed: bool,
@@ -211,13 +233,35 @@ async def _finish(
             'Native agent logs could not be synchronized after a failed run.'
         )
     finally:
-        _record(agent, context, started_at, calls)
+        _record(agent, context, calls)
+
+
+def discard_session_keys(logs: Path, recorder: TrialAccounting) -> None:
+    """Remove Claude's validated messaging credentials from downloaded logs."""
+    sessions = logs / 'sessions'
+    directory = sessions / 'sessions'
+    for parent in (logs, sessions, directory):
+        if parent.is_symlink() or not parent.is_dir():
+            return
+    for path in directory.iterdir():
+        if (
+            re.fullmatch(r'[0-9]+\.[0-9a-f]{64}\.key(?:\.tmp\.[0-9a-f]+)?', path.name)
+            is None
+            or path.is_symlink()
+            or not path.is_file()
+        ):
+            continue
+        try:
+            key = _SessionKey.model_validate_json(path.read_bytes())
+        except ValidationError:
+            continue
+        recorder.remember_secret(key.peer_token)
+        path.unlink()
 
 
 def _record(
     agent: ClaudeCode | Codex,
     context: AgentContext,
-    started_at: datetime,
     calls: list[dict[str, Any]],
 ) -> None:
     assert isinstance(agent.options, ClaudeCodeOptions | CodexOptions)
@@ -228,4 +272,3 @@ def _record(
         'harbor_version': metadata.version('harbor'),
     }
     record_calls(context, calls)
-    append_attempt(agent.logs_dir, agent.options, started_at, calls)

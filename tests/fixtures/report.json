@@ -53,7 +53,7 @@
         "id": 337,
         "votes": 337
       },
-      "local": null
+      "private": null
     },
     "reference": "acme-large",
     "anchor": "acme-large",

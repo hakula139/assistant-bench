@@ -12,9 +12,7 @@ src/assistant_bench/
 ├── arena/
 │   ├── commands.py                         # Publication, status and moderation commands
 │   ├── d1.py                               # Each hosted target's database and credential sources
-│   ├── local.py                            # The local SQLite store, lock, signing keys and Worker lifecycle
-│   ├── publication.py                      # Publications of current outputs and their idempotent activation
-│   ├── stores.py                           # Connections to hosted and local vote stores
+│   ├── publication.py                      # Immutable reviewed publications and their conditional activation
 │   └── votes.py                            # Vote cuts and moderation, the snapshots that save cuts, and the round they close
 ├── collection.py                           # Collection of a family's trials into output records
 ├── canaries.py                             # Route probes, their baseline comparison, and independent attempt records
@@ -23,9 +21,10 @@ src/assistant_bench/
 ├── spend.py                                # The spend ledger of agent attempts, its pricing, and a run's projection and budget
 ├── jobs.py                                 # A family's systems, its Harbor job configs, and their runs
 ├── report.py                               # The report schema and inputs, one results variant per scorer, and closing a round
-├── outputs.py                              # Output records, outputs/<family>.jsonl, the tests pass rule, each system's one fingerprint, and pool conflicts
+├── outputs.py                              # Output records, immutable cloud generations, fingerprints and pool conflicts
 ├── harnesses/
 │   ├── __init__.py                         # System harnesses, their agent kwargs, and fingerprints
+│   ├── accounting.py                       # Paid request admission and durable usage receipts
 │   ├── cache.py                            # Verified, pinned vendor CLI downloads
 │   ├── docker.py                           # Installed-agent host access within Harbor's network policy
 │   ├── endpoint.py                         # Endpoint variables and native SDK transports
@@ -46,10 +45,12 @@ src/assistant_bench/
 │   ├── pass_rates.py                       # Task-clustered pass-rate intervals, pass^k, and the paired leader test
 │   ├── ranking.py                          # Bradley-Terry point fit and its descriptive diagnostics
 │   └── weighting.py                        # Family-wide cumulative actor caps
-├── families.py                             # family.toml, gate, case, and vote models, and the local case merge
+├── families.py                             # Family, gate, case and vote models with explicit pinned source roots
 ├── catalog.py                              # Systems and prices from systems.toml and the nixos-config export
 ├── state.py                                # Private run claims, immutable records and active collection pointers
 ├── artifacts.py                            # Pinned private Git cases and immutable raw trial archives
+├── runtime.py                              # Command-owned materialization of pinned private sources
+├── execution.py                            # Harbor lifecycle claims, audited archives and settlement
 ├── database.py                             # The SQL protocol, SQLite adapter and D1 REST client
 ├── generation.py                           # Revision-owned generation protocol and locked native agent version
 ├── messages.py                             # The style of author-facing messages: code spans and validation errors
@@ -64,7 +65,7 @@ Imports point downward through these layers, so a module never imports one above
 
 1. `cli`, `ci`, and `task_assets`
 2. `arena.commands`
-3. `canaries`, `collection`, and `arguments`
+3. `canaries`, `collection`, `execution`, `runtime`, and `arguments`
 4. `tasks` and `spend`
 5. `jobs`
 6. The remaining `arena` modules
@@ -96,19 +97,19 @@ In `family.toml`, `scorer` discriminates the settings model, which decides how t
 
 The `checkers` scorer evaluates collected replies locally. Its case context, coverage targets and grader revision do not enter rendered instructions, task versions or system fingerprints. Recollection updates verdicts without generating replies, and closing requires one current verdict per configured system and case.
 
-1. `bench run [<family>...]` renders each case into a Harbor task under the data directory, with `instruction.md` and a `task.toml`, or checks each of a task family's own tasks, builds a job config with one agent per system listed in `family.toml` or per system that `--system` names, projects its cost from the family's spend ledger against `budget_usd`, and runs it through the Harbor CLI. Each agent attempt appends its token counts to the job's `attempts.jsonl`, which collection adds to the ledger.
+1. `bench run [<family>...]` pins the clean checkout and private repository revisions, restores earlier trial artifacts into a temporary workspace, renders cases or checks authored tasks, and builds a Harbor job with the selected systems. It projects cost from the private D1 ledger against `budget_usd`. Request admissions and receipts are recorded in private D1 while Harbor runs locally.
 2. Harbor runs each trial's agent. A `Generate` trial starts no container: it sends one request through the system's configured API, writes the reply to `output.txt` in the trial's agent logs, and records usage and response provenance on the trial's `AgentContext`. `Terminus` drives the task's container until the model completes the task, with native context management and an operational timeout. Harbor then grades the container's `/app` with the task's tests in a fresh container.
-3. `bench run` collects the family's trials into `outputs/<family>.jsonl` once Harbor exits, also after a failed run, and `bench collect` re-collects them. Both price tokens from the catalog and take a task's reward. A `votes` family runs its gates over each reply, or for a task family records the diff of each graded `/app` against the task's `environment/app/` and fails the `tests` gate when the reward is below 1.
-4. `bench arena prepare <family>` writes a publication of the current public outputs and a listing to review. `bench arena publish` activates that file in a target's D1 database, where the public [arena](arena.md) records votes on it. `bench serve` collects the other cases into a local publication and serves the same Worker against its local SQLite store.
-5. `bench close <family>` saves a cut of the counted votes, fits the [ranking](ranking.md) and writes the [report](reports.md) to `reports/<family>/<round>.json`. A `tests` family closes from its collected trial rewards instead.
+3. `bench run` stores completed trial artifacts in the private repository and seals a collected output generation in private D1 once Harbor exits, also after a failed run. `bench collect` restores artifacts and seals a new generation, pinning cases, collection code and public system labels. A `votes` family runs its gates over each reply, or for a task family records the diff of each graded `/app` against the task's `environment/app/` and fails the `tests` gate when the reward is below 1.
+4. `bench arena prepare <family> production|private` saves a publication of a sealed output generation in private D1. `bench arena inspect <id>` displays it for review, and `bench arena publish <target> <id>` activates it in that target's D1 database. Public and Access-protected private [arenas](arena.md) record votes independently of local execution.
+5. `bench close <family>` seals a snapshot of the counted votes in private D1, fits the [ranking](ranking.md) and writes the [report](reports.md) to `reports/<family>/<round>.json`. Snapshot replay uses its saved category order, close time and each cut's pinned output generation. A `tests` or `checkers` family closes from its collected generation and pinned case and code revisions.
 
-`bench check [<family>...]` validates each named family, or every family when none is named, and for a `tasks/` family it also runs Harbor's oracle and nop on every task, placing its jobs under `checks/` so that collection never reads them.
+`bench check [<family>...]` validates public sources without cloud authentication, and for a `tasks/` family also runs Harbor's oracle and nop on every task in a temporary workspace. `--private` includes a pinned private repository revision and requires GitHub authentication without opening D1. Check jobs never enter collection.
 
 ## Reruns
 
 Each `bench run` job lists the family's earlier jobs as diff sources, so Harbor skips every trial that an earlier job completed with the same task version and agent config. Adding a system therefore generates only its trials.
 
-Each rendered task's version carries a hash of its instruction, task name and agent timeout as build metadata on `tasks.TASK_VERSION`, and Harbor reruns a task whose build metadata changed, so an edited case reruns under its ID on every system. `bench check` and `bench run` render the tasks and install them, removing directories for cases the family no longer has. Collection derives the expected version from current case source and render settings without writing tasks, so an old installed task cannot make stale outputs current.
+Each rendered task's version carries a hash of its instruction, task name and agent timeout as build metadata on `tasks.TASK_VERSION`, and Harbor reruns a task whose build metadata changed, so an edited case reruns under its ID on every system. `bench check` and `bench run` render tasks in disposable workspaces. Collection derives the expected version from its pinned case source and render settings, so stale outputs cannot become current through an old local task directory.
 
 The diff also compares each trial's environment, which follows the job's harnesses as [Systems](systems.md#harnesses) describes, so changing it reruns every trial of the jobs it applies to. A Harbor upgrade that changes a `task.toml` default aborts the job, as [Harbor](../research/harbor.md#quirks-of-the-pinned-release) describes.
 
@@ -116,6 +117,6 @@ Authored tasks follow the version bumps that [Authoring](../guide/authoring.md#t
 
 A regrade is a new trial in the new job that names its source trial, so collection follows that chain to the trial whose agent wrote the solution and keeps that trial's job, trial, diff, tokens, and latency with the regrade's reward and verdict, and the votes on the solution stay. Harbor can regrade one trial twice, so collection keeps one output per solution. `bench check` and `bench run` also name each rendered case whose task changed under its version, as a Harbor upgrade that changes a `task.toml` default does.
 
-Reused trials stay in their original job, so collection reads every job directory of the family. It keeps at most `samples` outputs per case, system, and fingerprint, which is the slot Harbor reruns.
+Reused trials retain their original job identity, so collection restores the family's recorded job artifacts. It keeps at most `samples` outputs per case, system, and fingerprint, which is the slot Harbor reruns.
 
 Collection requires the current agent configuration, environment, and verifier-disable setting, including the originating solution's generation inputs. It excludes unlisted systems and stale configurations. Within a current slot it prefers a successful trial, then an errored trial its tests graded, then one they never graded, and the oldest within each tier whatever its reward. Age follows job names, which `bench` sets to the job's start time to the microsecond. An equivalent rerun therefore keeps the original output, a graded agent error replaces an error that left no verdict, and an errored trial drops out when a successful rerun replaces it.
