@@ -92,7 +92,6 @@
       "original": {
         "owner": "hakula139",
         "repo": "nixos-config",
-        "rev": "bd3448e0aee606c43740ef373aff07b653d2cbc9",
         "type": "github"
       }
     },
