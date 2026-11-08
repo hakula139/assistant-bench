@@ -90,6 +90,17 @@ def combined_usage(responses: Sequence[MeasuredUsage | None]) -> MeasuredUsage |
     )
 
 
+def merge_messages_usage(
+    current: Mapping[str, Any], delta: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Merge partial input counters and require the delta's output count."""
+    merged = dict(current) | {
+        key: value for key, value in delta.items() if value is not None
+    }
+    merged['output_tokens'] = delta.get('output_tokens')
+    return merged
+
+
 def measure(api: Api, reported: object) -> dict[str, Any]:
     """Return the details a call records about its usage.
 

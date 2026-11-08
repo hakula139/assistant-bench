@@ -15,25 +15,40 @@ from assistant_bench.harnesses.endpoint import (
     Endpoint,
 )
 from assistant_bench.harnesses.proxy import connect
+from assistant_bench.harnesses.usage import MeasuredUsage
 from assistant_bench.state import State
 from support import StubEndpoint, message, message_stream, response
 
 
 class TestConnect:
-    @pytest.mark.parametrize('api', ['anthropic-messages', 'openai-responses'])
     @pytest.mark.parametrize(
-        'reported', [True, False], ids=['measured', 'usage-missing']
+        ('api', 'usage_case'),
+        [
+            ('anthropic-messages', 'measured'),
+            ('anthropic-messages', 'missing'),
+            ('openai-responses', 'measured'),
+            ('openai-responses', 'missing'),
+            ('anthropic-messages', 'null-output'),
+        ],
+        ids=[
+            'messages-measured-null-inputs',
+            'messages-usage-missing',
+            'responses-measured',
+            'responses-usage-missing',
+            'messages-null-output',
+        ],
     )
     def test_forwards_stream_bytes_and_records_only_completed_response_usage(
         self,
         endpoint: StubEndpoint,
         begun_trial: TrialAccounting,
+        private_state: State,
         tmp_path: Path,
         api: Api,
-        reported: bool,
+        usage_case: str,
     ) -> None:
         payload = message() if api == 'anthropic-messages' else response()
-        if not reported:
+        if usage_case == 'missing':
             payload['usage'] = None
         event = {'type': 'response.completed', 'response': payload}
         stream = (
@@ -41,6 +56,18 @@ class TestConnect:
             if api == 'anthropic-messages'
             else [f'data: {json.dumps(event)}\n\n'.encode()]
         )
+        if api == 'anthropic-messages' and usage_case != 'missing':
+            delta = json.loads(stream[-2].split(b'data: ', 1)[1])
+            delta['usage'].update(
+                {
+                    'input_tokens': None,
+                    'cache_read_input_tokens': None,
+                    'cache_creation_input_tokens': None,
+                }
+                if usage_case == 'measured'
+                else {'output_tokens': None}
+            )
+            stream[-2] = f'event: message_delta\ndata: {json.dumps(delta)}\n\n'.encode()
         endpoint.streams = [stream, stream[:-1]]
         secret_file = tmp_path / 'secret-headers.json'
         secret_file.write_text(
@@ -89,6 +116,7 @@ class TestConnect:
 
         content, calls = asyncio.run(request())
 
+        reported = usage_case == 'measured'
         assert content == b''.join(stream)
         assert len(calls) == 1
         assert calls[0]['response_model'] == 'large-2026'
@@ -99,6 +127,13 @@ class TestConnect:
             (10 if api == 'anthropic-messages' else 0) if reported else None
         )
         assert calls[0].get('output_tokens') == (40 if reported else None)
+        (saved,) = [
+            RequestReceipt.model_validate_json(row['receipt_json'])
+            for row in private_state.requests('sample')
+            if isinstance(row['receipt_json'], str)
+        ]
+        assert saved.outcome == 'completed'
+        assert saved.usage == MeasuredUsage.from_details(calls[0])
         assert all(
             sent.headers['authorization'] == 'Bearer test-key'
             for sent in endpoint.requests

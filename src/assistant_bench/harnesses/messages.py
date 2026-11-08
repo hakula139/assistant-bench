@@ -1,8 +1,9 @@
 """Native Messages streaming, accounting, and Harbor conversation replay."""
 
+import json
 import time
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from importlib import metadata
 from pathlib import Path
 from typing import Any, cast, override
@@ -22,7 +23,7 @@ from assistant_bench.harnesses.native import (
     NativeLLM,
     NativeSettings,
 )
-from assistant_bench.harnesses.usage import measure
+from assistant_bench.harnesses.usage import measure, merge_messages_usage
 
 
 _input = TypeAdapter(list[MessageParam])
@@ -36,6 +37,7 @@ class MessageStreamError(ValueError):
 @dataclass
 class MessageResult:
     message: Message | None = None
+    usage: dict[str, Any] = field(default_factory=dict)
     request_id: str | None = None
     complete: bool = False
     final_usage: bool = False
@@ -101,7 +103,7 @@ class MessageResult:
             'anthropic_api_version': load_generation().anthropic_api_version,
             **measure(
                 'anthropic-messages',
-                message.usage if message and self.final_usage else None,
+                self.usage if self.final_usage else None,
             ),
         }
 
@@ -152,9 +154,16 @@ async def request_messages(
             async for event in stream:
                 if event.type == 'message_start':
                     result.message = event.message
+                    result.usage = event.message.usage.model_dump(
+                        mode='json', exclude_unset=True
+                    )
                 if result.message is not None:
                     result.message = stream.current_message_snapshot
                 if event.type == 'message_delta':
+                    result.usage = merge_messages_usage(
+                        result.usage,
+                        event.usage.model_dump(mode='json', exclude_unset=True),
+                    )
                     result.final_usage = True
                 if event.type == 'message_stop':
                     await recorder.confirm(
@@ -166,9 +175,7 @@ async def request_messages(
                                 'id': result.message.id,
                                 'model': result.message.model,
                                 'stop_reason': result.message.stop_reason,
-                                'usage': result.message.usage.model_dump(mode='json')
-                                if result.final_usage
-                                else None,
+                                'usage': result.usage if result.final_usage else None,
                             }
                             if result.message is not None
                             else None,
@@ -189,7 +196,9 @@ async def request_messages(
         result.latency_sec = round(time.monotonic() - started, 3)
         if result.message is not None:
             artifact.parent.mkdir(parents=True, exist_ok=True)
-            artifact.write_text(result.message.model_dump_json(indent=2))
+            payload = result.message.model_dump(mode='json')
+            payload['usage'] = result.usage
+            artifact.write_text(json.dumps(payload, indent=2, ensure_ascii=False))
 
 
 def message_input(

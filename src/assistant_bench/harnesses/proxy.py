@@ -15,7 +15,7 @@ from assistant_bench.catalog import Api
 from assistant_bench.generation import load_generation
 from assistant_bench.harnesses.accounting import REQUEST_ID, TrialAccounting
 from assistant_bench.harnesses.endpoint import Endpoint, receipt
-from assistant_bench.harnesses.usage import measure
+from assistant_bench.harnesses.usage import measure, merge_messages_usage
 
 
 _REQUEST = TypeAdapter(dict[str, Any])
@@ -121,7 +121,9 @@ async def connect(
                                     message = _REQUEST.validate_python(data['message'])
                                     usage = dict(message.get('usage') or {})
                                 elif kind == 'message_delta':
-                                    usage.update(data.get('usage', {}))
+                                    usage = merge_messages_usage(
+                                        usage, data.get('usage', {})
+                                    )
                                     message.update(data.get('delta', {}))
                                     final_usage = True
                                 elif kind == 'message_stop':
