@@ -87,7 +87,12 @@ def _boundaries(source: str) -> bool:
             if position == len(_BOUNDARIES) or boundary != _BOUNDARIES[position]:
                 return False
             position += 1
-        elif position not in {3, 5} and event != 'comment':
-            if event != 'text' or not isinstance(data, str) or data.strip(_WHITESPACE):
-                return False
+        elif (
+            position not in {3, 5}
+            and event != 'comment'
+            and (
+                event != 'text' or not isinstance(data, str) or data.strip(_WHITESPACE)
+            )
+        ):
+            return False
     return position == len(_BOUNDARIES)
