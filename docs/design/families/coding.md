@@ -4,7 +4,7 @@
 
 ## Systems and Samples
 
-Every system that [`family.toml`](../../../families/coding-repo/family.toml) lists runs under `terminus-2`, Harbor's terminal agent, as [Systems](../systems.md#harnesses) describes. Its fingerprint binds the family's harness and the locked Harbor version. Each system uses its resolved completion allowance and high effort or its supported equivalent, with native context management and no family turn cutoff. A task's 1,800-second agent timeout remains an operational watchdog. Each task and system pair runs once, and `gemini-3.8-flash-high` is the reference that anchors the board at 1,000 when a round ranks it.
+Systems in [`family.toml`](../../../families/coding-repo/family.toml) default to `terminus-2`, Harbor's terminal agent. `opus-5.5-claude-code-high` uses Claude Code 2.1.319, and `gemini-3.8-flash-codex-high` uses Codex 0.167.0, as [Systems](../systems.md#harnesses) describes. Each fingerprint binds its harness and version. Each system uses its resolved completion allowance and high effort or its supported equivalent, with native context management and no family turn cutoff. A task's 1,800-second agent timeout remains an operational watchdog. Each task and system pair runs once, and `gemini-3.8-flash-high` is the reference that anchors the board at 1,000 when a round ranks it.
 
 ## Categories
 

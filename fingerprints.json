@@ -1,10 +1,12 @@
 {
   "coding-repo/deepseek-v4.1-flash-1017-high": "6b9f283860e71385",
+  "coding-repo/gemini-3.8-flash-codex-high": "629c23a2d687ea8b",
   "coding-repo/gemini-3.8-flash-high": "658c8776a3b4a8df",
   "coding-repo/gemini-4-argon-high": "e7ca75600b7f85e1",
   "coding-repo/gpt-6-astra-high": "b22536c074197cad",
   "coding-repo/gpt-6.1-sol-high": "d0eb687ab5695e02",
   "coding-repo/kimi-k3-high": "00b7d9f69a619892",
+  "coding-repo/opus-5.5-claude-code-high": "eb744824258ea00d",
   "coding-repo/opus-5.5-high": "d9e800d3516a7ab8",
   "frontend-static/deepseek-v4.1-flash-1017-high": "62ab16924320ebd4",
   "frontend-static/gemini-3.8-flash-high": "8d4e5604c2a7a4c2",

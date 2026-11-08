@@ -11,6 +11,8 @@ systems = [
   "gemini-3.8-flash-high",
   "deepseek-v4.1-flash-1017-high",
   "kimi-k3-high",
+  "opus-5.5-claude-code-high",
+  "gemini-3.8-flash-codex-high",
 ]
 reference = "gemini-3.8-flash-high"
 render = "diff"
