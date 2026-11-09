@@ -16,15 +16,7 @@ reference = "gemini-3.8-flash-high"
 language = "en"
 samples = 2
 categories = ["docs", "essay", "fiction", "message", "reply", "review"]
-defects = [
-  "scope",
-  "facts",
-  "clarity",
-  "tone",
-  "mechanics",
-  "formulaic",
-  "length",
-]
+defects = ["scope", "facts", "clarity", "tone", "mechanics", "formulaic", "length"]
 
 [gates]
 min_chars = 80

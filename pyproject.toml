@@ -82,21 +82,7 @@ quote-style = "single"
 line-ending = "lf"
 
 [tool.ruff.lint]
-select = [
-  "B",
-  "C4",
-  "D",
-  "E",
-  "F",
-  "I",
-  "PGH003",
-  "PGH004",
-  "RUF100",
-  "RUF102",
-  "SIM",
-  "UP",
-  "W",
-]
+select = ["B", "C4", "D", "E", "F", "I", "PGH003", "PGH004", "RUF100", "RUF102", "SIM", "UP", "W"]
 ignore = ["D101", "D102", "D103", "D105", "D106", "D107"]
 
 [tool.ruff.lint.per-file-ignores]
@@ -129,9 +115,7 @@ addopts = [
 faulthandler_timeout = 900
 faulthandler_exit_on_timeout = true
 strict_markers = true
-markers = [
-  "docker: runs Harbor trials in Docker, selected by the Harbor Smoke job",
-]
+markers = ["docker: runs Harbor trials in Docker, selected by the Harbor Smoke job"]
 
 [tool.coverage.run]
 source = ["assistant_bench"]
