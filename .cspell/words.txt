@@ -31,6 +31,7 @@ dists
 dotenv
 DSYNC
 dynlib
+emnapi
 endog
 envrc
 esbuild
