@@ -11,10 +11,8 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
 
-    flake-utils.url = "github:numtide/flake-utils";
-
-    git-hooks-nix = {
-      url = "github:cachix/git-hooks.nix";
+    devkit = {
+      url = "github:hakula139/devkit/v2";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
@@ -31,23 +29,21 @@
   outputs =
     {
       nixpkgs,
-      flake-utils,
-      git-hooks-nix,
+      devkit,
       nixos-config,
       ...
     }:
     let
-      # git-hooks.nix has dropped x86_64-darwin, which Nixpkgs supports only through 26.05.
       systems = [
         "aarch64-darwin"
-        "aarch64-linux"
         "x86_64-linux"
       ];
     in
-    flake-utils.lib.eachSystem systems (
+    devkit.lib.eachSystem systems (
       system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
+        dk = devkit.lib.mkLib pkgs;
 
         # ------------------------------------------------------------------------------------------
         # nixos-config Export
@@ -59,6 +55,7 @@
             catalog = import "${nixos-config}/data/llm-models.nix";
             instructions = import "${nixos-config}/home/modules/llm-assistants/instructions" {
               inherit promptFragments;
+              devkitSource = devkit;
             };
           }
         );
@@ -67,8 +64,8 @@
         # Node Toolchain
         # ------------------------------------------------------------------------------------------
         nodeMajor = "26";
-        nodejs = pkgs."nodejs_${nodeMajor}";
-        pnpm = pkgs.pnpm.override { nodejs-slim = pkgs."nodejs-slim_${nodeMajor}"; };
+        nodejs = pkgs.nodejs_26;
+        pnpm = pkgs.pnpm_12;
         nodeTools = [
           nodejs
           pnpm
@@ -86,99 +83,27 @@
         # Pre-commit Hooks
         # ------------------------------------------------------------------------------------------
         hooks = {
-          end-of-file-fixer.enable = true;
-          trim-trailing-whitespace.enable = true;
-          check-added-large-files.enable = true;
+          actionlint.enable = true;
           check-yaml.enable = true;
-          taplo.enable = true;
-          # The patch adds `concurrency.queue`, unreleased as of v1.7.12. Drop it once Nixpkgs ships
-          # a newer actionlint.
-          actionlint = {
-            enable = true;
-            package = pkgs.actionlint.overrideAttrs (old: {
-              patches = (old.patches or [ ]) ++ [
-                (pkgs.fetchpatch {
-                  url = "https://github.com/rhysd/actionlint/commit/644076a59742c2d1540ebd4686eab3c308f0e562.patch";
-                  hash = "sha256-Lpd7CTkLbzgvAZV2H8G4GTUoPNDCK7PiW3A40+cquUk=";
-                })
-              ];
-            });
-          };
-
-          lychee.enable = true;
-
-          sort-file-contents = {
-            enable = true;
-            files = "^\\.cspell/words\\.txt$";
-            settings.ignore-case = true;
-          };
-
-          nixfmt.enable = true;
+          cspell.enable = true;
           deadnix.enable = true;
+          dprint.enable = true;
+          editorconfig-checker.enable = true;
+          markdownlint-cli2.enable = true;
+          nixfmt.enable = true;
+          shellcheck.enable = true;
+          shfmt.enable = true;
+          sort-file-contents.enable = true;
           statix.enable = true;
+          taplo.enable = true;
 
-          # shfmt reads `.editorconfig` only without formatting flags, and indents shell files that
-          # `.editorconfig`'s `[*.sh]` section misses with tabs.
-          shfmt = {
+          lychee = {
             enable = true;
-            settings = {
-              language-dialect = null;
-              simplify = false;
-              indent = null;
-              binary-next-line = false;
-              case-indent = false;
-            };
-          };
-        };
-
-        # CI runs Node and Ruff with local dependencies absent from the check's store source.
-        nodeHook =
-          name: cmd:
-          pkgs.lib.getExe (
-            pkgs.writeShellApplication {
-              inherit name;
-              runtimeInputs = nodeTools;
-
-              text = ''
-                if [ ! -d node_modules ]; then
-                  echo "node_modules is missing. Run pnpm install, then commit again." >&2
-                  exit 1
-                fi
-                pnpm exec ${cmd} "$@"
-              '';
-            }
-          );
-
-        nodeHooks = {
-          prettier = {
-            enable = true;
-            package = null;
-            entry = nodeHook "prettier" "prettier --write --ignore-unknown";
+            extraPackages = [ pkgs.cacert ];
           };
 
-          cspell = {
-            enable = true;
-            package = null;
-            entry = nodeHook "cspell" "cspell --no-must-find-files --no-progress";
-            types = [ "text" ];
-          };
-
-          markdownlint = {
-            enable = true;
-            name = "markdownlint-cli2";
-            package = null;
-            entry = nodeHook "markdownlint" "markdownlint-cli2 --fix";
-            files = "\\.md$";
-          };
-        };
-
-        uvExe = pkgs.lib.getExe pkgs.uv;
-
-        uvHooks = {
           ruff = {
             enable = true;
-            package = null;
-            entry = "${uvExe} run --locked ruff check --fix";
             types = [ "file" ];
             types_or = [
               "python"
@@ -188,8 +113,6 @@
 
           ruff-format = {
             enable = true;
-            package = null;
-            entry = "${uvExe} run --locked ruff format";
             types = [ "file" ];
             types_or = [
               "python"
@@ -198,21 +121,17 @@
           };
         };
 
-        preCommit = git-hooks-nix.lib.${system}.run {
+        preCommit = dk.preCommit {
           src = ./.;
-          hooks = hooks // nodeHooks // uvHooks;
+          inherit hooks;
+          devHooks = {
+            prettier = {
+              enable = true;
+              package = dk.nodeTool "prettier";
+              files = "\\.(astro|css|js|json|jsonc|ts|tsx|ya?ml)$";
+            };
+          };
         };
-
-        # Linux lychee needs CA roots in builds, even offline.
-        preCommitCheck = git-hooks-nix.lib.${system}.run {
-          src = ./.;
-          imports = [ { inherit hooks; } ];
-          hooks.lychee.extraPackages = [ pkgs.cacert ];
-        };
-
-        cmp = pkgs.lib.getExe' pkgs.diffutils "cmp";
-        flock = pkgs.lib.getExe pkgs.flock;
-        git = pkgs.lib.getExe pkgs.git;
 
         # ------------------------------------------------------------------------------------------
         # GitLab Pages Toolchain
@@ -236,29 +155,13 @@
         # ------------------------------------------------------------------------------------------
         devShells.python = pkgs.mkShell (pythonEnvironment // { name = "assistant-bench-python"; });
 
-        devShells.default = pkgs.mkShell {
-          name = "assistant-bench-dev";
-          inherit (pythonEnvironment) env;
-
-          packages = pythonEnvironment.packages ++ preCommit.enabledPackages ++ [ preCommit.config.package ];
-
-          # Match flake.nix to keep hooks in this project, since Nix evaluates a store copy.
-          # Concurrent hook installs race on hooksPath.
-          # Relative hooksPath values break linked worktrees (cachix/git-hooks.nix#688).
-          # Hook packages set PYTHONPATH, which would shadow the project's virtualenv.
-          shellHook = ''
-            unset PYTHONPATH
-            if toplevel=$(${git} rev-parse --show-toplevel 2>/dev/null) \
-              && ${cmp} -s ${./flake.nix} "$toplevel/flake.nix"; then
-              common=$(${git} rev-parse --path-format=absolute --git-common-dir)
-              (
-                ${flock} 9
-                ${preCommit.config.installationScript}
-                ${git} config --local --unset-all core.hooksPath || true
-              ) 9>"$common/git-hooks.lock"
-            fi
-          '';
-        };
+        devShells.default = pkgs.mkShell (
+          pythonEnvironment
+          // {
+            name = "assistant-bench-dev";
+            inputsFrom = [ preCommit.shell ];
+          }
+        );
 
         # ------------------------------------------------------------------------------------------
         # Packages
@@ -269,7 +172,7 @@
         # Checks
         # ------------------------------------------------------------------------------------------
         checks = {
-          pre-commit = preCommitCheck;
+          pre-commit = preCommit.check;
           pages-pnpm =
             pagesCheck "pages-pnpm" "BENCH_PNPM_VERSION" (pagesVariable "BENCH_PNPM_VERSION") pnpm.version
               "pnpm ${pnpm.version}";

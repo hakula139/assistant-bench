@@ -124,7 +124,6 @@ class TestSelectedTasks:
             'systems.toml',
             'families/coding-repo/family.toml',
             '.github/workflows/ci.yml',
-            '.github/actions/setup-nix/action.yml',
         ],
     )
     def test_checks_every_task_after_a_runtime_change(

@@ -15,20 +15,9 @@ concurrency:
 
 jobs:
   flake-check:
-    name: Nix Flake Check
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-
-      - name: Set up Nix
-        uses: ./.github/actions/setup-nix
-
-      - name: Run flake check
-        run: nix flake check --print-build-logs
+    uses: hakula139/devkit/.github/workflows/nix.yml@v2
+    with:
+      macos: false
 
   node-check:
     name: Node Check
@@ -44,7 +33,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Nix
-        uses: ./.github/actions/setup-nix
+        uses: hakula139/devkit/.github/actions/setup-nix@v2
 
       - name: Install dependencies
         run: nix develop -c pnpm install
@@ -54,9 +43,6 @@ jobs:
 
       - name: Lint
         run: nix develop -c pnpm lint
-
-      - name: Spell check
-        run: nix develop -c pnpm spellcheck
 
       - name: Type check
         run: nix develop -c pnpm typecheck
@@ -74,22 +60,6 @@ jobs:
           files: web/coverage/lcov.info
           flags: web
           use_oidc: true
-
-  build:
-    name: Build Site
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-
-      - name: Set up Nix
-        uses: ./.github/actions/setup-nix
-
-      - name: Install dependencies
-        run: nix develop -c pnpm install
 
       - name: Build site
         run: nix develop -c pnpm build
@@ -119,16 +89,10 @@ jobs:
           persist-credentials: false
 
       - name: Set up Nix
-        uses: ./.github/actions/setup-nix
+        uses: hakula139/devkit/.github/actions/setup-nix@v2
 
       - name: Install dependencies
         run: nix develop .#python -c uv sync --locked
-
-      - name: Lint
-        run: nix develop .#python -c uv run ruff check
-
-      - name: Format
-        run: nix develop .#python -c uv run ruff format --check
 
       - name: Type check
         run: nix develop .#python -c uv run mypy
@@ -162,7 +126,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Nix
-        uses: ./.github/actions/setup-nix
+        uses: hakula139/devkit/.github/actions/setup-nix@v2
 
       - name: Install dependencies
         run: nix develop .#python -c uv sync --locked
@@ -178,7 +142,7 @@ jobs:
       - name: Check the coding family
         shell: bash
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
           args=()
           if [[ -n $BASE_SHA ]]; then
@@ -200,15 +164,15 @@ jobs:
     needs:
       - flake-check
       - node-check
-      - build
       - python-check
       - harbor-smoke
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      actions: read
     steps:
       - name: Check results
-        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
-        run: exit 1
+        uses: hakula139/devkit/.github/actions/ci-result@v2
 
   preview:
     name: Deploy Preview
@@ -217,7 +181,7 @@ jobs:
       github.event_name == 'pull_request' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.event.pull_request.user.login != 'dependabot[bot]'
-    needs: build
+    needs: node-check
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # Serialize previews with cleanup so cancellation cannot leave old deployments behind.
@@ -256,7 +220,7 @@ jobs:
 
       - name: Set up Nix
         if: steps.pr.outputs.open
-        uses: ./.github/actions/setup-nix
+        uses: hakula139/devkit/.github/actions/setup-nix@v2
 
       - name: Install dependencies
         if: steps.pr.outputs.open
@@ -363,7 +327,7 @@ jobs:
 
       - name: Set up Nix
         if: steps.head.outputs.current
-        uses: ./.github/actions/setup-nix
+        uses: hakula139/devkit/.github/actions/setup-nix@v2
 
       - name: Install dependencies
         if: steps.head.outputs.current

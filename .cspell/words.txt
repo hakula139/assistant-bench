@@ -26,6 +26,7 @@ Daan
 dateutil
 dedupe
 delenv
+devkit
 direnv
 dists
 dotenv
@@ -85,6 +86,7 @@ Nixpkgs
 noscript
 npmjs
 numpy
+nums
 numtide
 nvmrc
 Orchidarium

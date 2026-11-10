@@ -59,27 +59,24 @@ The tree lists only the top-level entries whose names leave their purpose unclea
 - Never run paid model calls in CI, as tests reach models only through the stub endpoint in `tests/support.py`.
 - Keep commands minimal and settings in config files: `bench` takes only the arguments that pick what a command acts on and reads every setting from `systems.toml` and `family.toml`, while environment variables hold only secrets and per-environment values, as [Development](docs/conventions/development.md#where-settings-live) lists.
 - Keep no compatibility layers: no data migrations, ID aliases, redirects, case lineage, or readers for old formats. A case, family, or schema change that would orphan votes drops them. Guards that refuse mismatched data may stay. Once a replacement is verified, delete the superseded state, code, and docs with no archive. The arena's D1 schema is the one exception, as [Arena](docs/design/arena.md#schema-changes) describes.
-- In committed files, state each convention on its own terms and never name the repositories that conventions, layout, or design were drawn from. nixos-config appears only where the bench uses it: the flake input, its export, the shared Renovate preset, and `nixos-config:<client>` prompts. Research notes and design pages may cite the external benchmarks, papers, and tools whose methods the bench uses.
+- In committed files, state each convention on its own terms and never name the repositories that conventions, layout, or design were drawn from. nixos-config appears only where the bench uses it: the flake input, its export, and `nixos-config:<client>` prompts. Research notes and design pages may cite the external benchmarks, papers, and tools whose methods the bench uses.
 
 ## Verification
 
 Run after implementation and before review:
 
 ```bash
-uv run ruff check                                     # Lint
-uv run ruff format --check                            # Check formatting
 uv run mypy                                           # Type check (strict)
 uv run basedpyright                                   # Check the shared editor type policy
 uv run pytest                                         # Run the tests that need no Docker, with coverage
 uv run bench fingerprints                             # Check fingerprints against the closed reports
 uv run pytest -m docker                               # Run the Harbor trials under Docker, which need no secrets
-pnpm format                                           # Check formatting of the site, JSON, Markdown, and YAML
-pnpm lint                                             # Lint Markdown and the site
-pnpm spellcheck                                       # Spell check
+pnpm format                                           # Check formatting of the site, JSON, and YAML
+pnpm lint                                             # Lint the site
 pnpm typecheck                                        # Type check the site and the voting Worker
 pnpm test                                             # Test the site and the voting Worker, with coverage: schema, charts, pages, the vote page and API, and accessibility
 pnpm build                                            # Build the site from reports/
-nix flake check                                       # After a flake or GitLab Pages job change, run the Nix checks
+nix flake check                                       # Run shared formatting, spelling, and lint checks and Pages pin checks
 ```
 
 [CI](docs/conventions/ci.md#checks) lists which job runs each check.

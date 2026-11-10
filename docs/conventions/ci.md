@@ -4,18 +4,17 @@
 
 GitHub Actions runs on pushes to `main`, pull requests, and manual dispatch:
 
-| Job             | Checks                                                                                                                                                                      |
-| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Nix Flake Check | `nix flake check`, which runs the pre-commit hooks without the Node and Ruff ones, and the GitLab Pages pin checks                                                          |
-| Node Check      | `pnpm format`, `pnpm lint`, `pnpm spellcheck`, `pnpm typecheck`, Playwright's Chromium, and `pnpm test` with coverage uploaded to Codecov                                   |
-| Build Site      | `pnpm build`, a dry-run bundle of the production voting Worker, uploading `web/dist` as the `site-dist` artifact                                                            |
-| Python Check    | `uv sync --locked`, Ruff, mypy, basedpyright, pytest with coverage uploaded to Codecov, and the fingerprint check                                                           |
-| Harbor Smoke    | `uv run pytest -m docker` under Docker, including the oracle and nop check that `bench check smoke` runs, then `bench check coding-repo` on the coding tasks selected below |
-| CI Result       | Fails when any job above fails or is cancelled                                                                                                                              |
+| Job                       | Checks                                                                                                                                                                                                             |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| flake-check / Nix (Linux) | The shared Nix workflow runs `nix flake check`, including shared formatting, spelling, Ruff, and Markdown checks and the GitLab Pages pin checks.                                                                  |
+| Node Check                | `pnpm format`, `pnpm lint`, `pnpm typecheck`, Playwright's Chromium, and `pnpm test` with coverage uploaded to Codecov, then `pnpm build` and a dry-run voting Worker bundle, uploading `web/dist` as `site-dist`. |
+| Python Check              | `uv sync --locked`, mypy, basedpyright, pytest with coverage uploaded to Codecov, and the fingerprint check.                                                                                                       |
+| Harbor Smoke              | `uv run pytest -m docker` under Docker, including the oracle and nop check that `bench check smoke` runs, then `bench check coding-repo` on the coding tasks selected below                                        |
+| CI Result                 | Fails when any job above fails or is cancelled                                                                                                                                                                     |
 
 The fingerprint check runs `uv run bench fingerprints`, which enforces the rule in [Systems](../design/systems.md#fingerprints) against the fingerprints that the closed reports under `reports/` froze. It reads only the checked-out tree, so the push run on `main` catches a fingerprint change and a close that pass alone but conflict once both land.
 
-On a PR, Harbor Smoke checks each current coding task whose files differ from the PR's base, passing its ID through `bench check coding-repo --task <id>`. Added and renamed tasks are checked, while deleted tasks need no trial. Changes under `src/`, to the coding family's shared files, `systems.toml`, the coding family's `family.toml`, Python dependencies or version, Nix inputs or shell, or Harbor Smoke's workflow or setup action check every coding task. Other changes skip the coding-family trials. Pushes to `main` and manual runs check every coding task.
+Harbor Smoke selects changed coding tasks against the PR base or the previous head on a push to `main`, passing each ID through `bench check coding-repo --task <id>`. Added and renamed tasks are checked, while deleted tasks need no trial. Changes under `src/`, to the coding family's shared files, `systems.toml`, the coding family's `family.toml`, Python dependencies or version, Nix inputs or shell, or Harbor Smoke's workflow check every coding task. Other changes skip the coding-family trials. Manual runs have no comparison base and check every coding task. The core Docker smoke tests run for every event.
 
 The `main` ruleset requires CI Result and both Codecov patch statuses: `codecov/patch` for Python and `codecov/patch/web` for the site. Python Check and Node Check upload their coverage under the `python` and `web` flags, and `codecov.yml` gives each flag its own project and patch status.
 
@@ -35,11 +34,11 @@ Static PR previews use the asset-only `assistant-bench-preview` Worker in `web/w
 
 - **Deploy Voting:** runs on each push to `main` and on manual dispatch from `main` once CI Result passes. It deploys in the `production` environment, which only `main` may deploy to. The `production` concurrency group retains up to 100 pending deploys without cancelling a running deploy. Each queued deploy skips a commit that `main` has moved past, so older checks finishing later preserve the current head's queued deployment.
 
-- **Deploy Preview:** runs `wrangler preview` in the `preview` environment as soon as Build Site passes on each PR, without waiting for the other checks, creating a Worker Preview named `pr-<number>` under the static preview Worker, and comments its URLs on the PR.
+- **Deploy Preview:** runs `wrangler preview` in the `preview` environment once Node Check passes on each PR, creating a Worker Preview named `pr-<number>` under the static preview Worker, and comments its URLs on the PR.
 
   The Preview's `workers.dev` URL serves the PR's latest build with `X-Robots-Tag: noindex`, and each push also gets a URL of its own.
 
-  It joins the concurrency group `preview-<number>`, which it shares with Preview Cleanup, only once Build Site passes, so closing a PR cancels a deploy already in the group, while a deploy that starts after the close finds the PR closed and skips.
+  It joins the concurrency group `preview-<number>`, which it shares with Preview Cleanup, only once Node Check passes, so closing a PR cancels a deploy already in the group, while a deploy that starts after the close finds the PR closed and skips.
 
 - **Preview Cleanup:** deletes the Preview once the PR closes, marks the PR's deployments inactive, and updates the comment to say so. It runs on `pull_request_target`, which also fires for a PR with merge conflicts and runs `main`'s copy of the workflow, so changes to it take effect only once merged.
 
