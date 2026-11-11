@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   flake-check:
-    uses: hakula139/devkit/.github/workflows/nix.yml@v2
+    uses: hakula139/devkit/.github/workflows/nix.yml@v3
     with:
       macos: false
 
@@ -33,7 +33,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Nix
-        uses: hakula139/devkit/.github/actions/setup-nix@v2
+        uses: hakula139/devkit/.github/actions/setup-nix@v3
 
       - name: Install dependencies
         run: nix develop -c pnpm install
@@ -89,7 +89,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Nix
-        uses: hakula139/devkit/.github/actions/setup-nix@v2
+        uses: hakula139/devkit/.github/actions/setup-nix@v3
 
       - name: Install dependencies
         run: nix develop .#python -c uv sync --locked
@@ -126,7 +126,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Nix
-        uses: hakula139/devkit/.github/actions/setup-nix@v2
+        uses: hakula139/devkit/.github/actions/setup-nix@v3
 
       - name: Install dependencies
         run: nix develop .#python -c uv sync --locked
@@ -172,7 +172,7 @@ jobs:
       actions: read
     steps:
       - name: Check results
-        uses: hakula139/devkit/.github/actions/ci-result@v2
+        uses: hakula139/devkit/.github/actions/ci-result@v3
 
   preview:
     name: Deploy Preview
@@ -220,7 +220,7 @@ jobs:
 
       - name: Set up Nix
         if: steps.pr.outputs.open
-        uses: hakula139/devkit/.github/actions/setup-nix@v2
+        uses: hakula139/devkit/.github/actions/setup-nix@v3
 
       - name: Install dependencies
         if: steps.pr.outputs.open
@@ -327,7 +327,7 @@ jobs:
 
       - name: Set up Nix
         if: steps.head.outputs.current
-        uses: hakula139/devkit/.github/actions/setup-nix@v2
+        uses: hakula139/devkit/.github/actions/setup-nix@v3
 
       - name: Install dependencies
         if: steps.head.outputs.current
