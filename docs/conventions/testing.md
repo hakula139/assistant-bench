@@ -57,6 +57,4 @@ Pass `-n 0` for a targeted run, which otherwise pays every worker's startup, and
 
 ## Coverage
 
-`uv run pytest` reports coverage with the missing lines and writes `coverage.xml`, and `pnpm test` measures the site the same way and writes `web/coverage/lcov.info`, leaving out the shadcn/ui copies and the test helpers. The Python report leaves out each `case _: assert_never(...)` arm, which mypy proves unreachable.
-
-CI uploads both to Codecov under the `python` and `web` flags. Codecov's required `codecov/patch` and `codecov/patch/web` checks each fail when tests cover less than 80% of a PR's changed lines in their respective runtime, as `codecov.yml` sets.
+`uv run pytest` reports coverage and writes `coverage.xml`, and `pnpm test` measures the site the same way and writes `web/coverage/lcov.info`, leaving out the shadcn/ui copies and the test helpers. The Python report leaves out each `case _: assert_never(...)` arm, which mypy proves unreachable. [CI](ci.md#checks) uploads both to Codecov.

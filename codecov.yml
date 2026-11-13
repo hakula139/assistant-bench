@@ -1,18 +1,22 @@
+codecov:
+  notify:
+    after_n_builds: 2
+
 coverage:
   status:
     project:
       default:
         target: auto
         threshold: 1%
-        flags: [python]
+        paths: [src/]
       web:
         target: auto
         threshold: 1%
-        flags: [web]
+        paths: [web/]
     patch:
       default:
         target: 80%
-        flags: [python]
+        paths: [src/]
       web:
         target: 80%
-        flags: [web]
+        paths: [web/]

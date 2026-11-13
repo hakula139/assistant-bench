@@ -372,7 +372,7 @@ def test_coding_tasks_state_the_verifier_limit(task: Path) -> None:
     config = tomllib.loads((task / 'task.toml').read_text())
     pytest_config = tomllib.loads((REPO_ROOT / 'pyproject.toml').read_text())['tool'][
         'pytest'
-    ]['ini_options']
+    ]
 
     timeout = load_coding_verifier().TIMEOUT_SEC
 

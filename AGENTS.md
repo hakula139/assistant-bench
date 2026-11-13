@@ -19,10 +19,9 @@ The tree lists only the top-level entries whose names leave their purpose unclea
 ```text
 .
 ├── .env.example                            # Endpoint variables that `bench` loads from an ignored .env
-├── .worktreeinclude                        # Gitignored agent memory that Claude Code copies into new worktrees
 ├── families/                               # One directory per family and leaderboard
 ├── fingerprints.json                       # Each runnable system's fingerprint, kept current by a test
-├── flake.nix                               # Dev shells, pre-commit hooks, checks, and the nixos-config export
+├── flake.nix                               # The dev shell, pre-commit hooks, checks, and the nixos-config export
 ├── src/assistant_bench/                    # The `bench` package, mapped in docs/design/architecture.md
 ├── systems.toml                            # Systems under test, one table each
 ├── typings/                                # Development-only type stubs for dependencies that lack them
@@ -47,7 +46,7 @@ The tree lists only the top-level entries whose names leave their purpose unclea
 
 ## Rules for Every Change
 
-- Run pre-commit hooks on every commit, and never bypass them with `--no-verify` or `PRE_COMMIT_ALLOW_NO_CONFIG`. In each new checkout or worktree, run `nix develop -c true`, `pnpm install`, and `uv sync` once to provide the generated config, the Node tools, and the virtualenv. On each host, and again after each Playwright update, run `pnpm --filter web exec playwright install --only-shell chromium` for the site test's browser.
+- Never bypass the pre-commit hooks. In each new checkout or worktree, run `nix develop -c true` once to generate the hook configuration, then `pnpm install` and `uv sync` inside the dev shell for the Node tools and the virtualenv. On each host, and again after each Playwright update, run `pnpm --filter web exec playwright install --only-shell chromium` for the site test's browser.
 - Run the [verification](#verification) block before review.
 - Add new words to `.cspell/words.txt`, as `cspell` scans Python sources too.
 - Commit only synthetic or public cases to this repository. Keep transcript-derived and held-out cases and trial artifacts in the private repository, and runtime state and outputs in private D1, as [Data](docs/conventions/data.md) describes.
@@ -66,17 +65,16 @@ The tree lists only the top-level entries whose names leave their purpose unclea
 Run after implementation and before review:
 
 ```bash
-uv run mypy                                           # Type check (strict)
+nix develop -c run-hooks                              # Run every pre-commit hook, including mypy, on all files
 uv run basedpyright                                   # Check the shared editor type policy
 uv run pytest                                         # Run the tests that need no Docker, with coverage
 uv run bench fingerprints                             # Check fingerprints against the closed reports
 uv run pytest -m docker                               # Run the Harbor trials under Docker, which need no secrets
-pnpm format                                           # Check formatting of the site, JSON, and YAML
 pnpm lint                                             # Lint the site
 pnpm typecheck                                        # Type check the site and the voting Worker
 pnpm test                                             # Test the site and the voting Worker, with coverage: schema, charts, pages, the vote page and API, and accessibility
 pnpm build                                            # Build the site from reports/
-nix flake check                                       # Run shared formatting, spelling, and lint checks and Pages pin checks
+nix flake check                                       # Check the GitLab Pages pins
 ```
 
 [CI](docs/conventions/ci.md#checks) lists which job runs each check.

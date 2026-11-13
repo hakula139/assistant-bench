@@ -496,7 +496,7 @@ def stage(
         ],
     )
     database.execute(
-        'INSERT INTO publication_pair_cases '
+        'INSERT INTO publication_pair_cases '  # noqa: S608
         '(publication_id, low_system, high_system, case_keys) '
         'SELECT ?, low_system, high_system, json_group_array(case_key) '
         f'FROM ({_ELIGIBLE_CASES} ORDER BY low_system, high_system, a.case_key) '
@@ -613,7 +613,7 @@ def activate(database: Database, publication_id: str, now: datetime) -> bool:
         return False
     milliseconds = int(now.timestamp() * 1000)
     activated = database.execute(
-        f'WITH expected AS ({_ELIGIBLE_CASES}), stored AS ('
+        f'WITH expected AS ({_ELIGIBLE_CASES}), stored AS ('  # noqa: S608
         'SELECT low_system, high_system, value AS case_key '
         'FROM publication_pair_cases, json_each(case_keys) '
         'WHERE publication_id = ?) '
@@ -658,7 +658,8 @@ def _insert(
     for start in range(0, len(rows), per_statement):
         chunk = rows[start : start + per_statement]
         database.execute(
-            f'INSERT INTO {table} ({", ".join(columns)}) VALUES '
+            # `table` and `columns` are constants from callers.
+            f'INSERT INTO {table} ({", ".join(columns)}) VALUES '  # noqa: S608
             f'{", ".join([placeholders] * len(chunk))} ON CONFLICT DO NOTHING',
             [value for row in chunk for value in row],
         )

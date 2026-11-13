@@ -25,6 +25,7 @@ jobs:
       pull-requests: write
     env:
       PR_NUMBER: ${{ github.event.pull_request.number }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -32,10 +33,10 @@ jobs:
           persist-credentials: false
 
       - name: Set up Nix
-        uses: hakula139/devkit/.github/actions/setup-nix@v2
+        uses: hakula139/devkit/.github/actions/setup-nix@v3
 
       - name: Install dependencies
-        run: nix develop -c pnpm install
+        run: nix develop -c pnpm install --frozen-lockfile
 
       - name: Delete preview
         shell: bash

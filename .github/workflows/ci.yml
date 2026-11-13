@@ -14,18 +14,26 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  flake-check:
-    uses: hakula139/devkit/.github/workflows/nix.yml@v2
+  nix:
+    uses: hakula139/devkit/.github/workflows/nix.yml@v3
     with:
       macos: false
+    secrets:
+      CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
 
-  node-check:
-    name: Node Check
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+  python:
     permissions:
       contents: read
       id-token: write
+    uses: hakula139/devkit/.github/workflows/python.yml@v3
+    secrets:
+      CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+
+  bench:
+    name: Bench Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -33,13 +41,36 @@ jobs:
           persist-credentials: false
 
       - name: Set up Nix
-        uses: hakula139/devkit/.github/actions/setup-nix@v2
+        uses: hakula139/devkit/.github/actions/setup-nix@v3
 
       - name: Install dependencies
-        run: nix develop -c pnpm install
+        run: nix develop -c uv sync --locked
 
-      - name: Format
-        run: nix develop -c pnpm format
+      - name: Check editor types
+        run: nix develop -c uv run --locked basedpyright
+
+      - name: Check fingerprints
+        run: nix develop -c uv run --locked bench fingerprints
+
+  web:
+    name: Web Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Nix
+        uses: hakula139/devkit/.github/actions/setup-nix@v3
+
+      - name: Install dependencies
+        run: nix develop -c pnpm install --frozen-lockfile
 
       - name: Lint
         run: nix develop -c pnpm lint
@@ -50,15 +81,13 @@ jobs:
       - name: Install Chromium
         run: nix develop -c pnpm --filter web exec playwright install --only-shell chromium
 
-      - name: Test
+      - name: Run tests
         run: nix develop -c pnpm test
 
       - name: Upload to Codecov
         uses: codecov/codecov-action@v7
         with:
-          fail_ci_if_error: true
           files: web/coverage/lcov.info
-          flags: web
           use_oidc: true
 
       - name: Build site
@@ -75,49 +104,11 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
-  python-check:
-    name: Python Check
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-
-      - name: Set up Nix
-        uses: hakula139/devkit/.github/actions/setup-nix@v2
-
-      - name: Install dependencies
-        run: nix develop .#python -c uv sync --locked
-
-      - name: Type check
-        run: nix develop .#python -c uv run mypy
-
-      - name: Check editor types
-        run: nix develop .#python -c uv run basedpyright
-
-      - name: Test
-        run: nix develop .#python -c uv run pytest
-
-      - name: Check fingerprints
-        run: nix develop .#python -c uv run bench fingerprints
-
-      - name: Upload to Codecov
-        uses: codecov/codecov-action@v7
-        with:
-          fail_ci_if_error: true
-          files: coverage.xml
-          flags: python
-          use_oidc: true
-
   harbor-smoke:
     name: Harbor Smoke
     runs-on: ubuntu-latest
     timeout-minutes: 45
+
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -126,10 +117,10 @@ jobs:
           persist-credentials: false
 
       - name: Set up Nix
-        uses: hakula139/devkit/.github/actions/setup-nix@v2
+        uses: hakula139/devkit/.github/actions/setup-nix@v3
 
       - name: Install dependencies
-        run: nix develop .#python -c uv sync --locked
+        run: nix develop -c uv sync --locked
 
       - name: Check Docker
         run: time docker info
@@ -137,7 +128,7 @@ jobs:
       - name: Run trials under Docker
         env:
           GH_TOKEN: ${{ github.token }}
-        run: nix develop .#python -c uv run pytest -m docker
+        run: nix develop -c uv run pytest -m docker
 
       - name: Check the coding family
         shell: bash
@@ -148,7 +139,7 @@ jobs:
           if [[ -n $BASE_SHA ]]; then
             args+=("$BASE_SHA")
           fi
-          nix develop .#python -c uv run python -m assistant_bench.ci "${args[@]}"
+          nix develop -c uv run python -m assistant_bench.ci "${args[@]}"
 
       - name: Diagnose Docker failure
         if: failure()
@@ -162,17 +153,19 @@ jobs:
     # A skipped job counts as a passing required check, so the gate must run after failures too.
     if: ${{ !cancelled() }}
     needs:
-      - flake-check
-      - node-check
-      - python-check
+      - nix
+      - python
+      - bench
+      - web
       - harbor-smoke
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       actions: read
+
     steps:
       - name: Check results
-        uses: hakula139/devkit/.github/actions/ci-result@v2
+        uses: hakula139/devkit/.github/actions/ci-result@v3
 
   preview:
     name: Deploy Preview
@@ -181,7 +174,7 @@ jobs:
       github.event_name == 'pull_request' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.event.pull_request.user.login != 'dependabot[bot]'
-    needs: node-check
+    needs: web
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # Serialize previews with cleanup so cancellation cannot leave old deployments behind.
@@ -197,6 +190,7 @@ jobs:
     env:
       PR_NUMBER: ${{ github.event.pull_request.number }}
       PR_SHA: ${{ github.event.pull_request.head.sha }}
+
     steps:
       # A PR closed before this job joins the group has already run Preview Cleanup.
       - name: Check the PR is open
@@ -220,11 +214,11 @@ jobs:
 
       - name: Set up Nix
         if: steps.pr.outputs.open
-        uses: hakula139/devkit/.github/actions/setup-nix@v2
+        uses: hakula139/devkit/.github/actions/setup-nix@v3
 
       - name: Install dependencies
         if: steps.pr.outputs.open
-        run: nix develop -c pnpm install
+        run: nix develop -c pnpm install --frozen-lockfile
 
       - name: Download site artifact
         if: steps.pr.outputs.open
@@ -305,6 +299,7 @@ jobs:
     environment:
       name: production
       url: https://bench.hakula.xyz
+
     steps:
       - name: Check main's head
         id: head
@@ -327,11 +322,11 @@ jobs:
 
       - name: Set up Nix
         if: steps.head.outputs.current
-        uses: hakula139/devkit/.github/actions/setup-nix@v2
+        uses: hakula139/devkit/.github/actions/setup-nix@v3
 
       - name: Install dependencies
         if: steps.head.outputs.current
-        run: nix develop -c pnpm install
+        run: nix develop -c pnpm install --frozen-lockfile
 
       - name: Download site artifact
         if: steps.head.outputs.current

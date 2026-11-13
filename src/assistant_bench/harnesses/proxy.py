@@ -193,7 +193,8 @@ async def connect(
         runner = web.AppRunner(app, access_log=None, shutdown_timeout=1)
         await runner.setup()
         try:
-            await web.TCPSite(runner, '0.0.0.0', 0).start()
+            # Docker containers reach the host proxy through its network interface.
+            await web.TCPSite(runner, '0.0.0.0', 0).start()  # noqa: S104
             port = runner.addresses[0][1]
             yield Connection(f'http://host.docker.internal:{port}', token, calls)
         finally:

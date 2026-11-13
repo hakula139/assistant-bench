@@ -31,7 +31,6 @@ direnv
 dists
 dotenv
 DSYNC
-dynlib
 endog
 envrc
 esbuild
@@ -40,7 +39,6 @@ exog
 expit
 fallocate
 fchmod
-fcntl
 fdatasync
 fileno
 fsize
@@ -56,13 +54,10 @@ hanzi
 HMAC
 httpx
 intp
-isinstance
 isort
 jobq
 journalctl
 jsonable
-justhtml
-katex
 killpg
 kimi
 kwarg
@@ -87,13 +82,11 @@ noscript
 npmjs
 numpy
 nums
-numtide
 nvmrc
 Orchidarium
 pinv
 pkgs
 Priya
-pthread
 pvalue
 pwrite
 pwritev
@@ -107,7 +100,6 @@ pytest
 PYTHONDEVMODE
 PYTHONDONTWRITEBYTECODE
 RDONLY
-redoc
 remoteip
 repr
 rlimit
@@ -143,7 +135,6 @@ unrouted
 unscored
 unstarted
 unstub
-untabled
 untimed
 urandom
 usize
@@ -159,6 +150,5 @@ WRONLY
 xdist
 xlink
 zhon
-zhuyin
 zstd
 zēng

@@ -62,6 +62,7 @@ messages-protocol = 1
 anthropic-api-version = "2023-06-01"
 
 [tool.uv]
+required-version = ">=0.13"
 # Nixpkgs' Python can't load Linux wheels that link libstdc++, so uv must never pick one on PATH.
 python-preference = "only-managed"
 
@@ -82,11 +83,27 @@ quote-style = "single"
 line-ending = "lf"
 
 [tool.ruff.lint]
-select = ["B", "C4", "D", "E", "F", "I", "PGH003", "PGH004", "RUF100", "RUF102", "SIM", "UP", "W"]
-ignore = ["D101", "D102", "D103", "D105", "D106", "D107"]
+select = [
+  "B",
+  "C4",
+  "D",
+  "E",
+  "F",
+  "I",
+  "PGH003",
+  "PGH004",
+  "RUF100",
+  "RUF102",
+  "S",
+  "SIM",
+  "UP",
+  "W",
+]
+ignore = ["D101", "D102", "D103", "D105", "D106", "D107", "S101", "S603", "S607"]
 
 [tool.ruff.lint.per-file-ignores]
-"**/tests/**" = ["D100", "D104"]
+"**/tests/**" = ["D100", "D104", "S105", "S108", "S311", "S608"]
+"families/**" = ["S"]
 
 [tool.ruff.lint.isort]
 lines-after-imports = 2
@@ -96,9 +113,8 @@ combine-as-imports = true
 [tool.ruff.lint.pydocstyle]
 convention = "numpy"
 
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-pythonpath = ["tests"]
+[tool.pytest]
+minversion = "9.0"
 addopts = [
   "--import-mode=importlib",
   "--quiet",
@@ -109,12 +125,14 @@ addopts = [
   "-m",
   "not docker",
   "--cov",
-  "--cov-report=term-missing",
+  "--cov-report=term",
   "--cov-report=xml",
 ]
+strict = true
+testpaths = ["tests"]
+pythonpath = ["tests"]
 faulthandler_timeout = 900
 faulthandler_exit_on_timeout = true
-strict_markers = true
 markers = ["docker: runs Harbor trials in Docker, selected by the Harbor Smoke job"]
 
 [tool.coverage.run]

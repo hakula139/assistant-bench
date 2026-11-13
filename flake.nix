@@ -12,7 +12,7 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
 
     devkit = {
-      url = "github:hakula139/devkit/v2";
+      url = "github:hakula139/devkit/v3";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
@@ -61,70 +61,19 @@
         );
 
         # ------------------------------------------------------------------------------------------
-        # Node Toolchain
-        # ------------------------------------------------------------------------------------------
-        nodeMajor = "26";
-        nodejs = pkgs.nodejs_26;
-        pnpm = pkgs.pnpm_12;
-        nodeTools = [
-          nodejs
-          pnpm
-        ];
-
-        # ------------------------------------------------------------------------------------------
-        # Python Environment
-        # ------------------------------------------------------------------------------------------
-        pythonEnvironment = {
-          packages = [ pkgs.uv ] ++ nodeTools;
-          env.BENCH_NIXOS_CONFIG = nixosConfigExport;
-        };
-
-        # ------------------------------------------------------------------------------------------
         # Pre-commit Hooks
         # ------------------------------------------------------------------------------------------
-        hooks = {
-          actionlint.enable = true;
-          check-yaml.enable = true;
-          cspell.enable = true;
-          deadnix.enable = true;
-          dprint.enable = true;
-          editorconfig-checker.enable = true;
-          markdownlint-cli2.enable = true;
-          nixfmt.enable = true;
-          shellcheck.enable = true;
-          shfmt.enable = true;
-          sort-file-contents.enable = true;
-          statix.enable = true;
-          taplo.enable = true;
-
-          lychee = {
-            enable = true;
-            extraPackages = [ pkgs.cacert ];
-          };
-
-          ruff = {
-            enable = true;
-            types = [ "file" ];
-            types_or = [
-              "python"
-              "pyi"
-            ];
-          };
-
-          ruff-format = {
-            enable = true;
-            types = [ "file" ];
-            types_or = [
-              "python"
-              "pyi"
-            ];
-          };
-        };
-
         preCommit = dk.preCommit {
           src = ./.;
-          inherit hooks;
-          devHooks = {
+          hooks = {
+            lychee.enable = true;
+            mypy.enable = true;
+            ruff.enable = true;
+            ruff-format.enable = true;
+            shellcheck.enable = true;
+            shfmt.enable = true;
+            taplo.enable = true;
+
             prettier = {
               enable = true;
               package = dk.nodeTool "prettier";
@@ -136,6 +85,8 @@
         # ------------------------------------------------------------------------------------------
         # GitLab Pages Toolchain
         # ------------------------------------------------------------------------------------------
+        inherit (dk.nodeToolchain) pnpm;
+        nodeMajor = pkgs.lib.versions.major dk.nodeToolchain.nodejs.version;
         pagesVariable = name: ".pages.variables.${name} // .variables.${name}";
         pagesCheck =
           name: label: query: pattern: expected:
@@ -151,17 +102,14 @@
       in
       {
         # ------------------------------------------------------------------------------------------
-        # Dev Shells
+        # Dev Shell
         # ------------------------------------------------------------------------------------------
-        devShells.python = pkgs.mkShell (pythonEnvironment // { name = "assistant-bench-python"; });
-
-        devShells.default = pkgs.mkShell (
-          pythonEnvironment
-          // {
-            name = "assistant-bench-dev";
-            inputsFrom = [ preCommit.shell ];
-          }
-        );
+        devShells.default = pkgs.mkShell {
+          name = "assistant-bench-dev";
+          packages = builtins.attrValues dk.nodeToolchain ++ builtins.attrValues dk.uvToolchain;
+          inputsFrom = [ preCommit ];
+          env.BENCH_NIXOS_CONFIG = nixosConfigExport;
+        };
 
         # ------------------------------------------------------------------------------------------
         # Packages
@@ -172,7 +120,6 @@
         # Checks
         # ------------------------------------------------------------------------------------------
         checks = {
-          pre-commit = preCommit.check;
           pages-pnpm =
             pagesCheck "pages-pnpm" "BENCH_PNPM_VERSION" (pagesVariable "BENCH_PNPM_VERSION") pnpm.version
               "pnpm ${pnpm.version}";
