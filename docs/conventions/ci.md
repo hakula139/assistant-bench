@@ -4,24 +4,24 @@
 
 GitHub Actions runs on pushes to `main`, pull requests, and manual dispatch:
 
-| Job                   | Checks                                                                                                                                                                       |
-| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| nix / Nix (Linux)     | The shared Nix workflow runs `nix flake check`, which holds the GitLab Pages pin checks, and `nix develop -c run-hooks`.                                                     |
-| python / Python Check | The shared Python workflow runs pytest and uploads its coverage to Codecov.                                                                                                  |
-| Bench Check           | basedpyright and the fingerprint check.                                                                                                                                      |
-| Web Check             | `pnpm lint`, `pnpm typecheck`, and `pnpm test` with coverage uploaded to Codecov, then `pnpm build` and a dry-run voting Worker bundle, uploading `web/dist` as `site-dist`. |
-| Harbor Smoke          | `uv run pytest -m docker` under Docker, including the oracle and nop check that `bench check smoke` runs, then `bench check coding-repo` on the coding tasks selected below  |
-| CI Result             | Fails when any job above fails or is cancelled                                                                                                                               |
+| Job                           | Checks                                                                                                                                                                       |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| nix / Nix (Linux)             | The shared Nix workflow runs `nix flake check`, which holds the GitLab Pages pin checks, and `nix develop -c run-hooks`.                                                     |
+| python / Python Check (Linux) | The shared Python workflow runs pytest and uploads its coverage to Codecov.                                                                                                  |
+| Bench Check                   | basedpyright and the fingerprint check.                                                                                                                                      |
+| Web Check                     | `pnpm lint`, `pnpm typecheck`, and `pnpm test` with coverage uploaded to Codecov, then `pnpm build` and a dry-run voting Worker bundle, uploading `web/dist` as `site-dist`. |
+| Harbor Smoke                  | `uv run pytest -m docker` under Docker, including the oracle and nop check that `bench check smoke` runs, then `bench check coding-repo` on the coding tasks selected below. |
+| CI Result                     | Fails when any job above fails or is cancelled.                                                                                                                              |
 
 The fingerprint check runs `uv run bench fingerprints`, which enforces the rule in [Systems](../design/systems.md#fingerprints) against the fingerprints that the closed reports under `reports/` froze. It reads only the checked-out tree, so the push run on `main` catches a fingerprint change and a close that pass alone but conflict once both land.
 
 Harbor Smoke selects changed coding tasks against the PR base or the previous head on a push to `main`, passing each ID through `bench check coding-repo --task <id>`. Added and renamed tasks are checked, while deleted tasks need no trial. Changes under `src/`, to the coding family's shared files, `systems.toml`, the coding family's `family.toml`, Python dependencies or version, Nix inputs or shell, or Harbor Smoke's workflow check every coding task. Other changes skip the coding-family trials. Manual runs have no comparison base and check every coding task. The core Docker smoke tests run for every event.
 
-The `main` ruleset requires CI Result and both Codecov patch statuses: `codecov/patch` for Python and `codecov/patch/web` for the site. `codecov.yml` scopes each status to `src/` or `web/` and waits for both uploads, which authenticate with a GitHub OIDC token, so only the two uploading jobs hold `id-token: write`.
+The `main` ruleset requires CI Result and both Codecov patch statuses: `codecov/patch` for Python and `codecov/patch/web` for the site. `codecov.yml` scopes each status to `src/` or `web/`, fails a patch status when tests cover less than 80% of a PR's changed lines, and waits for both uploads. The Python and Web jobs request `id-token: write` for Codecov's OIDC upload, while fork pull requests use Codecov's tokenless upload instead.
 
-Only the deploy jobs below read repository secrets, and only in the steps that run Wrangler. Harbor Smoke uses the automatic read-only GitHub token to fetch pinned Codex release metadata. List each new check job in CI Result's `needs`.
+The shared Nix and Python jobs may receive `CACHIX_AUTH_TOKEN` for the Cachix cache. Only the deploy jobs below read `CLOUDFLARE_API_TOKEN`, and only in the steps that run Wrangler. Harbor Smoke uses the automatic read-only GitHub token to fetch pinned Codex release metadata. List each new check job in CI Result's `needs`, since the gate skips a job it does not wait for.
 
-Set every job's `timeout-minutes` to several times its measured successful duration, including the full coding-family run for Harbor Smoke. Revisit the budget when the workload changes so a stalled job releases its runner and concurrency group promptly.
+Set every job's `timeout-minutes` to several times its measured successful duration, including the full coding-family run for Harbor Smoke.
 
 Web Check installs Playwright's Chromium headless shell without `--with-deps`, since the runner image already carries its system libraries and the apt downloads stalled the job past its timeout.
 
@@ -49,8 +49,4 @@ On GitLab, `.gitlab-ci.yml` runs the `pages` job from `.gitlab/ci/pages.yml`, wh
 
 ## Workflow Steps
 
-Steps that need the dev shell prefix commands with `nix develop -c`. Every multiline script uses a literal block and sets `shell: bash` so actionlint can run shellcheck.
-
-Write multiline step text as one heredoc, never as repeated `printf` or `echo >>` calls.
-
-When the text includes a command's output, read the output into a variable first, since a failed command substitution inside a heredoc does not fail the step under `bash -e`.
+Steps that need the dev shell prefix commands with `nix develop -c`. Every multiline script uses a literal block and sets `shell: bash` so actionlint can run shellcheck. Multiline step text is one heredoc, and a command's output enters it through a variable set beforehand, since a failed command substitution inside a heredoc does not fail the step under `bash -e`.

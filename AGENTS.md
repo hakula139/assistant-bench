@@ -46,7 +46,7 @@ The tree lists only the top-level entries whose names leave their purpose unclea
 
 ## Rules for Every Change
 
-- Run pre-commit hooks on every commit, and never bypass them with `--no-verify` or `PRE_COMMIT_ALLOW_NO_CONFIG`. In each new checkout or worktree, run `nix develop -c true`, `pnpm install`, and `uv sync` once to provide the generated config, the Node tools, and the virtualenv. On each host, and again after each Playwright update, run `pnpm --filter web exec playwright install --only-shell chromium` for the site test's browser.
+- Never bypass the pre-commit hooks. In each new checkout or worktree, run `nix develop -c true` once to generate the hook configuration, then `pnpm install` and `uv sync` inside the dev shell for the Node tools and the virtualenv. On each host, and again after each Playwright update, run `pnpm --filter web exec playwright install --only-shell chromium` for the site test's browser.
 - Run the [verification](#verification) block before review.
 - Add new words to `.cspell/words.txt`, as `cspell` scans Python sources too.
 - Commit only synthetic or public cases to this repository. Keep transcript-derived and held-out cases and trial artifacts in the private repository, and runtime state and outputs in private D1, as [Data](docs/conventions/data.md) describes.
