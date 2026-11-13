@@ -1,6 +1,6 @@
 {
   "config": {
-    // GitHub shows a PR's title above its body, so the PR template starts at `##`.
+    // Prompt files, such as the canary and the smoke task's instruction, start with their text.
     "first-line-heading": false,
   },
 }

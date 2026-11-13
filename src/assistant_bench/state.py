@@ -669,7 +669,7 @@ class State:
                     WHERE existing.collection_id = incoming.collection_id
                         AND existing.position = incoming.position
                 )
-                """,
+                """,  # noqa: S608
                 params,
             )
             positions = ', '.join('?' for _ in batch)
@@ -677,7 +677,7 @@ class State:
                 f"""
                 SELECT position, output_key, output_json FROM collection_outputs
                 WHERE collection_id = ? AND position IN ({positions})
-                """,
+                """,  # noqa: S608
                 (collection, *(position for position, _, _ in batch)),
             ).rows
             existing = {cast(int, row['position']): row for row in rows}

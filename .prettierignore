@@ -1,5 +1,3 @@
-pnpm-lock.yaml
 **/*.md
-**/*.mdx
 reports/
 tests/fixtures/report*.json

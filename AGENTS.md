@@ -19,10 +19,9 @@ The tree lists only the top-level entries whose names leave their purpose unclea
 ```text
 .
 ├── .env.example                            # Endpoint variables that `bench` loads from an ignored .env
-├── .worktreeinclude                        # Gitignored agent memory that Claude Code copies into new worktrees
 ├── families/                               # One directory per family and leaderboard
 ├── fingerprints.json                       # Each runnable system's fingerprint, kept current by a test
-├── flake.nix                               # Dev shells, pre-commit hooks, checks, and the nixos-config export
+├── flake.nix                               # The dev shell, pre-commit hooks, checks, and the nixos-config export
 ├── src/assistant_bench/                    # The `bench` package, mapped in docs/design/architecture.md
 ├── systems.toml                            # Systems under test, one table each
 ├── typings/                                # Development-only type stubs for dependencies that lack them
@@ -66,17 +65,16 @@ The tree lists only the top-level entries whose names leave their purpose unclea
 Run after implementation and before review:
 
 ```bash
-uv run mypy                                           # Type check (strict)
+nix develop -c run-hooks                              # Run every pre-commit hook, including mypy, on all files
 uv run basedpyright                                   # Check the shared editor type policy
 uv run pytest                                         # Run the tests that need no Docker, with coverage
 uv run bench fingerprints                             # Check fingerprints against the closed reports
 uv run pytest -m docker                               # Run the Harbor trials under Docker, which need no secrets
-pnpm format                                           # Check formatting of the site, JSON, and YAML
 pnpm lint                                             # Lint the site
 pnpm typecheck                                        # Type check the site and the voting Worker
 pnpm test                                             # Test the site and the voting Worker, with coverage: schema, charts, pages, the vote page and API, and accessibility
 pnpm build                                            # Build the site from reports/
-nix flake check                                       # Run shared formatting, spelling, and lint checks and Pages pin checks
+nix flake check                                       # Check the GitLab Pages pins
 ```
 
 [CI](docs/conventions/ci.md#checks) lists which job runs each check.

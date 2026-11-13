@@ -18,7 +18,7 @@ from assistant_bench.paths import REPO_ROOT
 
 
 WRANGLER_CONFIG = REPO_ROOT / 'web' / 'wrangler.toml'
-TOKEN_FILE_VAR = 'BENCH_D1_TOKEN_FILE'
+TOKEN_FILE_VAR = 'BENCH_D1_TOKEN_FILE'  # noqa: S105
 ENV_FILE_VAR = 'BENCH_D1_ENV_FILE'
 TargetName = Literal['staging', 'production', 'private']
 

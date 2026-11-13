@@ -269,7 +269,8 @@ def _paged[T: _Keyed](
     rows: list[T] = []
     while True:
         page = database.execute(
-            f'SELECT {columns} FROM votes WHERE {where} AND id > ? '
+            # `columns` and `where` are constant SQL from callers.
+            f'SELECT {columns} FROM votes WHERE {where} AND id > ? '  # noqa: S608
             f'ORDER BY id LIMIT {PAGE_ROWS}',
             [*params, rows[-1].id if rows else 0],
         ).rows
@@ -334,7 +335,7 @@ class Selector(_Model):
     def condition(self) -> tuple[str, Param]:
         """Return the SQL condition and its one parameter, which binds any count."""
         return (
-            f'{self.column} IN (SELECT value FROM json_each(?))',
+            f'{self.column} IN (SELECT value FROM json_each(?))',  # noqa: S608
             json.dumps(self.values),
         )
 
@@ -443,7 +444,7 @@ def exclude(database: Database, family: str, selector: Selector, reason: str) ->
     check_reason(reason)
     condition, param = selector.condition()
     result = database.execute(
-        'UPDATE votes SET exclusion = ? WHERE family = ? AND exclusion IS NULL '
+        'UPDATE votes SET exclusion = ? WHERE family = ? AND exclusion IS NULL '  # noqa: S608
         f'AND {condition} RETURNING id',
         [reason, family, param],
     )
@@ -454,7 +455,9 @@ def restore(database: Database, family: str, selector: Selector) -> int:
     """Count the selected excluded votes again, returning how many changed."""
     condition, param = selector.condition()
     result = database.execute(
-        'UPDATE votes SET exclusion = NULL WHERE family = ? AND exclusion IS NOT NULL '
+        # `condition` is built from a literal column name.
+        'UPDATE votes SET exclusion = NULL WHERE family = ? '  # noqa: S608
+        'AND exclusion IS NOT NULL '
         f'AND {condition} RETURNING id',
         [family, param],
     )
