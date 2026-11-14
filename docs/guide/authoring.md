@@ -17,30 +17,19 @@ samples = 1
 categories = ["message"]
 ```
 
-A `family.toml` lists its fields in this order:
+Choose the scorer for the evidence the family collects: `votes` for blind comparisons, `tests` for task rewards, or `checkers` for deterministic format checks. The [family model](../../src/assistant_bench/families.py) defines accepted fields and defaults.
 
-| Field           | Required                   | Meaning                                                                                                                                                                 |
-| --------------- | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `scorer`        | yes                        | `votes` for blind pairwise votes, `tests` for task test rewards, or `checkers` for deterministic format checks of rendered cases                                        |
-| `aspect`        | public families            | The skill measured. A public family uses an aspect from `web/src/lib/aspects.ts` and an ID starting with it. A private family may use any aspect ID                     |
-| `display_name`  | yes                        | The short name within the aspect, or the whole name without one. The full name must be unique                                                                           |
-| `public`        | no                         | Whether the site lists the family, its systems, and reports. Defaults to `false`                                                                                        |
-| `public_voting` | no                         | For `votes`, publish the family for [production voting](../design/arena.md#publication-and-closing). Defaults to `false`                                                |
-| `systems`       | no                         | The `systems.toml` tables to run. Defaults to empty                                                                                                                     |
-| `pairs`         | `checkers`                 | Bare / prompted system pairs. Every listed system appears in exactly one pair                                                                                           |
-| `reference`     | `votes`                    | One of `systems`, anchored at 1,000 when the round ranks it                                                                                                             |
-| `render`        | `votes` task families      | `text` (default) or `html` for cases. Tasks require `diff`, showing each solution against `environment/app/`                                                            |
-| `language`      | no                         | `zh` or `en` for a `votes` case family's language gate                                                                                                                  |
-| `samples`       | yes                        | Harbor attempts per task and system. `checkers` requires exactly 1. Other scorers allow at least 1, and raising it runs only the extra attempts                         |
-| `harness`       | task families with systems | The default agent for systems without an explicit harness, normally `terminus-2`. Changing it replaces those systems' trials. Case families use `generate` and set none |
-| `budget_usd`    | no                         | The USD that the [spend ledger](running.md#spend-and-budgets) and a run's projection may reach before `bench run` refuses priced pending trials. Defaults to none       |
-| `categories`    | no                         | The case category IDs, in board order, that its cases and task metadata may use. Reports publish the IDs, and the site labels them from its glossary                    |
-| `defects`       | no                         | For `votes`, unique issue IDs in presentation order. Defaults to empty, hiding Issues buttons. [Voting](voting.md#casting-a-vote) gives their shortcuts                 |
-| `[gates]`       | no                         | A `votes` case family's `min_chars`, `max_chars`, and `script = "hans"`, defined in [Writing](../design/families/writing.md#gates)                                      |
+A public family needs a declared aspect and an ID beginning with that aspect. Its short display name becomes the full name when it has no aspect, and full names must be unique. `public` lists results on the site, while `public_voting` separately permits [production voting](../design/arena.md#publication-and-closing).
 
-An `html` reply must be a complete self-contained document, bare or inside one complete HTML fence with no surrounding prose. Collection preserves the extracted document's bytes, requires explicit doctype, html, head, and body boundaries, and rejects resource hints, refresh or DNS-enable metadata, base elements, SVG animation elements, and navigation outside document fragments. Its isolated preview allows inline CSS, data images or fonts, native controls, static SVG, and CSS animation, with JavaScript, external resources, form submission, and persistence unavailable. HTML outputs have no text-length measurement.
+List runnable systems and a reference for voted rankings. The reference anchors a round at 1,000 when it ranks. Increasing `samples` runs only the extra attempts. Checker families require one sample and put every listed system in exactly one bare / prompted pair. Task families set a default harness, and changing it replaces the affected trials. [Running](running.md#spend-and-budgets) explains budget admission.
 
-A new category ID updates the `Category` literal, the `categories` list in `lib/categories.ts`, and the glossary, as [TypeScript](../conventions/typescript.md#reports) describes along with new defect IDs and languages.
+Keep categories in board order and defects in presentation order. Category IDs appear in reports, with labels supplied by the site glossary. Omitting defects hides issue tagging. [Writing](../design/families/writing.md#gates) defines the optional language, length and script gates.
+
+Cases render as text by default or as HTML with `render = "html"`. Voted tasks require `render = "diff"` to show solutions against `environment/app/`. An HTML reply must be a complete self-contained document, bare or inside one complete HTML fence with no surrounding prose:
+
+- Include explicit doctype, html, head and body boundaries. Collection preserves the extracted document's bytes and records no text length.
+- Use inline CSS, data images or fonts, native controls, static SVG and CSS animation. JavaScript, external resources, form submission and persistence are unavailable.
+- Omit resource hints, refresh or DNS-enable metadata, base elements, SVG animation elements and navigation outside document fragments.
 
 Each `checkers` pair is `{ bare = "<system>", prompted = "<system>" }`. The bare system has no system prompt, and the prompted system has one. Their resolved generation settings must otherwise match, including model, API, effort, context, completion limit, harness and generation version. Checker families require cases and use each case's language.
 
@@ -64,7 +53,7 @@ checklist = ["One sentence"]
 - `source` is `synthetic` or `public` in this repository. Cases derived from transcripts (`transcript`) and held-out cases (`held-out`) belong in `cases/<family>.toml` in the private repository, which runtime commands read at a pinned revision beside the public cases. [Data](../conventions/data.md#data-classes) covers each class.
 - `instruction` is the prompt every system receives as Markdown. Write every instruction as a TOML multi-line literal string, with `'''` and a line break opening it and `'''` alone on the closing line, so it ends in exactly one newline and the source shows the prompt byte for byte, with no escapes. The instruction follows the repository's Markdown rules like any other Markdown file, with chat logs, transcripts, and other material whose lines Markdown would join or garble in a fenced code block.
 - `checklist` is an optional list of points the vote page shows under the prompt as What to check, which the model never sees.
-- `[cases.checks]` is required for `checkers` and absent for other scorers. It fixes `language = "en"` or `"zh"`, `kind = "prose"` (default) or `"directory-tree"`, and a nonempty unique `rules` list. Rule IDs are `ellipsis`, `han-punctuation` (Chinese), `curly-quotes` (English), `paragraph-lines`, `list-spacing`, `tree-comments` (directory trees) and `forbidden-marker`. Optional `targets` names a unique subset for coverage, without changing applicability. `quoted_input` lists exact instruction substrings exempt from authored-prose checks. The marker rule requires `forbidden_marker` to name its planted instruction substring, and other rules omit that field. Checker metadata is separate from the instruction, so changing it recollects verdicts without generating responses again.
+- `[cases.checks]` belongs only to checker cases. Declare the language, prose or directory-tree kind, applicable format rules and any exact quoted-input exemptions. Coverage targets select a subset without changing applicability. A forbidden-marker check names the planted instruction substring. Keep this metadata separate from the instruction, so editing it recollects verdicts without generating responses again.
 
 Writing cases follow the family's [drafting and sourcing policy](../design/families/writing.md#case-sourcing).
 
@@ -74,18 +63,9 @@ Each `tasks/<task>/` directory follows Harbor's task layout: `task.toml` with `[
 
 A task's directory name is its ID, unique across the family's public and private tasks, and its instruction is `instruction.md`. Its `[metadata]` carries `category`, one of the family's `categories`, and `source`, one of the [Data](../conventions/data.md#data-classes) classes. A family that lists systems also requires `author`, a free-form label naming the model that wrote the task, and `author_vendor`, its vendor ID from the shared catalog. Authorship remains fixed when that system retires from the runnable configuration.
 
-`bench check` checks each task's `task.toml` for what a run needs:
+Tasks need a semantic version, explicit CPU, memory and agent timeout limits, and no network for either phase. The verifier uses a separate container from the same task image and receives `/app` as an artifact. Per-step overrides and a separate verifier image are unsupported.
 
-- `[task] version`, which Harbor compares with an earlier trial's lock
-- `[environment] network_mode = "no-network"`, `cpus`, and `memory_mb`
-- `no-network` in the agent and verifier phases, which `[agent] network_mode` and `[verifier] network_mode` may not reopen
-- `[verifier] environment_mode = "separate"`, which gives the verifier its own container
-- no `[verifier.environment]`, so the verifier uses the task's own image
-- no `[[steps]]`, whose per-step overrides the check does not prove
-- `[agent] timeout_sec`
-- `/app` under `[[artifacts]]`, which the verifier receives
-
-It then runs the reference solution (Harbor's `oracle` agent) and a do-nothing agent (`nop`) once on each task, and fails unless the reference earns reward 1 and the do-nothing agent earns 0, so the reference solution passes a task that the repository as committed fails.
+`bench check` validates these limits and runs the reference solution (`oracle`) and do-nothing agent (`nop`). The reference must earn reward 1 and the starter reward 0.
 
 Once a task has run, every edit to it needs a bump of `[task] version`, since Harbor aborts a job whose task changed under a version an earlier trial recorded, and `bench check` and `bench run` name such a task first:
 

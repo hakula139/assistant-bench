@@ -25,53 +25,33 @@ web/src/
 
 ## Comments
 
-- When a module-level declaration or its interface, type, or class member needs a comment, use `/** */` TSDoc so editors show it on hover. Use `//` for other comments, including those inside a function body.
-
-## Checks
-
-- `pnpm lint` enforces import order with perfectionist's `sort-imports` and `sort-named-imports`, which `eslint --fix` applies.
-- `pnpm test` checks every built page with axe-core, as [Testing](testing.md#accessibility) describes.
+Use `/** */` TSDoc for comments on declarations and members so editors show them on hover. Use `//` inside function bodies.
 
 ## Reports
 
-- The site reads only `families/*/family.toml` and `reports/*/*.json` through the `families` and `reports` collections' `glob()` loaders, and public display names from `systems.toml` through the `systems` collection's `file()` loader. It drops every family without `public = true` together with its reports. Nothing under the data directory reaches a build.
-- `lib/family.ts` lists only the `family.toml` keys the site reads, with objects that drop the rest, since the pydantic settings model already rejects unknown keys.
-- `lib/report.ts` mirrors the Pydantic `Report` model field for field with strict Zod objects. Change both schemas in one PR so the build rejects unknown fields and invalid values.
-- Only `content.config.ts`, `lib/family.ts`, and `lib/report.ts` build classic Zod schemas, and other modules import only types from the last two, as ESLint enforces. Building a classic schema in the browser runs Zod's eval probe, which the pages' script policy reports as a violation. Browser code that validates data uses `zod/mini`, which never probes.
-- `pnpm test` parses every report fixture and compares Zod's JSON Schema with the Pydantic-generated `tests/fixtures/report.schema.json`. It checks field types, nullability, constants, enums, required and allowed keys, and map keys within each results variant. Numeric bounds, formats and descriptions are not compared.
-- Add a scorer's schema variant and register its views in `components/scorers/index.ts`, its metadata and steps in `lib/method.ts`, and its icons in `components/site/Method.tsx`. Pages dispatch through the registry, and methodology links must reach the registered section. Keep render-specific steps, labels, and sections in those shared registries, keyed by scorer and render, never by family name.
-- Register a public aspect's title in `lib/aspects.ts` and its icon in `components/site/Method.tsx`. The registry determines listing order.
-- A new defect ID updates the `Defect` type in `src/assistant_bench/families.py`, the `defects` list in `lib/defects.ts`, and its label in `lib/glossary.ts`. A new category ID does the same for `Category` and `categories` in `lib/categories.ts`, with its label in `categoryTerms`.
-- A new language needs a detector in `scoring/gates.py`, the `Language` type in `families.py`, the enum in `lib/family.ts`, and its label in `lib/method.ts`.
+The site reads committed public families, system labels and reports. Nothing from the private data directory may enter a build. Keep the strict Pydantic and Zod report schemas in step, including nullability and public identity.
+
+Browser validation uses `zod/mini`. Classic Zod probes `eval`, which violates the page CSP, so classic schema construction stays in the content loaders and their schema modules. Other consumers import their types.
+
+Dispatch scorer and render behavior through the shared registries, including methodology links. Family names must not select presentation behavior.
 
 ## Components
 
-- Add shadcn/ui components with `pnpm exec shadcn add <component>` from `web/`, then commit the copy and adjust it in place. Preserve keyboard behavior, available-space limits, and control contrast when changing a component.
-- Style with the shadcn/ui components and their variants first, and with Tailwind utilities where none fits, keeping raw CSS to theme tokens in `global.css`. When several elements share a look, give it one home in a component, a variant, or a shared class constant, so the class list is not repeated.
-- Running text stays within `measure`, and page blocks sit `stack` apart, which `Base.astro` applies to every results page's top level. Space stacked blocks with flex `gap` and no margins on the blocks, as `stack`, `PageHeader`, `Section`, and `Part` do, since Astro wraps each hydrated island in a `display: contents` element that `space-y` margins skip.
-- Hydrate a component only where the page is interactive. Tables render as static React components unless a cell opens a hint, and island props stay serializable, which is why `DotRangePlot` takes a named format.
-- Pass filter state through `useSearchParam` so each filter lands in the URL. When each value of a choice would add its own data to the page, as a family's rounds do, give each value a static route and link the routes, so island props hold only what the page shows.
+- Add shadcn/ui components with `pnpm exec shadcn add <component>` from `web/`, then adjust the committed copy. Preserve keyboard behavior, available-space limits and control contrast.
+- Prefer component variants and Tailwind utilities, with raw CSS reserved for theme tokens. Shared appearances have one component, variant or class constant.
+- Keep running text within `measure` and page blocks `stack` apart. Use flex `gap` between stacked blocks because Astro's `display: contents` island wrappers break sibling-margin spacing.
+- Hydrate only interactive components and keep island props serializable. Filters use `useSearchParam`. Choices carrying different datasets, such as closed rounds, use static routes so each page carries only its own data.
 
 ## Charts
 
-- Render every chart through `PlotFigure`, which sizes it to its container and measures labels in the chart's font. Size label margins from those measurements with `labelMargin`, never from a fixed width.
-- Draw gridlines, reference rules, and tooltips through `grid`, `referenceRule`, and `tip` in `components/charts/chart-marks.ts`, so every chart draws them alike.
-- Pick log-axis ticks with `logTicks` and label them through the axis mark's `text` option, because Plot's log tick format blanks labels on spans under a decade.
-- Take chart colors from the CSS variables in `global.css`, never from literal values, so dark mode needs no re-render. The series and emphasis hues were checked as a pair for lightness, chroma, color-vision separation, and contrast against the surface in both themes, so recheck both before changing either.
-- Give every Plot chart a `TableTwin` with the same values, and keep tooltips to values the twin also shows. The static `Forest` is its own table twin.
-- Draw one score per table row, as the static `Forest` and the leaderboard do, with `ScoreTrack` under a `TrackAxis`, which render without JavaScript. Draw score points in Plot charts through `forestMarks`. Put both on a domain from `forestDomain`, or from `sharedDomain` for several boards on one axis, so every point plot cuts and marks outliers by the same rule. Use each report's frozen method, rules and public identity map for closed rounds.
+Use `PlotFigure` and the shared chart primitives for responsive sizing, measured label margins, marks and axes. Derive point-plot domains consistently and show clipped outliers. Closed rounds use their frozen method, rules and public identities.
 
-## The Vote Page
+Use `logTicks` with the axis mark's `text` option because Plot's default log formatter blanks labels on spans under a decade. Take colors from CSS variables. Recheck lightness, chroma, color-vision separation and contrast in both themes before changing the series and emphasis hues.
 
-- The integration routes `/vote/` in every build. Its island fetches personalized data only at runtime.
-- The island fetches pairs from the same-origin `/api` at runtime, so no vote data enters any build, and it never shows anything that identifies a system, including timing and server error details beyond the API's message.
-- Render case and output Markdown only through `lib/markdown.ts`, which shows raw HTML as text and disables images. HTML outputs use the Worker's authenticated preview route in an empty-sandbox iframe, with no access to the parent DOM.
-- `lib/vote-flow.ts` holds every call to the vote API and the tab's draft, which lives in `sessionStorage` alone, so the page writes nothing to `localStorage` and never sends a vote on load.
-- The page's only third-party content is the Turnstile widget. Its script source is in the page's Astro CSP. The `/vote/*` rule of `web/public/_headers` permits its frame source and same-origin HTML preview frames.
+Every chart needs a table twin with the same values, and tooltips may show only values available there. Static point plots can serve as their own table. [Site](../design/site.md) owns presentation and interaction requirements.
 
 ## The Voting Worker
 
-- `web/worker/` holds the Hono app that serves `/api/*`, one module per concern beside its `*.test.ts`, and `worker/test/` holds the shared test setup. It compiles under its own `tsconfig.json` against the bindings that `wrangler types` generates from `web/wrangler.toml` into the ignored `worker-configuration.d.ts`, which `pnpm lint` and `pnpm typecheck` regenerate.
-- Requests validate through `sValidator` with the `zod/mini` schemas of `lib/arena.ts`, which the client shares, so a route and its caller cannot drift apart. Import `zod/mini` as a namespace (`import * as z`), since the named `z` export keeps all of Zod in the Worker's bundle, as ESLint enforces.
-- Every limit lives in `limits.ts`, apart from the per-minute request limit that the `ratelimits` tables of `web/wrangler.toml` set. A refusal throws `ApiError` with a fixed code from `lib/arena.ts`, and anything else surfaces as 500 `unavailable` through the one error hook.
-- Each write that must not interleave with another is one statement or one D1 batch, since D1 runs a binding's batch as a transaction.
+The client and routes share the API schemas in `lib/arena.ts`. Use `zod/mini` as a namespace import, since its named `z` export retains the full Zod bundle. Keep bindings generated from `web/wrangler.toml` out of version control.
+
+A write that must not interleave with another is one SQL statement or one D1 batch, which D1 executes transactionally. [Arena](../design/arena.md) owns admission, fixed error responses, blinding and schema evolution. [Site](../design/site.md#the-vote-page) owns the voting interaction.

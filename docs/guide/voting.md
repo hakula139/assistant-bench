@@ -10,13 +10,13 @@ For private cases, open the Access-protected private vote page and sign in with 
 
 Each pair compares two systems' different, passing outputs on one case, and you vote at most once on each comparison. A family ends with No pairs left once you have voted on every comparison it offers. Tap the vote count in the Prompt bar to see how many pairs remain.
 
-The server holds your current pair, so a reload or a second tab shows the same one. A reload also keeps your unsent choice, issues, Markdown toggle, collapsed prompt and scroll position, and never sends a vote. If the pair changed meanwhile, the page shows the new one and says so when it cleared an unsent choice.
+The server holds your current pair, so a reload or a second tab shows the same one. Reloading preserves your draft without submitting it. If the pair changed meanwhile, the page says when it cleared an unsent choice.
 
 If a vote fails to send, Retry sends the same vote again, and the server records it once. If another tab already voted on the pair, the page shows the current pair. Skip shows another case for the same two systems, and says so when no other case is left. Undo withdraws your last vote within 10 minutes of casting it and shows its pair again, and each further Undo goes one vote further back.
 
 ## Casting a Vote
 
-Each pair shows the case's prompt above two outputs, or, for text outputs, beside them on a wide screen, with A on the left and B on the right, and never names their systems. Under the prompt, What to check lists the points to judge by, which the model never saw. A prompt you collapse stays collapsed for the following pairs from the same case. Nothing is selected until you choose:
+Judge outputs A and B against the prompt and What to check, whose criteria the model never saw. The page hides system identities. Choose a verdict, optionally tag issues, then submit:
 
 | Key        | Action                                                                               |
 | ---------- | ------------------------------------------------------------------------------------ |
@@ -31,6 +31,6 @@ Each pair shows the case's prompt above two outputs, or, for text outputs, besid
 
 Letter and digit shortcuts work while the voting panel has focus. Each new pair focuses the panel. Header controls and open popovers keep their own keyboard behavior.
 
-An issue counts against the output you tag, whatever your verdict. Each family lists its own issues. Each output's Issues button explains and toggles them, including on phones. A family that lists none shows no Issues button.
+An issue counts against the output you tag, whatever your verdict. Each family's Issues menu explains its available tags.
 
 Outputs appear exactly as written. The Render Markdown toggle renders both text panes as Markdown, with raw HTML shown as text and images left unloaded.
