@@ -311,7 +311,6 @@ class TestExecutionPlugin:
         claude = harness == 'claude-code'
         system = make_system(
             api='anthropic-messages' if claude else 'openai-responses',
-            thinking_mode='anthropic-adaptive' if claude else None,
             harness=harness,
             version='1.2.3',
         )

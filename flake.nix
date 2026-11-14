@@ -43,13 +43,15 @@
         # nixos-config Export
         # ------------------------------------------------------------------------------------------
         promptFragments = import "${nixos-config}/home/modules/llm-assistants/shared/prompt-fragments";
+        devkitSource =
+          (builtins.fetchTree (builtins.fromJSON (builtins.readFile "${nixos-config}/flake.lock"))
+            .nodes.devkit.locked).outPath;
         nixosConfigExport = pkgs.writeText "nixos-config.json" (
           builtins.toJSON {
             inherit (nixos-config) rev;
             catalog = import "${nixos-config}/data/llm-models.nix";
             instructions = import "${nixos-config}/home/modules/llm-assistants/instructions" {
-              inherit promptFragments;
-              devkitSource = devkit;
+              inherit promptFragments devkitSource;
             };
           }
         );

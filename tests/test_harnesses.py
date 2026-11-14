@@ -24,7 +24,6 @@ class TestFingerprint:
         changed = versions.model_copy(update=change)
         native = make_system(
             api='anthropic-messages',
-            thinking_mode='anthropic-adaptive',
             harness=harness,
             generation=versions,
         )

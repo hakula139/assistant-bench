@@ -428,9 +428,7 @@ class TestGenerate:
             endpoint.stream = message_stream(
                 message(stop_reason=stop, stop_details=details)
             )
-            system = make_system(
-                api='anthropic-messages', thinking_mode='anthropic-adaptive'
-            )
+            system = make_system(api='anthropic-messages')
 
             _, collected = collect_reply(run_context, endpoint, system)
 

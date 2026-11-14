@@ -25,7 +25,6 @@ EXPORT_VAR = 'BENCH_NIXOS_CONFIG'
 NIXOS_CONFIG_PROMPT = 'nixos-config:'
 SYSTEMS_FILE = 'systems.toml'
 Api = Literal['openai-chat-completions', 'openai-responses', 'anthropic-messages']
-ThinkingMode = Literal['anthropic-adaptive']
 
 
 # ── nixos-config Export ──
@@ -39,10 +38,7 @@ class ChannelCost(BaseModel):
 
 
 class Thinking(BaseModel):
-    mode: str | None = None
     efforts: list[str]
-    default_level: str = Field(alias='defaultLevel')
-    requires_effort: bool = Field(alias='requiresEffort')
 
 
 class CatalogModel(BaseModel):
@@ -158,7 +154,6 @@ class SystemIdentity(BaseModel):
     """Configured context capacity for the agent's native context management."""
 
     effort: str | None
-    thinking_mode: ThinkingMode | None = None
     prompt: str | None
     harness: str
     version: str | None = None
@@ -169,10 +164,6 @@ class SystemIdentity(BaseModel):
     def _check_capacity(self) -> Self:
         if self.max_output_tokens >= self.context_window:
             raise ValueError('`max_output_tokens` must be less than `context_window`')
-        if self.api == 'anthropic-messages' and self.thinking_mode is None:
-            raise ValueError(
-                'native Messages requires the `anthropic-adaptive` thinking mode'
-            )
         return self
 
 
@@ -234,13 +225,13 @@ def resolve_system(
     export: NixosConfigExport,
     generation: Generation,
 ) -> System:
-    """Resolve a system, defaulting effort from the catalog where it is required.
+    """Resolve a system, requiring the effort its catalog model accepts.
 
     Raises
     ------
     InputError
         The model, its channel, the API, the effort, or the prompt is unknown or
-        ambiguous, or the model's capacities or thinking mode do not fit.
+        ambiguous, or the model's capacities or thinking rules do not fit.
     """
     entry = _catalog_model(name, config.model, export)
     if not entry.apis:
@@ -253,12 +244,13 @@ def resolve_system(
         )
 
     thinking = entry.thinking
-    effort = config.effort
-    if effort is None and thinking is not None and thinking.requires_effort:
-        effort = thinking.default_level
-    _check_effort(name, effort, thinking)
+    if config.api == 'anthropic-messages' and thinking is None:
+        raise InputError(
+            f"System `{name}`: native Messages requires the catalog model's "
+            'thinking rules.'
+        )
+    _check_effort(name, config.effort, thinking)
 
-    adaptive = thinking is not None and thinking.mode == 'anthropic-adaptive'
     ((channel, route),) = entry.channel_id.items()
     try:
         return System(
@@ -267,12 +259,7 @@ def resolve_system(
             api=config.api,
             max_output_tokens=entry.max_output_tokens,
             context_window=entry.context_window,
-            effort=effort,
-            thinking_mode=(
-                'anthropic-adaptive'
-                if config.api == 'anthropic-messages' and adaptive
-                else None
-            ),
+            effort=config.effort,
             prompt=_prompt(name, config.prompt, export),
             harness=config.harness or 'generate',
             version=config.version,
@@ -331,8 +318,9 @@ def _check_effort(
     if thinking is None:
         if effort is not None:
             raise InputError(f'System `{name}`: the model takes no effort.')
-        return
-    if effort is not None and effort not in thinking.efforts:
+    elif effort is None:
+        raise InputError(f'System `{name}`: the model requires an effort.')
+    elif effort not in thinking.efforts:
         raise InputError(
             f'System `{name}`: effort `{effort}` is not one of '
             f'{code(thinking.efforts)}.'

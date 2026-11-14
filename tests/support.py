@@ -345,7 +345,11 @@ GENERATION = make_generation()
 
 
 def make_config(**overrides: Any) -> SystemConfig:
-    fields: dict[str, Any] = {'model': 'acme-large', 'display_name': 'Acme Large'}
+    fields: dict[str, Any] = {
+        'model': 'acme-large',
+        'effort': 'medium',
+        'display_name': 'Acme Large',
+    }
     return SystemConfig(**(fields | overrides))
 
 

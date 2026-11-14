@@ -57,4 +57,4 @@ nix build .#nixos-config                    # Build the export on its own
 nix flake update nixos-config               # Move to the latest nixos-config commit
 ```
 
-A bump that changes a system's resolved prompt, route, or effort changes its fingerprint, and [Systems](../design/systems.md#fingerprints) states whether the system keeps its name. The rendered instructions cite devkit's source path, so a devkit bump changes the prompts of the `nixos-config:<client>` systems too.
+A bump that changes a system's resolved prompt, route, or effort changes its fingerprint, and [Systems](../design/systems.md#fingerprints) states whether the system keeps its name. The rendered instructions cite the devkit revision that nixos-config's own `flake.lock` pins, so moving the flake's `devkit` input leaves the `nixos-config:<client>` prompts unchanged, while a nixos-config bump that moves that pin changes their fingerprints.

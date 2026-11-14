@@ -21,10 +21,7 @@
           }
         },
         "thinking": {
-          "mode": "anthropic-adaptive",
-          "efforts": ["low", "medium", "high"],
-          "defaultLevel": "medium",
-          "requiresEffort": true
+          "efforts": ["low", "medium", "high"]
         }
       },
       "acme-small": {
@@ -43,11 +40,6 @@
             "cacheRead": 0.01,
             "cacheWrite": 0.1
           }
-        },
-        "thinking": {
-          "efforts": ["low", "high"],
-          "defaultLevel": "high",
-          "requiresEffort": false
         }
       },
       "local-model": {
