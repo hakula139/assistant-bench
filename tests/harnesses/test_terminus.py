@@ -71,6 +71,7 @@ from support import (
     message_stream,
     reasoned_response,
     response,
+    review_publications,
     terminus_completion,
     write_task_family,
 )
@@ -257,7 +258,7 @@ def run_and_collect(
             with pytest.raises(error):
                 asyncio.run(execute())
     assert context is not None and logs_dir is not None
-    run_context.refresh_sources(family)
+    review_publications(run_context)
     (collected,) = collection.collect(
         family, {system.name: system}, run_context
     ).outputs

@@ -11,10 +11,12 @@ if not arguments or arguments[0] != 'api':
 if code := int(os.environ.get('TEST_GH_STATUS', '0')):
     raise SystemExit(code)
 metadata = Path(os.environ['TEST_GH_METADATA'])
-if arguments[1:] == ['repos/example/private-data']:
+if [argument.casefold() for argument in arguments[1:]] == ['repos/example/private-data']:
     sys.stdout.write(metadata.read_text())
 else:
-    if 'repos/example/private-data/pulls' not in arguments:
+    if 'repos/example/private-data/pulls' not in [
+        argument.casefold() for argument in arguments
+    ]:
         raise SystemExit(2)
     records = metadata.with_name('pulls.json')
     requests: list[dict[str, Any]] = (

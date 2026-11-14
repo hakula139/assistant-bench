@@ -21,7 +21,13 @@ from assistant_bench.harnesses.host import HostEnvironment
 from assistant_bench.runtime import RunContext
 from assistant_bench.spend import Accounting
 from assistant_bench.tasks import render_tasks
-from support import StubEndpoint, make_system, response, run_host_job
+from support import (
+    StubEndpoint,
+    make_system,
+    response,
+    review_publications,
+    run_host_job,
+)
 
 
 pytestmark = pytest.mark.usefixtures('export')
@@ -154,7 +160,7 @@ class TestHostEnvironment:
             run_id='first-run',
             expected_source_revision=run_context.source_revision(family),
         )
-        run_context.refresh_sources(family)
+        review_publications(run_context)
         rerun = jobs.job(
             family,
             [system],

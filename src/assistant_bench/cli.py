@@ -266,7 +266,7 @@ def _run_families(
             f'`{probe.actual.max_output_tokens}`-token completion allowance '
             f'including reasoning. Full-context cost ceiling: {cost}.'
         )
-    canaries.run(probes, context)
+    _run_canaries(probes, context)
 
     for family, selected, job in prepared:
         run_id = str(uuid4())
@@ -310,6 +310,27 @@ def _run_families(
                     'after inspecting its cloud state.',
                     err=True,
                 )
+
+
+def _run_canaries(probes: list[canaries.Probe], context: RunContext) -> None:
+    failure: BaseException | None = None
+    try:
+        canaries.run(probes, context)
+    except BaseException as error:
+        failure = error
+        raise
+    finally:
+        try:
+            _echo_publications(
+                context.reconcile_publications(
+                    scopes=(),
+                    canary_systems=[probe.original.name for probe in probes],
+                )
+            )
+        except Exception as error:
+            if failure is None:
+                raise
+            failure.add_note(f'Canary artifact publication status also failed: {error}')
 
 
 @app.command()

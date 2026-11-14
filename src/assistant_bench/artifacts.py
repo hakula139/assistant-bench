@@ -564,7 +564,7 @@ class ArtifactRepository:
             if (
                 side.ref != reference
                 or side.repo is None
-                or side.repo.full_name != self.repository_slug
+                or side.repo.full_name.casefold() != self.repository_slug.casefold()
             ):
                 raise InputError(
                     'The artifact pull request names another repository or branch.'

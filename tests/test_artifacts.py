@@ -823,6 +823,25 @@ class TestArtifactRepository:
             )
 
     class TestEnsurePublication:
+        def test_repository_identity_uses_github_casing_without_changing_branch_refs(
+            self,
+            repository: PrivateRepository,
+            trial: Trial,
+        ) -> None:
+            configured = replace(
+                repository, client=ArtifactRepository('Example/Private-Data')
+            )
+            receipt = stage(configured, trial)
+
+            publication = configured.client.ensure_publication('run-a')
+
+            assert publication.state == 'OPEN'
+            assert configured.client.confirm_publication(publication, [receipt]) is None
+            assert (
+                git(repository.remote, 'rev-parse', 'artifacts/run-a')
+                == receipt.commit_sha
+            )
+
         def test_keeps_staging_pending_until_an_explicit_squash_merge(
             self,
             repository: PrivateRepository,

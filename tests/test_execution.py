@@ -167,8 +167,11 @@ class TestExecute:
         assert not run_context.state.complete_run('first-run')
         assert run_context.reconcile_publications(scopes=[family.name])
         review_publications(run_context)
-        assert run_context.sources(family) == []
-        run_context.refresh_sources(family)
+        assert (
+            run_context.source_revision(family)
+            == run_context.state.source_revision(family.name)
+            == 1
+        )
         first = collection.collect(family, {system.name: system}, run_context)
         ledger = read_ledger(family.name, run_context.state)
         assert first.outputs[0].text == 'Hello there.'
@@ -654,6 +657,7 @@ class TestExecutionPlugin:
             update={'job_name': 'stale-plan'}
         )
         admitted = stale.model_copy(update={'job_name': 'registered-first'})
+        stale_revision = run_context.source_revision(family)
 
         async def register() -> None:
             async with executed_trial(
@@ -666,7 +670,8 @@ class TestExecutionPlugin:
         asyncio.run(register())
         review_publications(run_context)
         monkeypatch.setattr(jobs, 'run_job', run_host_job)
-        assert run_context.source_revision(family) == 0
+        assert stale_revision == 0
+        assert run_context.source_revision(family) == 1
         assert run_context.state.artifact_generation(family.name).revision == 1
 
         with pytest.raises(InputError, match='already owns a planned paid slot'):
@@ -676,7 +681,7 @@ class TestExecutionPlugin:
                 {system.name: Accounting.of(system)},
                 scope=family.name,
                 run_id='stale-run',
-                expected_source_revision=run_context.source_revision(family),
+                expected_source_revision=stale_revision,
             )
 
         assert endpoint.requests == []
