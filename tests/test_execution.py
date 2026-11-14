@@ -31,6 +31,7 @@ from support import (
     break_setting,
     executed_trial,
     make_system,
+    review_publications,
     run_host_job,
     write_votes_family,
 )
@@ -64,6 +65,82 @@ def planned(context: RunContext, family: Family, system: System) -> JobConfig:
 
 class TestExecute:
     @pytest.mark.usefixtures('export')
+    def test_pr_failure_preserves_paid_work_and_recovers_without_model_calls(
+        self,
+        run_context: RunContext,
+        family: Family,
+        system: System,
+        endpoint: StubEndpoint,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(jobs, 'run_job', run_host_job)
+        monkeypatch.setenv('TEST_GH_PR_FAILURE', '1')
+        config = planned(run_context, family, system)
+
+        with pytest.raises(InputError):
+            execution.execute(
+                run_context,
+                config,
+                {system.name: Accounting.of(system)},
+                scope=family.name,
+                run_id='pending-run',
+                expected_source_revision=run_context.source_revision(family),
+            )
+
+        assert len(endpoint.requests) == 1
+        assert run_context.state.artifact_generation(family.name).artifacts == ()
+        (receipt,) = run_context.state.pending_artifacts('pending-run')
+        assert receipt.publication_ready
+        assert receipt.authorized_claim_id is not None
+        assert run_context.state.claim_state(receipt.authorized_claim_id) == 'claimed'
+        monkeypatch.delenv('TEST_GH_PR_FAILURE')
+        assert run_context.reconcile_publications(scopes=[family.name])
+        review_publications(run_context)
+        assert len(endpoint.requests) == 1
+        assert run_context.state.claim_state(receipt.authorized_claim_id) == 'settled'
+        assert run_context.state.complete_run('pending-run')
+
+    def test_publication_failure_attaches_to_the_original_execution_error(
+        self,
+        run_context: RunContext,
+        family: Family,
+        system: System,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        original = RuntimeError('Synthetic execution failure.')
+
+        def fail(*args: object, **kwargs: object) -> None:
+            run_context.state.record_pending_artifact(
+                'failed-publication',
+                'trial-a',
+                'source-a',
+                'a' * 40,
+                'runs/failed-publication/trials/artifact-a',
+                'b' * 64,
+            )
+            raise original
+
+        monkeypatch.setattr(jobs, 'run_job', fail)
+        monkeypatch.setenv('TEST_GH_PR_FAILURE', '1')
+        with pytest.raises(RuntimeError) as failure:
+            execution.execute(
+                run_context,
+                planned(run_context, family, system),
+                {system.name: Accounting.of(system)},
+                scope=family.name,
+                run_id='failed-publication',
+                expected_source_revision=0,
+            )
+
+        assert failure.value is original
+        assert any(
+            'Artifact publication also failed' in note for note in original.__notes__
+        )
+        assert run_context.state.pending_artifacts('failed-publication')[
+            0
+        ].publication_ready
+
+    @pytest.mark.usefixtures('export')
     def test_a_fresh_client_recovers_outputs_and_reuses_without_another_request(
         self,
         run_context: RunContext,
@@ -86,8 +163,15 @@ class TestExecute:
             expected_source_revision=run_context.source_revision(family),
         )
 
-        assert run_context.sources(family) == []
-        run_context.refresh_sources(family)
+        assert run_context.state.artifact_generation(family.name).artifacts == ()
+        assert not run_context.state.complete_run('first-run')
+        assert run_context.reconcile_publications(scopes=[family.name])
+        review_publications(run_context)
+        assert (
+            run_context.source_revision(family)
+            == run_context.state.source_revision(family.name)
+            == 1
+        )
         first = collection.collect(family, {system.name: system}, run_context)
         ledger = read_ledger(family.name, run_context.state)
         assert first.outputs[0].text == 'Hello there.'
@@ -175,7 +259,7 @@ class TestExecute:
 
     @pytest.mark.usefixtures('export')
     @pytest.mark.parametrize(
-        'method', ['record_entry', 'record_trial_artifact', 'settle_claim']
+        'method', ['record_entry', 'record_pending_artifact', 'authorize_pending_claim']
     )
     def test_terminal_persistence_failure_keeps_the_run_uncertain(
         self,
@@ -224,7 +308,7 @@ class TestExecutionPlugin:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         config = planned(run_context, family, system)
-        publish_trials = ArtifactRepository.publish_trials
+        stage_trials = ArtifactRepository.stage_trials
         release = threading.Event()
         trial_identity: tuple[str, str] | None = None
 
@@ -249,12 +333,12 @@ class TestExecutionPlugin:
             def publish(
                 repository: ArtifactRepository, archives: Sequence[MaterializedTrial]
             ) -> tuple[ArtifactRef, ...]:
-                (reference,) = publish_trials(repository, archives)
+                (reference,) = stage_trials(repository, archives)
                 loop.call_soon_threadsafe(published.set_result, reference)
                 release.wait()
                 return (reference,)
 
-            monkeypatch.setattr(ArtifactRepository, 'publish_trials', publish)
+            monkeypatch.setattr(ArtifactRepository, 'stage_trials', publish)
             task = asyncio.create_task(finish())
             try:
                 completed, _ = await asyncio.wait(
@@ -274,17 +358,28 @@ class TestExecutionPlugin:
         reference = asyncio.run(cancel())
 
         assert trial_identity is not None
+        assert not run_context.state.trial_registered('cancelled-run', *trial_identity)
+        assert run_context.state.pending_artifacts('cancelled-run')
+        review_publications(run_context)
         assert run_context.state.trial_registered('cancelled-run', *trial_identity)
         (artifact,) = run_context.state.artifact_generation(family.name).artifacts
-        assert (
+        assert ArtifactRef(
+            commit_sha=artifact.commit_sha,
+            path=artifact.path,
+            manifest_digest=artifact.manifest_digest,
+        ) == ArtifactRef(
+            commit_sha=artifact.commit_sha,
+            path=reference.path,
+            manifest_digest=reference.manifest_digest,
+        )
+        archive = run_context.artifacts.materialize(
             ArtifactRef(
                 commit_sha=artifact.commit_sha,
-                path=artifact.path,
-                manifest_digest=artifact.manifest_digest,
-            )
-            == reference
+                path=reference.path,
+                manifest_digest=reference.manifest_digest,
+            ),
+            tmp_path / 'recovered',
         )
-        archive = run_context.artifacts.materialize(reference, tmp_path / 'recovered')
         assert (
             archive.manifest.trial_name,
             archive.manifest.trial_id,
@@ -338,6 +433,7 @@ class TestExecutionPlugin:
             return
 
         asyncio.run(finish())
+        review_publications(run_context)
 
         (artifact,) = run_context.state.artifact_generation(family.name).artifacts
         archive = run_context.artifacts.materialize(
@@ -397,6 +493,7 @@ class TestExecutionPlugin:
             asyncio.run(request())
 
         assert claim_id is not None
+        review_publications(run_context)
         assert run_context.state.claim_state(claim_id) == (
             'settled' if confirmed else 'uncertain'
         )
@@ -450,6 +547,7 @@ class TestExecutionPlugin:
             run_id='original-run',
             expected_source_revision=run_context.source_revision(family),
         )
+        review_publications(run_context)
         run_context.refresh_sources(family)
         tasks = [
             run_context.root / 'tasks' / family.name / name
@@ -476,6 +574,7 @@ class TestExecutionPlugin:
             expected_source_revision=run_context.source_revision(family),
         )
 
+        review_publications(run_context)
         assert len(endpoint.requests) == 3
         assert private_store.execute(
             'SELECT slot_key, state FROM attempt_claims WHERE run_id = ?',
@@ -541,6 +640,8 @@ class TestExecutionPlugin:
             '["f/greeting","acme-large",0]',
         ]
         assert len(endpoint.requests) == 2
+        assert run_context.state.run_status('reverse-run') == 'running'
+        review_publications(run_context)
         assert run_context.state.run_status('reverse-run') == 'complete'
 
     @pytest.mark.usefixtures('export')
@@ -556,6 +657,7 @@ class TestExecutionPlugin:
             update={'job_name': 'stale-plan'}
         )
         admitted = stale.model_copy(update={'job_name': 'registered-first'})
+        stale_revision = run_context.source_revision(family)
 
         async def register() -> None:
             async with executed_trial(
@@ -566,8 +668,10 @@ class TestExecutionPlugin:
                 )
 
         asyncio.run(register())
+        review_publications(run_context)
         monkeypatch.setattr(jobs, 'run_job', run_host_job)
-        assert run_context.source_revision(family) == 0
+        assert stale_revision == 0
+        assert run_context.source_revision(family) == 1
         assert run_context.state.artifact_generation(family.name).revision == 1
 
         with pytest.raises(InputError, match='already owns a planned paid slot'):
@@ -577,7 +681,7 @@ class TestExecutionPlugin:
                 {system.name: Accounting.of(system)},
                 scope=family.name,
                 run_id='stale-run',
-                expected_source_revision=run_context.source_revision(family),
+                expected_source_revision=stale_revision,
             )
 
         assert endpoint.requests == []
@@ -660,6 +764,7 @@ class TestExecutionPlugin:
             asyncio.run(fail())
 
         assert claim_id is not None
+        review_publications(run_context)
         assert run_context.state.claim_state(claim_id) == (
             'cancelled' if phase == 'setup' else 'uncertain'
         )

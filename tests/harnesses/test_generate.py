@@ -42,6 +42,7 @@ from support import (
     message,
     message_stream,
     response,
+    review_publications,
 )
 
 
@@ -145,7 +146,7 @@ def collect_reply(
         for name, value in endpoint_env.items():
             environment.setenv(name, value)
         context = asyncio.run(execute())
-    run_context.refresh_sources(family)
+    review_publications(run_context)
     (collected,) = collection.collect(
         family, {system.name: system}, run_context
     ).outputs

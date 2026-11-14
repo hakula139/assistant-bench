@@ -5,6 +5,7 @@ import gzip
 import ipaddress
 import json
 import math
+import os
 import shutil
 import socket
 import sqlite3
@@ -14,7 +15,7 @@ import textwrap
 import threading
 import tomllib
 from collections import defaultdict
-from collections.abc import AsyncGenerator, Generator, Iterator, Mapping
+from collections.abc import AsyncGenerator, Generator, Iterator, Mapping, Sequence
 from contextlib import asynccontextmanager, closing, contextmanager, suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -60,7 +61,7 @@ from assistant_bench.arena.publication import (
     output_key,
 )
 from assistant_bench.arena.votes import Cut, Snapshot, TaggedDefects, Vote
-from assistant_bench.artifacts import ArtifactRepository
+from assistant_bench.artifacts import ArtifactRef, ArtifactRepository, MaterializedTrial
 from assistant_bench.catalog import Price, System, SystemConfig
 from assistant_bench.database import SQLiteDatabase
 from assistant_bench.execution import ExecutionInput, ExecutionPlugin
@@ -76,6 +77,7 @@ from assistant_bench.families import (
     load_family,
 )
 from assistant_bench.generation import Generation
+from assistant_bench.git import git_environment
 from assistant_bench.harnesses import fingerprint
 from assistant_bench.harnesses.accounting import (
     TrialAccounting,
@@ -660,8 +662,13 @@ async def executed_trial(
             await plugin._ended(  # pyright: ignore[reportPrivateUsage]
                 event.model_copy(update={'event': TrialEvent.END})
             )
-        assert context.state.complete_run(run.id)
+        context.state.seal_publication(run.id)
+        context.artifacts.ensure_publication(run.id)
+        assert context.state.pending_claims_authorized(run.id)
     finally:
+        context.state.seal_publication(run.id)
+        if context.state.pending_artifacts(run.id):
+            context.artifacts.ensure_publication(run.id)
         await plugin.on_job_end(
             JobResult(
                 id=job.id,
@@ -676,6 +683,76 @@ async def executed_trial(
 # ── Git Repositories ──
 
 
+def merge_artifact_branch(repository: PrivateRepository, run_id: str) -> str:
+    """Simulate an explicit reviewer squash merge and delete its staging branch."""
+    repository.client.ensure_publication(run_id)
+    git(repository.seed, 'fetch', '--quiet', 'origin', 'main', f'artifacts/{run_id}')
+    git(repository.seed, 'merge', '--ff-only', 'origin/main')
+    git(repository.seed, 'merge', '--squash', f'origin/artifacts/{run_id}')
+    git(repository.seed, 'commit', '--quiet', '-m', 'Merge audited artifacts')
+    canonical = git(repository.seed, 'rev-parse', 'HEAD')
+    git(repository.seed, 'push', '--quiet', 'origin', 'HEAD:main')
+    git(repository.seed, 'push', '--quiet', 'origin', '--delete', f'artifacts/{run_id}')
+    path = repository.metadata.with_name('pulls.json')
+    records = json.loads(path.read_text())
+    for record in records:
+        if record['head']['ref'] == f'artifacts/{run_id}':
+            record.update(
+                state='closed',
+                merged_at='2025-01-01T00:00:00Z',
+                merge_commit_sha=canonical,
+            )
+    path.write_text(json.dumps(records))
+    return canonical
+
+
+def review_publications(context: RunContext) -> None:
+    """Explicitly review synthetic pending Runs before checking consumption."""
+    metadata = Path(os.environ['TEST_GH_METADATA'])
+    repository = PrivateRepository(
+        context.artifacts,
+        Path(json.loads(metadata.read_text())['ssh_url']),
+        metadata.parent / 'seed',
+        metadata,
+        context.case_revision,
+    )
+    for run in context.state.pending_runs():
+        if any(
+            row.canonical_commit_sha is None
+            for row in context.state.pending_artifacts(run.id)
+        ):
+            merge_artifact_branch(repository, run.id)
+        assert context.reconcile_publications(scopes=[run.scope]) == ()
+
+
+def reviewed_artifacts(
+    repository: ArtifactRepository, archives: Sequence[MaterializedTrial]
+) -> tuple[ArtifactRef, ...]:
+    """Seed already-reviewed artifacts for tests of downstream consumption."""
+    by_run: dict[str, list[MaterializedTrial]] = {}
+    for archive in archives:
+        by_run.setdefault(archive.manifest.run_id, []).append(archive)
+    references: dict[str, ArtifactRef] = {}
+    metadata = Path(os.environ['TEST_GH_METADATA'])
+    fixture = PrivateRepository(
+        repository,
+        Path(json.loads(metadata.read_text())['ssh_url']),
+        metadata.parent / 'seed',
+        metadata,
+        '',
+    )
+    for run_id, selected in by_run.items():
+        staged = repository.stage_trials(selected)
+        canonical = merge_artifact_branch(fixture, run_id)
+        for receipt in staged:
+            references[receipt.path] = ArtifactRef(
+                commit_sha=canonical,
+                path=receipt.path,
+                manifest_digest=receipt.manifest_digest,
+            )
+    return tuple(references[archive.manifest.path] for archive in archives)
+
+
 @dataclass(frozen=True)
 class PrivateRepository:
     client: ArtifactRepository
@@ -688,7 +765,12 @@ class PrivateRepository:
 def git(root: Path, *args: str) -> str:
     """Run git in `root` and return its output, stripped."""
     return subprocess.run(
-        ['git', *args], cwd=root, check=True, capture_output=True, text=True
+        ['git', *args],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        text=True,
+        env=git_environment(),
     ).stdout.strip()
 
 

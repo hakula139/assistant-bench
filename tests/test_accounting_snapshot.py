@@ -119,7 +119,7 @@ class TestAccountingSnapshot:
             )
 
             def register() -> None:
-                state.record_trial_artifact(
+                state.record_pending_artifact(
                     artifact.run_id,
                     artifact.trial_id,
                     artifact.source_trial_id,
@@ -127,6 +127,9 @@ class TestAccountingSnapshot:
                     artifact.path,
                     artifact.manifest_digest,
                 )
+
+                state.seal_publication(artifact.run_id)
+                state.finalize_publication(artifact.run_id, artifact.commit_sha)
 
             during = State(CommitAfterRead(reader, register)).artifact_generation(
                 'sample'

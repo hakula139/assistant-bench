@@ -91,6 +91,19 @@ class TrialArtifact:
 
 
 @dataclass(frozen=True)
+class PendingArtifact:
+    run_id: str
+    trial_id: str
+    source_trial_id: str
+    staged_commit_sha: str
+    path: str
+    manifest_digest: str
+    authorized_claim_id: str | None
+    publication_ready: bool
+    canonical_commit_sha: str | None
+
+
+@dataclass(frozen=True)
 class ArtifactGeneration:
     revision: int
     artifacts: tuple[TrialArtifact, ...]
@@ -450,73 +463,135 @@ class State:
             (scope, scope),
         ).rows
 
-    def settle_claim(self, claim_id: str) -> None:
-        """Atomically settle recorded work with registered artifacts and receipts.
-
-        All admitted requests need confirmed terminal receipts, even when their
-        validated usage is unknown. A rejected settlement keeps its active state
-        and slot. Repeated settlement never advances the source counter twice.
-        """
-        self._claim_row(claim_id)
-        self._database.execute(
-            """
-            INSERT INTO claim_artifacts (claim_id, run_id, trial_id)
-            SELECT claims.id, claims.run_id, claims.trial FROM attempt_claims AS claims
-            JOIN trial_artifacts AS artifacts
-                ON artifacts.run_id = claims.run_id
-                    AND artifacts.trial_id = claims.trial
-            WHERE claims.id = ? AND claims.state IN ('claimed', 'uncertain')
-                AND EXISTS (
-                    SELECT 1 FROM attempt_entries
-                    WHERE claim_id = claims.id
-                ) AND NOT EXISTS (
-                    SELECT 1 FROM request_admissions AS requests
-                    JOIN attempt_starts AS starts ON starts.id = requests.attempt_id
-                    LEFT JOIN request_receipts AS receipts
-                        ON receipts.request_id = requests.id
-                    WHERE starts.claim_id = claims.id AND receipts.request_id IS NULL
-                )
-            ON CONFLICT (claim_id) DO NOTHING
-            """,
-            (claim_id,),
-        )
-        rows = self._database.execute(
-            'SELECT claim_id FROM claim_artifacts WHERE claim_id = ?',
-            (claim_id,),
-        ).rows
-        if not rows:
-            raise InputError(
-                f'Claim `{claim_id}` needs an Entry, artifacts and terminal receipts.'
-            )
-
-    def record_trial_artifact(
+    def record_pending_artifact(
         self,
         run_id: str,
         trial_id: str,
         source_trial_id: str,
-        commit_sha: str,
+        staged_commit_sha: str,
         path: str,
         manifest_digest: str,
     ) -> None:
-        """Register remotely confirmed artifacts independently of paid claims."""
+        expected = (
+            run_id,
+            trial_id,
+            source_trial_id,
+            staged_commit_sha,
+            path,
+            manifest_digest,
+        )
+        existing = next(
+            (row for row in self.pending_artifacts(run_id) if row.trial_id == trial_id),
+            None,
+        )
+        if existing is None:
+            self._database.execute(
+                """
+                INSERT INTO pending_trial_artifacts (
+                    run_id, trial_id, source_trial_id, staged_commit_sha,
+                    path, manifest_digest
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT (run_id, trial_id) DO NOTHING
+                """,
+                expected,
+            )
+        row = next(
+            row for row in self.pending_artifacts(run_id) if row.trial_id == trial_id
+        )
+        if (
+            row.run_id,
+            row.trial_id,
+            row.source_trial_id,
+            row.staged_commit_sha,
+            row.path,
+            row.manifest_digest,
+        ) != expected:
+            raise InputError(
+                f'Trial `{trial_id}` already has different pending artifacts.'
+            )
+
+    def pending_artifacts(self, run_id: str) -> tuple[PendingArtifact, ...]:
+        rows = self._database.execute(
+            'SELECT * FROM pending_trial_artifacts WHERE run_id = ? ORDER BY trial_id',
+            (run_id,),
+        ).rows
+        return tuple(
+            PendingArtifact(
+                run_id=cast(str, row['run_id']),
+                trial_id=cast(str, row['trial_id']),
+                source_trial_id=cast(str, row['source_trial_id']),
+                staged_commit_sha=cast(str, row['staged_commit_sha']),
+                path=cast(str, row['path']),
+                manifest_digest=cast(str, row['manifest_digest']),
+                authorized_claim_id=cast(str | None, row['authorized_claim_id']),
+                publication_ready=bool(row['publication_ready']),
+                canonical_commit_sha=cast(str | None, row['canonical_commit_sha']),
+            )
+            for row in rows
+        )
+
+    def pending_runs(self) -> tuple[Run, ...]:
+        rows = self._database.execute(
+            """
+            SELECT DISTINCT pending.run_id FROM pending_trial_artifacts AS pending
+            JOIN runs ON runs.id = pending.run_id
+            WHERE pending.canonical_commit_sha IS NULL OR runs.status != 'complete'
+            ORDER BY pending.run_id
+            """
+        ).rows
+        return tuple(self.run(cast(str, row['run_id'])) for row in rows)
+
+    def run_systems(self, run_id: str) -> tuple[str, ...]:
+        rows = self._database.execute(
+            'SELECT DISTINCT system FROM attempt_claims WHERE run_id = ?', (run_id,)
+        ).rows
+        return tuple(cast(str, row['system']) for row in rows)
+
+    def authorize_pending_claim(self, claim_id: str) -> None:
+        claim = self.get_claim(claim_id)
+        rows = self._database.execute(
+            """
+            UPDATE pending_trial_artifacts SET authorized_claim_id = ?
+            WHERE run_id = ? AND trial_id = ?
+            RETURNING authorized_claim_id
+            """,
+            (claim_id, claim.run_id, claim.trial),
+        ).rows
+        if not rows:
+            raise InputError(f'Claim `{claim_id}` has no pending artifact.')
+
+    def seal_publication(self, run_id: str) -> None:
+        self._database.execute(
+            'UPDATE pending_trial_artifacts SET publication_ready = 1 WHERE run_id = ?',
+            (run_id,),
+        )
+
+    def finalize_publication(self, run_id: str, canonical_commit_sha: str) -> None:
+        if any(
+            row.canonical_commit_sha not in (None, canonical_commit_sha)
+            for row in self.pending_artifacts(run_id)
+        ):
+            raise InputError('The publication already names another canonical commit.')
         self._database.execute(
             """
-            INSERT INTO trial_artifacts (
-                run_id, trial_id, source_trial_id, commit_sha, path, manifest_digest
-            ) VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT (run_id, trial_id) DO NOTHING
+            UPDATE pending_trial_artifacts SET canonical_commit_sha = ?
+            WHERE run_id = ? AND canonical_commit_sha IS NOT ?
             """,
-            (run_id, trial_id, source_trial_id, commit_sha, path, manifest_digest),
+            (canonical_commit_sha, run_id, canonical_commit_sha),
         )
-        if self.trial_artifact(run_id, trial_id) != {
-            'run_id': run_id,
-            'trial_id': trial_id,
-            'source_trial_id': source_trial_id,
-            'commit_sha': commit_sha,
-            'path': path,
-            'manifest_digest': manifest_digest,
-        }:
-            raise InputError(f'Trial `{trial_id}` already has different artifacts.')
+
+    def pending_claims_authorized(self, run_id: str) -> bool:
+        return not self._database.execute(
+            """
+            SELECT 1 FROM attempt_claims AS claims
+            LEFT JOIN pending_trial_artifacts AS pending
+                ON pending.run_id = claims.run_id AND pending.trial_id = claims.trial
+            WHERE claims.run_id = ? AND claims.state NOT IN ('settled', 'cancelled')
+                AND (pending.authorized_claim_id IS NOT claims.id
+                    OR pending.publication_ready != 1)
+            """,
+            (run_id,),
+        ).rows
 
     def trial_artifact(self, run_id: str, trial_id: str) -> Row:
         rows = self._database.execute(

@@ -6,7 +6,7 @@ import re
 import subprocess
 import tarfile
 import tempfile
-from collections.abc import Generator
+from collections.abc import Collection, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -15,7 +15,7 @@ from harbor.models.job.config import SourceJobConfig
 
 from assistant_bench import jobs, tasks
 from assistant_bench.arena.d1 import connect
-from assistant_bench.artifacts import ArtifactRepository
+from assistant_bench.artifacts import ArtifactRepository, Publication, StagedArtifact
 from assistant_bench.families import Case, Family, load_cases, load_family
 from assistant_bench.git import git_environment
 from assistant_bench.messages import InputError
@@ -52,6 +52,46 @@ class RunContext:
         default_factory=dict, init=False, repr=False
     )
     _revisions: dict[str, int] = field(default_factory=dict, init=False, repr=False)
+
+    def reconcile_publications(
+        self, *, scopes: Collection[str], canary_systems: Collection[str] = ()
+    ) -> tuple[Publication, ...]:
+        """Finalize selected merged Runs before any new inventory or admission."""
+        pending: list[Publication] = []
+        for run in self.state.pending_runs():
+            if run.scope not in scopes and not (
+                run.scope == 'canaries'
+                and set(self.state.run_systems(run.id)) & set(canary_systems)
+            ):
+                continue
+            receipts = self.state.pending_artifacts(run.id)
+            if not all(row.publication_ready for row in receipts):
+                raise InputError(
+                    f'Run `{run.id}` has an unfinished artifact publication.'
+                )
+            publication = self.artifacts.ensure_publication(run.id)
+            canonical = self.artifacts.confirm_publication(
+                publication,
+                tuple(
+                    StagedArtifact(
+                        run_id=row.run_id,
+                        trial_id=row.trial_id,
+                        source_trial_id=row.source_trial_id,
+                        commit_sha=row.staged_commit_sha,
+                        path=row.path,
+                        manifest_digest=row.manifest_digest,
+                    )
+                    for row in receipts
+                ),
+            )
+            if canonical is None:
+                pending.append(publication)
+            else:
+                self.state.finalize_publication(run.id, canonical)
+                self.state.complete_run(run.id)
+                self._sources.pop(run.scope, None)
+                self._revisions.pop(run.scope, None)
+        return tuple(pending)
 
     def sources(self, family: Family) -> list[tuple[SourceJobConfig, Path]]:
         if family.name not in self._sources:

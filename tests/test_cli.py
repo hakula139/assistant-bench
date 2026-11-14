@@ -36,7 +36,7 @@ from assistant_bench import (
     runtime,
 )
 from assistant_bench.arena import publication, votes
-from assistant_bench.artifacts import MaterializedTrial, build_manifest
+from assistant_bench.artifacts import MaterializedTrial, Publication, build_manifest
 from assistant_bench.catalog import (
     EXPORT_VAR,
     NixosConfigExport,
@@ -68,6 +68,8 @@ from support import (
     make_system,
     make_trial,
     record_vote,
+    review_publications,
+    reviewed_artifacts,
     run_host_job,
     write_task_family,
     write_trial,
@@ -202,9 +204,9 @@ def archive_trials(
             case_revision=run.case_revision,
         )
         archives.append(MaterializedTrial(root, manifest))
-    references = context.artifacts.publish_trials(archives)
+    references = reviewed_artifacts(context.artifacts, archives)
     for result, reference in zip(results, references, strict=True):
-        context.state.record_trial_artifact(
+        context.state.record_pending_artifact(
             run.id,
             result.trial_name,
             str(result.id),
@@ -212,6 +214,9 @@ def archive_trials(
             reference.path,
             reference.manifest_digest,
         )
+    context.state.seal_publication(run.id)
+    if references:
+        context.state.finalize_publication(run.id, references[0].commit_sha)
     context.refresh_sources(load_family(scope))
 
 
@@ -375,6 +380,54 @@ def planned_actions(job: JobConfig) -> dict[str, set[DiffAction]]:
     for trial, trial_diff in zip(plan.trial_configs, diff.trials, strict=True):
         actions[trial.agent.kwargs['system']].add(trial_diff.action)
     return actions
+
+
+class TestRunCanaries:
+    @pytest.mark.parametrize(
+        ('probe_failure', 'status_failure'),
+        [(False, False), (True, False), (True, True), (False, True)],
+    )
+    def test_reports_selected_canary_prs_and_preserves_the_original_failure(
+        self,
+        cloud: RunContext,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+        probe_failure: bool,
+        status_failure: bool,
+    ) -> None:
+        system = make_system()
+        probe = canaries.Probe(
+            system, system, system, JobConfig(job_name='probe-a'), 'protocol'
+        )
+        original = InputError('Synthetic canary refusal.')
+        status_error = InputError('Synthetic publication status failure.')
+        check = Mock(side_effect=original if probe_failure else None, return_value=[])
+        status = Mock(
+            side_effect=status_error if status_failure else None,
+            return_value=(
+                Publication(
+                    run_id='run-a', url='https://example.com/pull/1', state='OPEN'
+                ),
+            ),
+        )
+        monkeypatch.setattr(canaries, 'run', check)
+        monkeypatch.setattr(RunContext, 'reconcile_publications', status)
+
+        if probe_failure or status_failure:
+            with pytest.raises(InputError) as failure:
+                cli._run_canaries([probe], cloud)  # pyright: ignore[reportPrivateUsage]
+            assert failure.value is (original if probe_failure else status_error)
+        else:
+            cli._run_canaries([probe], cloud)  # pyright: ignore[reportPrivateUsage]
+
+        assert ('https://example.com/pull/1' in capsys.readouterr().out) == (
+            not status_failure
+        )
+        status.assert_called_once_with(scopes=(), canary_systems=[system.name])
+        if probe_failure and status_failure:
+            assert any(
+                'publication status also failed' in note for note in original.__notes__
+            )
 
 
 class TestMain:
@@ -1335,7 +1388,22 @@ class TestRun:
         result = invoke('run', 'f')
 
         assert result.exit_code == 0, result.output
-        assert 'Family `f`: 1 output, 0 errored.\n' in result.output
+        assert 'Artifacts await review at' in result.output
+        assert cloud.state.artifact_generation('f').artifacts == ()
+        with monkeypatch.context() as pending:
+            prepare = Mock(
+                side_effect=AssertionError('Pending work must stop before preparation.')
+            )
+            pending.setattr(cli, '_prepare', prepare)
+            waiting = invoke('run', 'f')
+            assert waiting.exit_code == 0, waiting.output
+            assert 'Artifacts await review at' in waiting.output
+            prepare.assert_not_called()
+        assert len(endpoint.requests) == 1
+        review_publications(cloud)
+        collected = invoke('collect', 'f')
+        assert collected.exit_code == 0, collected.output
+        assert 'Family `f`: 1 output, 0 errored.\n' in collected.output
         (output,) = read_outputs('f', cloud.state)
         assert output.text == 'Hello there.'
         assert output.input_tokens == 120
@@ -1409,7 +1477,12 @@ class TestRun:
         result = invoke('run', 'f')
 
         assert result.exit_code == 3, result.output
-        assert 'Family `f`: 1 output, 0 errored.\n' in result.output
+        assert 'Artifacts await review at' in result.output
+        assert cloud.state.artifact_generation('f').artifacts == ()
+        review_publications(cloud)
+        collected = invoke('collect', 'f')
+        assert collected.exit_code == 0, collected.output
+        assert 'Family `f`: 1 output, 0 errored.\n' in collected.output
         (output,) = read_outputs('f', cloud.state)
         assert output.text == 'Hello there.'
         assert output.cost_usd is not None

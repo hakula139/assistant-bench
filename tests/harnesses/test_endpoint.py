@@ -51,6 +51,7 @@ from support import (
     make_system,
     message,
     response,
+    review_publications,
 )
 
 
@@ -333,6 +334,7 @@ class TestEndpoint:
                     asyncio.run(request())
             else:
                 asyncio.run(request())
+                review_publications(run_context)
 
             (stored,) = run_context.state.requests('metadata')
             assert isinstance(stored['receipt_json'], str)

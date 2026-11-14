@@ -94,7 +94,7 @@ A new scorer needs collection, closing, its report variant and site views. Exhau
 
 ## Data Flow
 
-Runs pin implementation and source revisions before creating disposable workspaces. Private D1 records request admission and measured usage. Completed artifacts enter private Git, and collection seals immutable output generations in private D1, including after a failed run. Collection can be repeated from those artifacts with the pinned sources, collection code and public labels.
+Runs pin implementation and source revisions before creating disposable workspaces. Private D1 records request admission and measured usage. Completed artifacts stage on private Git branches for reviewed PRs, including after a failed run. After merge and a canonical payload audit, registration and authorized claim settlement commit atomically. Collection seals immutable output generations in private D1 from those registered artifacts and can be repeated with the pinned sources, collection code and public labels.
 
 The `checkers` scorer evaluates collected replies locally. Its case context, coverage targets and grader revision stay outside rendered instructions, task versions and system fingerprints. Recollection updates verdicts without generating replies, and closing requires one current verdict per configured system and case.
 

@@ -6,7 +6,6 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing, contextmanager
 from dataclasses import replace
 from datetime import timedelta
-from importlib.resources import files
 from pathlib import Path
 from threading import Barrier
 
@@ -28,7 +27,7 @@ from assistant_bench.state import (
     State,
     TrialArtifact,
 )
-from support import START, make_output, make_system
+from support import START, make_output, make_system, private_database
 
 
 PRICE = Price(input=2, output=10, cache_read=0.2, cache_write=2.5)
@@ -46,9 +45,8 @@ def connect(path: Path) -> Generator[State]:
 @pytest.fixture
 def state(tmp_path: Path) -> Iterator[State]:
     path = tmp_path / 'state.sqlite'
-    schema = files('assistant_bench').joinpath('sql/private/0001_state.sql')
-    with closing(sqlite3.connect(path, autocommit=True)) as connection:
-        connection.executescript(schema.read_text())
+    with private_database(path):
+        pass
     with connect(path) as store:
         yield store
 
@@ -125,7 +123,7 @@ def admission(attempt: AttemptStart, identifier: str = 'request-a') -> RequestAd
 
 
 def register(state: State, parent: Run, owner: Claim) -> None:
-    state.record_trial_artifact(
+    state.record_pending_artifact(
         parent.id,
         owner.trial,
         owner.trial,
@@ -133,13 +131,8 @@ def register(state: State, parent: Run, owner: Claim) -> None:
         f'runs/{parent.id}/{owner.id}',
         DIGEST,
     )
-
-
-def settled(state: State, parent: Run, owner: Claim) -> None:
-    assert state.begin_attempt(start(owner))
-    state.record_entry(owner.id, entry(parent, owner).model_dump_json())
-    register(state, parent, owner)
-    state.settle_claim(owner.id)
+    state.seal_publication(parent.id)
+    state.finalize_publication(parent.id, COMMIT)
 
 
 def output(label: str) -> str:
@@ -549,7 +542,72 @@ class TestState:
 
             assert state.entries('sample') == [original.model_dump_json()]
 
-    class TestRecordTrialArtifact:
+    class TestFinalizePublication:
+        @pytest.mark.parametrize(
+            'statement',
+            [
+                "UPDATE pending_trial_artifacts SET path = 'runs/other'",
+                'UPDATE pending_trial_artifacts SET authorized_claim_id = NULL',
+                'UPDATE pending_trial_artifacts SET publication_ready = 0',
+                "UPDATE pending_trial_artifacts SET canonical_commit_sha = 'another'",
+                'DELETE FROM pending_trial_artifacts',
+            ],
+        )
+        def test_sql_writers_cannot_rewrite_finalized_pending_history(
+            self,
+            state: State,
+            tmp_path: Path,
+            statement: str,
+        ) -> None:
+            parent, owner = claimed(state)
+            assert state.begin_attempt(start(owner))
+            state.record_entry(owner.id, entry(parent, owner).model_dump_json())
+            state.record_pending_artifact(
+                parent.id,
+                owner.trial,
+                owner.trial,
+                COMMIT,
+                'runs/run-a/trials/artifact-a',
+                DIGEST,
+            )
+            state.authorize_pending_claim(owner.id)
+            state.seal_publication(parent.id)
+            state.finalize_publication(parent.id, COMMIT)
+            original = state.pending_artifacts(parent.id)
+
+            with (
+                closing(
+                    sqlite3.connect(tmp_path / 'state.sqlite', autocommit=True)
+                ) as sql,
+                pytest.raises(sqlite3.IntegrityError),
+            ):
+                sql.execute(statement)
+
+            assert state.pending_artifacts(parent.id) == original
+            assert state.source_revision(parent.scope) == 1
+            assert state.claim_state(owner.id) == 'settled'
+
+        def test_unsealed_receipts_cannot_enter_the_formal_registry(
+            self, state: State
+        ) -> None:
+            parent = run()
+            state.create_run(parent)
+            state.record_pending_artifact(
+                parent.id,
+                'trial-a',
+                'source-a',
+                COMMIT,
+                'runs/run-a/trials/artifact-a',
+                DIGEST,
+            )
+
+            with pytest.raises(sqlite3.IntegrityError, match='Only sealed'):
+                state.finalize_publication(parent.id, COMMIT)
+
+            assert state.pending_artifacts(parent.id)[0].canonical_commit_sha is None
+            assert state.artifact_generation(parent.scope).artifacts == ()
+            assert state.source_revision(parent.scope) == 0
+
         def test_registers_a_regrade_without_paid_work_or_a_fabricated_entry(
             self, state: State
         ) -> None:
@@ -564,8 +622,11 @@ class TestState:
                 DIGEST,
             )
 
-            state.record_trial_artifact(*reference)
-            state.record_trial_artifact(*reference)
+            state.record_pending_artifact(*reference)
+            state.record_pending_artifact(*reference)
+            state.seal_publication(parent.id)
+            state.finalize_publication(parent.id, COMMIT)
+            state.finalize_publication(parent.id, COMMIT)
 
             artifact = state.trial_artifact(parent.id, 'regraded-trial')
             assert artifact['source_trial_id'] == reference[2]
@@ -601,189 +662,244 @@ class TestState:
 
             assert state.trial_artifact(parent.id, owner.trial) == original
 
-    class TestSettleClaim:
-        @pytest.mark.parametrize('binding', ['missing', 'another-run', 'another-trial'])
-        def test_settlement_requires_the_same_run_and_trial_registry_identity(
-            self, state: State, tmp_path: Path, binding: str
+        def test_pending_artifacts_hold_claims_until_atomic_idempotent_finalization(
+            self,
+            state: State,
         ) -> None:
             parent, owner = claimed(state)
             assert state.begin_attempt(start(owner))
             state.record_entry(owner.id, entry(parent, owner).model_dump_json())
-            registry_run, registry_trial = parent.id, owner.trial
-            if binding == 'another-run':
-                other = run('run-b')
-                state.create_run(other)
-                registry_run = other.id
-            elif binding == 'another-trial':
-                registry_trial = 'trial-b'
-            if binding != 'missing':
-                state.record_trial_artifact(
-                    registry_run,
-                    registry_trial,
-                    owner.trial,
+            state.record_pending_artifact(
+                parent.id,
+                owner.trial,
+                'source-a',
+                COMMIT,
+                'runs/run-a/trials/artifact-a',
+                DIGEST,
+            )
+
+            assert state.artifact_generation(parent.scope).artifacts == ()
+            assert state.source_revision(parent.scope) == 0
+            assert state.claim_state(owner.id) == 'claimed'
+            assert not state.pending_claims_authorized(parent.id)
+            state.authorize_pending_claim(owner.id)
+            assert not state.pending_claims_authorized(parent.id)
+            state.seal_publication(parent.id)
+            assert state.pending_claims_authorized(parent.id)
+            state.finalize_publication(parent.id, 'c' * 40)
+            state.finalize_publication(parent.id, 'c' * 40)
+
+            assert state.source_revision(parent.scope) == 1
+            assert state.claim_state(owner.id) == 'settled'
+            assert (
+                state.trial_artifact(parent.id, owner.trial)['commit_sha'] == 'c' * 40
+            )
+            assert state.complete_run(parent.id)
+            with pytest.raises(InputError, match='another canonical'):
+                state.finalize_publication(parent.id, 'd' * 40)
+
+        def test_every_active_claim_requires_its_own_ready_authorization(
+            self, state: State
+        ) -> None:
+            parent, owner = claimed(state)
+            second = replace(owner, id='claim-b', trial='trial-b', slot_key='slot-b')
+            assert state.claim_attempt(second)
+            assert state.begin_attempt(start(owner))
+            state.record_entry(owner.id, entry(parent, owner).model_dump_json())
+            state.record_pending_artifact(
+                parent.id,
+                owner.trial,
+                'source-a',
+                COMMIT,
+                'runs/run-a/trials/artifact-a',
+                DIGEST,
+            )
+            state.authorize_pending_claim(owner.id)
+            state.seal_publication(parent.id)
+
+            assert not state.pending_claims_authorized(parent.id)
+            assert not state.complete_run(parent.id)
+            assert state.cancel_claim(second.id)
+            assert state.pending_claims_authorized(parent.id)
+
+        def test_whole_run_finalization_rolls_back_when_a_later_artifact_conflicts(
+            self, state: State, tmp_path: Path
+        ) -> None:
+            parent, owner = claimed(state)
+            for trial in (owner.trial, 'trial-b'):
+                state.record_pending_artifact(
+                    parent.id,
+                    trial,
+                    trial,
                     COMMIT,
-                    'runs/other',
+                    f'runs/run-a/trials/{trial}',
+                    DIGEST,
+                )
+            assert state.begin_attempt(start(owner))
+            state.record_entry(owner.id, entry(parent, owner).model_dump_json())
+            state.authorize_pending_claim(owner.id)
+            with closing(
+                sqlite3.connect(tmp_path / 'state.sqlite', autocommit=True)
+            ) as database:
+                database.executescript(
+                    """
+                    CREATE TRIGGER refuse_later_trial BEFORE INSERT ON trial_artifacts
+                    WHEN NEW.trial_id = 'trial-b'
+                    BEGIN
+                        SELECT RAISE(ABORT, 'Synthetic storage failure');
+                    END;
+                    """
+                )
+            state.seal_publication(parent.id)
+
+            with pytest.raises(sqlite3.IntegrityError):
+                state.finalize_publication(parent.id, 'c' * 40)
+
+            assert all(
+                row.canonical_commit_sha is None
+                for row in state.pending_artifacts(parent.id)
+            )
+            assert [
+                row.trial_id
+                for row in state.artifact_generation(parent.scope).artifacts
+            ] == []
+            assert state.source_revision(parent.scope) == 0
+            assert state.claim_state(owner.id) == 'claimed'
+
+        def test_sealed_receipts_are_immutable_and_cannot_gain_trials_or_authorization(
+            self, state: State
+        ) -> None:
+            parent, owner = claimed(state)
+            assert state.begin_attempt(start(owner))
+            state.record_entry(owner.id, entry(parent, owner).model_dump_json())
+            args = (
+                parent.id,
+                owner.trial,
+                owner.trial,
+                COMMIT,
+                'runs/run-a/trials/artifact-a',
+                DIGEST,
+            )
+            state.record_pending_artifact(*args)
+            state.seal_publication(parent.id)
+            state.record_pending_artifact(*args)
+
+            with pytest.raises(InputError, match='different pending'):
+                state.record_pending_artifact(*args[:-1], 'e' * 64)
+            with pytest.raises(sqlite3.IntegrityError):
+                state.authorize_pending_claim(owner.id)
+            with pytest.raises(sqlite3.IntegrityError):
+                state.record_pending_artifact(
+                    parent.id,
+                    'trial-b',
+                    'source-b',
+                    COMMIT,
+                    'runs/run-a/trials/artifact-b',
                     DIGEST,
                 )
 
-            with pytest.raises(InputError):
-                state.settle_claim(owner.id)
-
-            assert state.claim_state(owner.id) == 'claimed'
-            assert state.source_revision(parent.scope) == (
-                0 if binding == 'missing' else 1
+        def test_authorization_requires_every_terminal_receipt(
+            self, state: State
+        ) -> None:
+            parent, owner = claimed(state)
+            attempt = start(owner)
+            assert state.begin_attempt(attempt)
+            assert state.admit_request(admission(attempt))
+            state.record_entry(owner.id, entry(parent, owner).model_dump_json())
+            state.record_pending_artifact(
+                parent.id,
+                owner.trial,
+                'source-a',
+                COMMIT,
+                'runs/run-a/trials/artifact-a',
+                DIGEST,
             )
-            assert not state.complete_run(parent.id)
+
+            with pytest.raises(sqlite3.IntegrityError):
+                state.authorize_pending_claim(owner.id)
+            assert state.pending_artifacts(parent.id)[0].authorized_claim_id is None
+
+        @pytest.mark.parametrize(
+            'binding', ['another-run', 'another-trial', 'no-entry']
+        )
+        def test_sql_authorization_cannot_bind_another_or_unfinished_attempt(
+            self,
+            state: State,
+            tmp_path: Path,
+            binding: str,
+        ) -> None:
+            parent, owner = claimed(state)
+            target = owner
+            if binding == 'another-run':
+                other = run('run-b')
+                state.create_run(other)
+                target = claim(other, 'claim-b', slot='slot-b')
+                assert state.claim_attempt(target)
+            elif binding == 'another-trial':
+                target = replace(
+                    owner, id='claim-b', trial='trial-b', slot_key='slot-b'
+                )
+                assert state.claim_attempt(target)
+            if binding != 'no-entry':
+                assert state.begin_attempt(start(target))
+                state.record_entry(
+                    target.id, entry(state.run(target.run_id), target).model_dump_json()
+                )
+            state.record_pending_artifact(
+                parent.id,
+                owner.trial,
+                owner.trial,
+                COMMIT,
+                'runs/run-a/trials/artifact-a',
+                DIGEST,
+            )
+
             with (
                 closing(
                     sqlite3.connect(tmp_path / 'state.sqlite', autocommit=True)
                 ) as sql,
                 pytest.raises(sqlite3.IntegrityError),
             ):
-                sql.execute('PRAGMA foreign_keys = ON')
                 sql.execute(
-                    'INSERT INTO claim_artifacts (claim_id, run_id, trial_id) '
-                    'VALUES (?, ?, ?)',
-                    (owner.id, registry_run, registry_trial),
+                    'UPDATE pending_trial_artifacts SET authorized_claim_id = ?',
+                    (target.id,),
                 )
 
-        @pytest.mark.parametrize(
-            'uncertain', [False, True], ids=['claimed', 'uncertain']
-        )
-        def test_pending_receipts_keep_the_original_slot_until_terminal_confirmation(
-            self, state: State, uncertain: bool
-        ) -> None:
-            parent, owner = claimed(state)
-            first, second = start(owner), start(owner, 1)
-            for attempt in [first, second]:
-                assert state.begin_attempt(attempt)
-                assert state.admit_request(admission(attempt, attempt.id))
-            state.record_receipt(first.id, '{"usage":{"input_tokens":100}}')
-            state.record_entry(owner.id, entry(parent, owner).model_dump_json())
-            register(state, parent, owner)
-            if uncertain:
-                state.mark_uncertain(owner.id)
-            original_state = state.claim_state(owner.id)
-
-            with pytest.raises(InputError):
-                state.settle_claim(owner.id)
-
-            assert state.claim_state(owner.id) == original_state
-            assert state.source_revision(parent.scope) == 1
-            assert not state.claim_attempt(claim(parent, 'competing'))
-            assert not state.complete_run(parent.id)
-            state.record_receipt(second.id, '{"usage":null}')
-            state.settle_claim(owner.id)
-            state.settle_claim(owner.id)
-            assert state.claim_state(owner.id) == 'settled'
-            assert state.source_revision(parent.scope) == 1
-            remaining = state.requests(parent.scope, unrecorded_only=True)
-            assert [(row['request_id'], row['receipt_json']) for row in remaining] == [
-                (second.id, '{"usage":null}')
-            ]
-            assert state.complete_run(parent.id)
-
-        def test_requires_a_real_attempt_before_publishing_completion(
-            self, state: State
-        ) -> None:
-            parent, owner = claimed(state)
-            register(state, parent, owner)
-
-            with pytest.raises(InputError):
-                state.settle_claim(owner.id)
-
-            assert state.claim_state(owner.id) == 'claimed'
-            assert state.source_revision(parent.scope) == 1
-            assert state.trial_artifact(parent.id, owner.trial)['commit_sha'] == COMMIT
-            assert not state.complete_run(parent.id)
-
-        def test_persists_artifacts_and_releases_a_slot_exactly_once(
-            self, state: State
-        ) -> None:
-            parent, owner = claimed(state)
-            settled(state, parent, owner)
-
-            state.settle_claim(owner.id)
-
-            assert state.claim_state(owner.id) == 'settled'
-            assert state.source_revision(parent.scope) == 1
-            (reference,) = state.artifact_generation(parent.scope).artifacts
-            assert reference.commit_sha == COMMIT
-            assert reference.path == 'runs/run-a/claim-a'
-            assert reference.manifest_digest == DIGEST
-            assert state.complete_run(parent.id)
-            assert state.run_status(parent.id) == 'complete'
-
-        def test_rejects_replacing_an_already_settled_artifact(
-            self, state: State
-        ) -> None:
-            parent, owner = claimed(state)
-            settled(state, parent, owner)
-            before = state.artifact_generation(parent.scope)
-
-            with pytest.raises(InputError):
-                state.record_trial_artifact(
-                    parent.id,
-                    owner.trial,
-                    owner.trial,
-                    'f' * 40,
-                    'runs/other',
-                    'c' * 64,
-                )
-
-            assert state.artifact_generation(parent.scope) == before
-            assert state.source_revision(parent.scope) == 1
-
-        def test_failed_source_advance_rolls_back_the_artifact_and_claim_together(
-            self, state: State, tmp_path: Path
-        ) -> None:
-            parent, owner = claimed(state)
-            original = entry(parent, owner)
-            assert state.begin_attempt(start(owner))
-            state.record_entry(owner.id, original.model_dump_json())
-            before = state.artifact_generation(parent.scope)
-            with closing(
-                sqlite3.connect(tmp_path / 'state.sqlite', autocommit=True)
-            ) as other:
-                other.executescript(
-                    'CREATE TRIGGER refuse_source_advance '
-                    'BEFORE UPDATE ON source_heads '
-                    "BEGIN SELECT RAISE(ABORT, 'Synthetic storage failure'); END;"
-                )
-
-            with pytest.raises(
-                sqlite3.IntegrityError, match='Synthetic storage failure'
-            ):
-                register(state, parent, owner)
-
-            assert state.claim_state(owner.id) == 'claimed'
-            assert state.artifact_generation(parent.scope) == before
+            assert state.claim_state(target.id) == 'claimed'
             assert state.source_revision(parent.scope) == 0
-            assert state.entries(parent.scope) == [original.model_dump_json()]
-            assert not state.complete_run(parent.id)
+            assert state.pending_artifacts(parent.id)[0].authorized_claim_id is None
 
-        def test_out_of_order_slots_advance_a_counter_and_refuse_stale_plans(
+        def test_whole_run_advances_each_source_once_and_refuses_stale_admission(
             self, state: State
         ) -> None:
             parent, first = claimed(state)
-            second = claim(parent, 'claim-b', slot='task-v1/model-a/sample-1')
+            second = claim(parent, 'claim-b', slot='slot-b')
             assert state.claim_attempt(second)
-            settled(state, parent, second)
-            assert not state.complete_run(parent.id)
+            for owner in (second, first):
+                assert state.begin_attempt(start(owner))
+                state.record_entry(owner.id, entry(parent, owner).model_dump_json())
+                state.record_pending_artifact(
+                    parent.id,
+                    owner.trial,
+                    owner.trial,
+                    COMMIT,
+                    f'runs/run-a/trials/{owner.trial}',
+                    DIGEST,
+                )
+                state.authorize_pending_claim(owner.id)
+            state.seal_publication(parent.id)
 
-            settled(state, parent, first)
+            state.finalize_publication(parent.id, COMMIT)
+            state.finalize_publication(parent.id, COMMIT)
 
             assert state.source_revision(parent.scope) == 2
             assert (
                 state.claim_state(first.id) == state.claim_state(second.id) == 'settled'
             )
-            assert state.complete_run(parent.id)
             following = run('run-next')
             state.create_run(following)
             assert not state.claim_attempt(claim(following, 'stale'))
-            fresh = claim(following, 'fresh', revision=2)
-            assert state.claim_attempt(fresh)
-            assert state.get_claim(fresh.id) == fresh
+            assert state.claim_attempt(claim(following, 'fresh', revision=2))
 
     class TestStageOutputs:
         @pytest.mark.parametrize('sealed', [False, True], ids=['staging', 'sealed'])

@@ -44,6 +44,7 @@ from support import (
     finish_job,
     make_system,
     response,
+    reviewed_artifacts,
     voted_tasks,
     with_settings,
     write_checkers_family,
@@ -511,10 +512,10 @@ class TestMaterializeSources:
                         ),
                     )
                 )
-        references = private_repository.client.publish_trials(archives)
+        references = reviewed_artifacts(private_repository.client, archives)
         for archive, reference in zip(archives, references, strict=True):
             manifest = archive.manifest
-            private_state.record_trial_artifact(
+            private_state.record_pending_artifact(
                 manifest.run_id,
                 manifest.trial_name,
                 manifest.trial_id,
@@ -522,6 +523,14 @@ class TestMaterializeSources:
                 reference.path,
                 reference.manifest_digest,
             )
+        for run_id in {archive.manifest.run_id for archive in archives}:
+            private_state.seal_publication(run_id)
+            reference = next(
+                reference
+                for archive, reference in zip(archives, references, strict=True)
+                if archive.manifest.run_id == run_id
+            )
+            private_state.finalize_publication(run_id, reference.commit_sha)
         generation = private_state.artifact_generation(family.name)
         shutil.rmtree(original)
         lookup = Mock(wraps=private_state.run)

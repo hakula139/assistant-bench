@@ -39,6 +39,7 @@ from support import (
     message_stream,
     private_database,
     response,
+    review_publications,
     run_host_job,
     voted_tasks,
 )
@@ -446,6 +447,52 @@ class TestRun:
         assert canaries.read_records(probe.original.name, run_context.state) == [record]
         assert secret in changed[0].read_text()
         assert len(endpoint.requests) == len(host_jobs) == 1
+        assert run_context.state.artifact_generation('canaries').artifacts == ()
+        assert run_context.state.pending_runs()
+
+    def test_refuses_a_frozen_snapshot_changed_after_its_pending_receipt(
+        self,
+        endpoint: StubEndpoint,
+        host_jobs: list[JobConfig],
+        run_context: RunContext,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        endpoint.response = completion('READY')
+        probe = prepare_probe(make_system(), tmp_path)
+        submit = jobs.run_job
+
+        def changed(
+            config: JobConfig,
+            *,
+            log: Path | None = None,
+            plugin_context: Path | None = None,
+            source_root: Path | None = None,
+        ) -> Path:
+            path = submit(
+                config, log=log, plugin_context=plugin_context, source_root=source_root
+            )
+            (run,) = run_context.state.pending_runs()
+            (receipt,) = run_context.state.pending_artifacts(run.id)
+            frozen = (
+                run_context.root
+                / 'snapshots'
+                / receipt.path.split('/')[-1]
+                / run.job
+                / receipt.trial_id
+                / 'agent'
+                / OUTPUT_FILE
+            )
+            frozen.write_text('Changed after audit.\n')
+            return path
+
+        monkeypatch.setattr(jobs, 'run_job', changed)
+        with pytest.raises(InputError, match='snapshot differs'):
+            canaries.run([probe], run_context)
+
+        assert len(endpoint.requests) == len(host_jobs) == 1
+        assert canaries.read_records(probe.original.name, run_context.state) == []
+        assert run_context.state.artifact_generation('canaries').artifacts == ()
 
     @pytest.mark.parametrize('echo', ['output', 'model', 'finish-reason', 'request-id'])
     def test_an_unaudited_probe_retains_only_sanitized_durable_accounting(
@@ -586,8 +633,10 @@ class TestRun:
         first, second = [make_system(name=name) for name in names]
         endpoint.response = completion('READY') | {'model': 'first-2026'}
         canaries.run([prepare_probe(first, tmp_path)], run_context)
+        review_publications(run_context)
         endpoint.response = completion('READY') | {'model': 'second-2026'}
         canaries.run([prepare_probe(second, tmp_path)], run_context)
+        review_publications(run_context)
         endpoint.response = completion('READY') | {'model': 'first-2026'}
 
         canaries.run([prepare_probe(first, tmp_path)], run_context)
@@ -744,6 +793,7 @@ class TestRun:
         assert entry.fingerprint == fingerprint(probe.actual)
         assert len(endpoint.requests) == len(host_jobs) == 1
 
+        review_publications(run_context)
         endpoint.status = 200
         endpoint.stream = (
             message_stream(message('READY')) if api == 'anthropic-messages' else None
@@ -798,6 +848,7 @@ class TestRun:
         baseline['usage']['prompt_tokens_details'] = {'cached_tokens': 0}
         endpoint.response = baseline
         canaries.run([prepare_probe(system, tmp_path)], run_context)
+        review_publications(run_context)
         payload = completion('READY')
         payload['usage']['prompt_tokens'] = tokens
         payload['usage']['total_tokens'] = tokens + 40
@@ -837,6 +888,7 @@ class TestRun:
         original = system
         first_probe = prepare_probe(system, tmp_path)
         (first,) = canaries.run([first_probe], run_context)
+        review_publications(run_context)
         endpoint.response = completion('READY') | {'model': 'other-2026'}
         if changed == 'source':
             system = system.model_copy(update={'prompt': 'Answer briefly.'})
@@ -853,6 +905,7 @@ class TestRun:
             current.source_generate_fingerprint != first.source_generate_fingerprint
             or current.probe_protocol_digest != first.probe_protocol_digest
         )
+        review_publications(run_context)
         endpoint.response = completion('READY') | {'model': 'drifted-2026'}
         changed_probe = replace(
             prepare_probe(system, tmp_path), protocol_digest=probe.protocol_digest
@@ -860,6 +913,7 @@ class TestRun:
 
         with pytest.raises(InputError, match='differs from its baseline'):
             canaries.run([changed_probe], run_context)
+        review_publications(run_context)
         endpoint.response = completion('READY') | {'model': 'other-2026'}
         with pytest.raises(InputError, match='differs from its baseline'):
             canaries.run([prepare_probe(original, tmp_path)], run_context)
@@ -894,6 +948,7 @@ class TestRun:
             payload['usage']['prompt_tokens_details'] = {'cached_tokens': 0}
             endpoint.response = payload
             canaries.run([prepare_probe(system, tmp_path)], run_context)
+            review_publications(run_context)
         payload['usage']['prompt_tokens'] = 54
         payload['usage']['total_tokens'] = 94
         endpoint.response = payload
@@ -984,6 +1039,7 @@ class TestRun:
                     raced = True
                     endpoint.response = completion('READY') | {'model': 'first-2026'}
                     canaries.run([first_probe], first)
+                    review_publications(first)
                     endpoint.response = completion('READY') | {'model': 'second-2026'}
                 return generation(state, scope)
 

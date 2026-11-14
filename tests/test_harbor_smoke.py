@@ -27,6 +27,7 @@ from support import (
     message_stream,
     reasoned_response,
     response,
+    review_publications,
     run_host_job,
     terminus_completion,
     write_task_family,
@@ -208,7 +209,7 @@ def test_terminus_runs_a_voted_task_family_once_and_regrades_a_tests_edit(
         expected_source_revision=run_context.source_revision(family),
     )
     job_dir = jobs.job_path(config)
-    run_context.refresh_sources(family)
+    review_publications(run_context)
     requests = len(endpoint.requests)
     execution.execute(
         run_context,
@@ -319,7 +320,7 @@ def test_terminus_runs_a_voted_task_family_once_and_regrades_a_tests_edit(
         run_id='third-run',
         expected_source_revision=run_context.source_revision(family),
     )
-    run_context.refresh_sources(family)
+    review_publications(run_context)
 
     assert len(endpoint.requests) == requests
     (regraded,) = collection.collect(family, {system.name: system}, run_context).outputs
@@ -456,7 +457,7 @@ def test_installed_cli_preserves_native_trace_usage_and_task_diff(
             endpoint.response_gate.set()
 
     job_dir = jobs.job_path(config)
-    run_context.refresh_sources(family)
+    review_publications(run_context)
     (output,) = collection.collect(family, {system.name: system}, run_context).outputs
     if cancelled:
         assert output.error == 'AgentTimeoutError'
