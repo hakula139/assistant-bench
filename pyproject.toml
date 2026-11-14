@@ -103,7 +103,7 @@ ignore = ["D101", "D102", "D103", "D105", "D106", "D107", "S101", "S603", "S607"
 
 [tool.ruff.lint.per-file-ignores]
 "**/tests/**" = ["D100", "D104", "S105", "S108", "S311", "S608"]
-"families/**" = ["S"]
+"families/coding-repo/tasks/make-pipeline-incremental/solution/app/pipeline/steps.py" = ["S102"]
 
 [tool.ruff.lint.isort]
 lines-after-imports = 2

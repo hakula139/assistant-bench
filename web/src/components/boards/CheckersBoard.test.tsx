@@ -15,6 +15,9 @@ afterEach(cleanup);
 
 test('keeps strict ties and descriptive effects separate from applicable-rule denominators', async () => {
   const round = await readReport('report-checkers', 'checkers');
+  round.systems.acme.display_name = 'Zebra';
+  round.systems['acme-prompted'].display_name = 'Alpha';
+  round.results.prompt_effects[0].interval = null;
 
   render(<CheckersBoard round={round} />);
 
@@ -23,16 +26,20 @@ test('keeps strict ties and descriptive effects separate from applicable-rule de
     within(board)
       .getAllByRole('row')
       .map((row) => row.textContent),
-  ).toEqual([
-    'SystemPass rate95% intervalCases',
-    'Acme75%19–99%4',
-    'Acme · Instructions75%19–99%4',
-  ]);
-  expect(screen.getByText(/cannot separate it from Acme · Instructions/)).toBeTruthy();
+  ).toEqual(['SystemPass rate95% intervalCases', 'Zebra75%19–99%4', 'Alpha75%19–99%4']);
+  const effect = within(screen.getAllByRole('table')[1]).getByRole('row', {
+    name: /ZebraAlpha/,
+  });
+  expect(
+    within(effect)
+      .getAllByRole('cell')
+      .map((cell) => cell.textContent),
+  ).toEqual(['ZebraAlpha', '0%', '–']);
+  expect(screen.getByText(/cannot separate it from Alpha/)).toBeTruthy();
   expect(screen.getByText(/do not establish significance/)).toBeTruthy();
-  const details = screen.getByText('Acme', { selector: 'summary' }).parentElement;
+  const details = screen.getByText('Zebra', { selector: 'summary' }).parentElement;
   expect(details).not.toBeNull();
-  await userEvent.setup().click(screen.getByText('Acme', { selector: 'summary' }));
+  await userEvent.setup().click(screen.getByText('Zebra', { selector: 'summary' }));
   expect(details?.textContent).toContain('Straight quotes1 / 11');
 });
 
@@ -53,4 +60,12 @@ test('filters strict scores by category without changing the paired overall effe
   ]);
   expect(window.location.search).toContain('category=message');
   expect(screen.getByRole('heading', { name: 'Prompt effect' })).toBeTruthy();
+  const effect = within(screen.getAllByRole('table')[1]).getByRole('row', {
+    name: /AcmeAcme · Instructions/,
+  });
+  expect(
+    within(effect)
+      .getAllByRole('cell')
+      .map((cell) => cell.textContent),
+  ).toEqual(['AcmeAcme · Instructions', '0%', '-75–75%']);
 });
