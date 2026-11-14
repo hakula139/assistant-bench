@@ -84,6 +84,7 @@ class TestLoadSystems:
                 """\
                 [large]
                 model = "acme-large"
+                effort = "medium"
                 display_name = "Acme Large"
 
                 [small]
@@ -109,10 +110,12 @@ class TestLoadSystems:
                 """\
                 [large]
                 model = "acme-large"
+                effort = "medium"
                 display_name = "Acme Large"
 
                 [large-codex]
                 model = "acme-large"
+                effort = "medium"
                 prompt = "nixos-config:codex"
                 display_name = "Acme Large"
                 """
@@ -191,7 +194,7 @@ class TestLoadSystems:
             'gemini-4-argon-high': 'Gemini 4 Argon · High',
             'gemini-3.8-flash-high': 'Gemini 3.8 Flash · High',
             'deepseek-v4.1-flash-1017-high': 'DeepSeek V4.1 Flash 1017 · High',
-            'kimi-k3-high': 'Kimi K3 · High',
+            'kimi-k3.1-pro-high': 'Kimi K3.1 Pro · High',
             'opus-5.5-high-nixos': 'Claude Opus 5.5 · High · Instructions',
             'gpt-6-astra-high-nixos': 'GPT-6 Astra · High · Instructions',
             'gpt-6.1-sol-high-nixos': 'GPT-6.1 Sol · High · Instructions',
@@ -200,7 +203,7 @@ class TestLoadSystems:
             'deepseek-v4.1-flash-1017-high-nixos': (
                 'DeepSeek V4.1 Flash 1017 · High · Instructions'
             ),
-            'kimi-k3-high-nixos': 'Kimi K3 · High · Instructions',
+            'kimi-k3.1-pro-high-nixos': 'Kimi K3.1 Pro · High · Instructions',
             'opus-5.5-claude-code-high': 'Claude Opus 5.5 · Claude Code · High',
             'gemini-3.8-flash-codex-high': 'Gemini 3.8 Flash · Codex · High',
         }
@@ -217,14 +220,13 @@ class TestLoadSystems:
         native = systems['opus-5.5-high']
         assert (
             native.api,
-            native.thinking_mode,
             native.max_output_tokens,
             native.context_window,
-        ) == ('anthropic-messages', 'anthropic-adaptive', 128000, 1000000)
+        ) == ('anthropic-messages', 128000, 1000000)
 
 
 class TestResolveSystem:
-    def test_resolves_native_capacities_and_thinking_from_catalog_metadata(
+    def test_resolves_native_capacities_from_catalog_metadata(
         self, export: NixosConfigExport
     ) -> None:
         config = make_config(api='anthropic-messages', effort='high')
@@ -235,25 +237,15 @@ class TestResolveSystem:
             name='native',
             api='anthropic-messages',
             effort='high',
-            thinking_mode='anthropic-adaptive',
         )
 
     @pytest.mark.parametrize(
         ('model', 'effort', 'expected'),
         [
             ('acme-large', 'high', 'high'),
-            ('acme-large', None, 'medium'),
-            ('acme-small', 'low', 'low'),
-            ('acme-small', None, None),
             ('local-model', None, None),
         ],
-        ids=[
-            'accepted-effort',
-            'required-default',
-            'accepted-optional-effort',
-            'optional-omission',
-            'no-effort-rules',
-        ],
+        ids=['accepted-effort', 'no-effort-rules'],
     )
     def test_resolves_the_effort_the_model_accepts(
         self,
@@ -317,7 +309,7 @@ class TestResolveSystem:
     ) -> None:
         system = resolve_system(
             'local',
-            make_config(model='local-model'),
+            make_config(model='local-model', effort=None),
             export,
             GENERATION,
         )
@@ -353,12 +345,16 @@ class TestResolveSystem:
                 '`data/llm-models.nix`.',
             ),
             (
-                make_config(model='acme-small', effort='medium'),
-                'System `x`: effort `medium` is not one of `low`, `high`.',
-            ),
-            (
                 make_config(model='local-model', effort='low'),
                 'System `x`: the model takes no effort.',
+            ),
+            (
+                make_config(effort=None),
+                'System `x`: the model requires an effort.',
+            ),
+            (
+                make_config(effort='max'),
+                'System `x`: effort `max` is not one of `low`, `medium`, `high`.',
             ),
             (
                 make_config(model='acme-unrouted'),
@@ -383,8 +379,9 @@ class TestResolveSystem:
         ids=[
             'unknown-model-near-a-key',
             'unknown-model',
-            'unoffered-effort',
             'effort-for-a-model-without-one',
+            'missing-effort',
+            'unoffered-effort',
             'no-channel',
             'several-channels',
             'unknown-prompt-client',
@@ -424,16 +421,10 @@ class TestResolveSystem:
             ),
             (
                 {},
-                {'defaultLevel': 'max'},
-                'openai-chat-completions',
-                'System `x`: effort `max` is not one of `low`, `medium`, `high`.',
-            ),
-            (
-                {},
-                {'mode': 'effort'},
+                None,
                 'anthropic-messages',
-                'System `x`: native Messages requires the `anthropic-adaptive` '
-                'thinking mode.',
+                "System `x`: native Messages requires the catalog model's "
+                'thinking rules.',
             ),
             (
                 {'maxTokens': 8192},
@@ -446,8 +437,7 @@ class TestResolveSystem:
             'unlisted-api',
             'only-unselectable-apis',
             'no-apis',
-            'unoffered-required-default',
-            'no-adaptive-mode',
+            'no-thinking',
             'no-prompt-room',
         ],
     )
@@ -455,14 +445,17 @@ class TestResolveSystem:
         self,
         export: NixosConfigExport,
         model: dict[str, Any],
-        thinking: dict[str, str],
+        thinking: dict[str, str] | None,
         api: Api,
         message: str,
     ) -> None:
         document = export.model_dump(by_alias=True)
         entry = document['catalog']['models']['acme-large']
         entry.update(model)
-        entry['thinking'].update(thinking)
+        if thinking is None:
+            entry.pop('thinking')
+        else:
+            entry['thinking'].update(thinking)
         configured = NixosConfigExport.model_validate(document)
         config = make_config(api=api)
 

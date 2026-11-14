@@ -4,11 +4,11 @@ A system is one generation configuration under test: a model route and API, comp
 
 ## Resolution
 
-A system names a catalog model with `model`, which supplies its vendor, single route, prices, configured completion and context allowances, and effort rules. The system's `effort` must be one the model accepts, and a model requiring effort takes its catalog default when the system sets none. Every system sets its [display name](../guide/authoring.md#systems). A channel priced at zero reports as unpriced.
+A system names a catalog model with `model`, which supplies its vendor, single route, prices, configured completion and context allowances, and effort rules. A model with effort rules requires the system's `effort` to be one of its `thinking.efforts`, and a model without them rejects any effort. Every system sets its [display name](../guide/authoring.md#systems). A channel priced at zero reports as unpriced.
 
 The catalog's `maxTokens` is the completion allowance the bench configures, including reasoning. The benchmark baseline selects high effort or its supported equivalent for every model, so every system runs at one configured level. Terminus uses the configured context window minus the completion allowance as its input limit, reserving completion space through Harbor's native context management.
 
-`api` selects `openai-chat-completions` by default, `openai-responses`, or `anthropic-messages`. The catalog declares supported APIs in `apis` and supported efforts in `thinking.efforts`. An unsupported API, explicit effort, or required default is rejected during resolution. Opus uses native Messages with the catalog's adaptive thinking mode, while GPT systems use Responses. Requests never substitute an effort or transport after a failure.
+`api` selects `openai-chat-completions` by default, `openai-responses`, or `anthropic-messages`. The catalog declares supported APIs in `apis` and supported efforts in `thinking.efforts`. An unsupported API or effort is rejected during resolution, and native Messages also requires the catalog model's thinking rules. Systems on native Messages use adaptive thinking, while GPT systems use Responses. Requests never substitute an effort or transport after a failure.
 
 `prompt` resolves to text before anything hashes or sends it, where `nixos-config:<client>` selects a rendered instruction file from the export.
 
@@ -69,11 +69,11 @@ Harbor records each trial's agent and environment import paths in the job's `con
 
 The flake takes [nixos-config](https://github.com/hakula139/nixos-config) as a `flake = false` input and imports only pure Nix files from it, which evaluate without Nixpkgs or a host. Its `nixos-config` package writes one JSON file, which the dev shell exports as `BENCH_NIXOS_CONFIG`:
 
-| Field          | Content                                                                                               |
-| -------------- | ----------------------------------------------------------------------------------------------------- |
-| `rev`          | The input's commit, recorded on every output                                                          |
-| `catalog`      | The model catalog: vendors, channels and routes, prices, effort rules, and display names              |
-| `instructions` | Each client's rendered global instruction file, keyed as `claudeCode`, `codex`, `omp`, and `opencode` |
+| Field          | Content                                                                                   |
+| -------------- | ----------------------------------------------------------------------------------------- |
+| `rev`          | The input's commit, recorded on every output                                              |
+| `catalog`      | The model catalog: vendors, channels and routes, prices, effort rules, and display names  |
+| `instructions` | Each client's rendered global instruction file, keyed as `claudeCode`, `codex`, and `omp` |
 
 ## Concurrency
 

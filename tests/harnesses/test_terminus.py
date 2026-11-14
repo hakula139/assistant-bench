@@ -195,7 +195,6 @@ def messages_agent(
     system = make_system(
         harness='terminus-2',
         api='anthropic-messages',
-        thinking_mode='anthropic-adaptive',
         effort='high',
         max_output_tokens=32768,
         context_window=131072,
@@ -345,9 +344,6 @@ class TestTerminus:
             system = make_system(
                 harness='terminus-2',
                 api=api,
-                thinking_mode='anthropic-adaptive'
-                if api == 'anthropic-messages'
-                else None,
             )
             config = trial_config.AgentConfig(
                 import_path=HARNESSES['terminus-2'].import_path,
@@ -802,9 +798,6 @@ class TestTerminus:
             system = make_system(
                 harness='terminus-2',
                 api=api,
-                thinking_mode='anthropic-adaptive'
-                if api == 'anthropic-messages'
-                else None,
             )
             agent = NativeProbe(
                 logs_dir=logs_dir,
@@ -866,7 +859,6 @@ class TestTerminus:
             system = make_system(
                 harness='terminus-2',
                 api='anthropic-messages',
-                thinking_mode='anthropic-adaptive',
                 max_output_tokens=32768,
                 context_window=131072,
             )

@@ -144,26 +144,23 @@ def test_check_passes_the_oracle_and_fails_the_nop_on_every_smoke_task(
 
 
 @pytest.mark.parametrize(
-    ('api', 'effort', 'thinking_mode', 'serve_turns'),
+    ('api', 'effort', 'serve_turns'),
     [
         pytest.param(
             'openai-chat-completions',
             'medium',
-            None,
             serve_chat_turns,
             id='openai-chat-completions',
         ),
         pytest.param(
             'openai-responses',
             'max',
-            None,
             serve_responses_turns,
             id='openai-responses',
         ),
         pytest.param(
             'anthropic-messages',
             'high',
-            'anthropic-adaptive',
             serve_messages_turns,
             id='anthropic-messages',
         ),
@@ -178,7 +175,6 @@ def test_terminus_runs_a_voted_task_family_once_and_regrades_a_tests_edit(
     run_context: RunContext,
     api: str,
     effort: str,
-    thinking_mode: str | None,
     serve_turns: Callable[[StubEndpoint, str], dict[str, Any]],
 ) -> None:
     for name, value in endpoint.env.items():
@@ -191,7 +187,6 @@ def test_terminus_runs_a_voted_task_family_once_and_regrades_a_tests_edit(
     system = make_system(
         api=api,
         effort=effort,
-        thinking_mode=thinking_mode,
         max_output_tokens=32768,
         context_window=131072,
     )
@@ -411,7 +406,6 @@ def test_installed_cli_preserves_native_trace_usage_and_task_diff(
         api=api,
         harness=harness,
         version=version,
-        thinking_mode='anthropic-adaptive' if harness == 'claude-code' else None,
         max_output_tokens=32768,
         context_window=131072,
     )

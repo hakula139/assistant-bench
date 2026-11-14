@@ -1123,14 +1123,19 @@ class TestRun:
         self, submitted: list[JobConfig]
     ) -> None:
         result = invoke(
-            'run', 'smoke-text', '--system', 'kimi-k3-high', '--system', 'opus-5.5-high'
+            'run',
+            'smoke-text',
+            '--system',
+            'kimi-k3.1-pro-high',
+            '--system',
+            'opus-5.5-high',
         )
         assert result.exit_code == 0, result.output
 
         (job,) = submitted
         assert [agent.kwargs['system'] for agent in job.agents] == [
             'opus-5.5-high',
-            'kimi-k3-high',
+            'kimi-k3.1-pro-high',
         ]
 
     def test_rejects_a_named_system_the_family_does_not_list(
@@ -1156,7 +1161,7 @@ class TestRun:
         cloud: RunContext,
         private_store: SQLiteDatabase,
     ) -> None:
-        named = ['gpt-6.1-sol-high', 'kimi-k3-high']
+        named = ['gpt-6.1-sol-high', 'kimi-k3.1-pro-high']
         args = [arg for name in named for arg in ('--system', name)]
         result = invoke('run', 'smoke-text', *args)
         assert result.exit_code == 0, result.output
@@ -1216,7 +1221,7 @@ class TestRun:
         write_task_family(
             families_dir,
             'echo',
-            systems=('opus-5.5-high', 'kimi-k3-high'),
+            systems=('opus-5.5-high', 'kimi-k3.1-pro-high'),
             author_vendor='anthropic',
         )
         result = invoke('run', 'f', '--system', 'opus-5.5-high')
@@ -1228,7 +1233,7 @@ class TestRun:
 
         assert planned_actions(submitted[1]) == {
             'opus-5.5-high': {DiffAction.REUSE},
-            'kimi-k3-high': {DiffAction.RERUN},
+            'kimi-k3.1-pro-high': {DiffAction.RERUN},
         }
 
     def test_rejects_a_named_family_without_systems(
@@ -1247,7 +1252,9 @@ class TestRun:
         self, families_dir: Path, submitted: list[JobConfig]
     ) -> None:
         write_votes_family(families_dir, ['opus-5.5-high'], name='f')
-        write_votes_family(families_dir, ['opus-5.5-high', 'kimi-k3-high'], name='g')
+        write_votes_family(
+            families_dir, ['opus-5.5-high', 'kimi-k3.1-pro-high'], name='g'
+        )
         write_task_family(families_dir, name='z')
 
         result = invoke('run')
@@ -1271,14 +1278,18 @@ class TestRun:
         self, families_dir: Path, submitted: list[JobConfig]
     ) -> None:
         write_votes_family(families_dir, ['opus-5.5-high'], name='f')
-        write_votes_family(families_dir, ['opus-5.5-high', 'kimi-k3-high'], name='g')
+        write_votes_family(
+            families_dir, ['opus-5.5-high', 'kimi-k3.1-pro-high'], name='g'
+        )
 
-        result = invoke('run', '--system', 'kimi-k3-high')
+        result = invoke('run', '--system', 'kimi-k3.1-pro-high')
         assert result.exit_code == 0, result.output
 
         (job,) = submitted
         assert job.jobs_dir.name == 'g'
-        assert [agent.kwargs['system'] for agent in job.agents] == ['kimi-k3-high']
+        assert [agent.kwargs['system'] for agent in job.agents] == [
+            'kimi-k3.1-pro-high'
+        ]
 
     @pytest.mark.parametrize(
         ('name', 'hint'),
