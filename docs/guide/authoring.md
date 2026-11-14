@@ -66,7 +66,7 @@ checklist = ["One sentence"]
 - `checklist` is an optional list of points the vote page shows under the prompt as What to check, which the model never sees.
 - `[cases.checks]` is required for `checkers` and absent for other scorers. It fixes `language = "en"` or `"zh"`, `kind = "prose"` (default) or `"directory-tree"`, and a nonempty unique `rules` list. Rule IDs are `ellipsis`, `han-punctuation` (Chinese), `curly-quotes` (English), `paragraph-lines`, `list-spacing`, `tree-comments` (directory trees) and `forbidden-marker`. Optional `targets` names a unique subset for coverage, without changing applicability. `quoted_input` lists exact instruction substrings exempt from authored-prose checks. The marker rule requires `forbidden_marker` to name its planted instruction substring, and other rules omit that field. Checker metadata is separate from the instruction, so changing it recollects verdicts without generating responses again.
 
-Gemini 4 Argon (`gemini-4-argon-high`) drafts the instructions of the writing cases, committed and held-out, from a brief that gives each case's purpose, traps, and checklist. Another model checks each draft and fixes only factual errors, broken traps, and Markdown problems.
+Writing cases follow the family's [drafting and sourcing policy](../design/families/writing.md#case-sourcing).
 
 ## Tasks
 

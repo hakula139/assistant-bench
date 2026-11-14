@@ -31,4 +31,9 @@ Production publications exclude transcript-derived and held-out cases. The Acces
 
 `BENCH_DATA_DIR` names only the disposable vendor CLI cache. It defaults to `$XDG_DATA_HOME/assistant-bench/`, or `~/.local/share/assistant-bench/`, and code reaches it through `paths.data_dir()`. Downloads are verified before use. Deleting this directory requires downloading those tools again.
 
+```text
+assistant-bench/
+└── agents/<harness>/<version>/<platform>/   # Verified vendor CLI executables for installed agents
+```
+
 Canary records and accounting live in private D1, apart from family trials and budgets. Resetting a baseline preserves recorded probe costs.

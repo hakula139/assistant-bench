@@ -49,4 +49,4 @@ On GitLab, `.gitlab-ci.yml` runs the `pages` job from `.gitlab/ci/pages.yml`, wh
 
 ## Workflow Steps
 
-Steps that need the dev shell prefix commands with `nix develop -c`. Every multiline script uses a literal block and sets `shell: bash` so actionlint can run shellcheck. Multiline step text is one heredoc, and a command's output enters it through a variable set beforehand, since a failed command substitution inside a heredoc does not fail the step under `bash -e`.
+Every multiline script uses a literal block and sets `shell: bash` so actionlint can run shellcheck. Multiline step text is one heredoc, and a command's output enters it through a variable set beforehand, since a failed command substitution inside a heredoc does not fail the step under `bash -e`.

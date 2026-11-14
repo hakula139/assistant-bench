@@ -1,7 +1,5 @@
 # Testing
 
-Where tests live, when they merge or go, how they reach models and Harbor, and what coverage they owe.
-
 ## Placement
 
 - Tests mirror the package: a module's tests live in `tests/test_<module>.py`, and a subpackage member's in `tests/<subpackage>/test_<module>.py`. `pyproject.toml` sets pytest's `--import-mode=importlib` so that same-named test files in different directories do not collide.
@@ -9,12 +7,6 @@ Where tests live, when they merge or go, how they reach models and Harbor, and w
 - `test_repository.py` checks committed data, lockfiles, and dependency stubs, and `test_harbor_smoke.py` holds the trials that need Docker.
 - Fixtures live in `tests/conftest.py`, data fixtures in `tests/fixtures/`, and builders and the stub endpoint in `tests/support.py`, which tests import as `support`.
 - Each function's tests sit in a class named after it, with the classes in the module's function order. A method's class nests in a class named after its type.
-
-## Merging and Dropping Tests
-
-Tests that run the same steps and assertions on different values make one parametrized test whose name states the rule they share. In Python, that test uses `pytest.mark.parametrize` with `ids` wherever pytest's own would not name the case, and in Vitest, `test.each` with a title that names each case. Tests whose arrange steps or assertions differ stay apart, even when they call the same function.
-
-Drop a test once another covers everything it checks.
 
 ## Models and Harbor
 
@@ -28,7 +20,7 @@ Drop a test once another covers everything it checks.
 
 ## Cross-Checks and the Report Fixture
 
-- The ranking fit is checked against statsmodels' `Logit` on simulated votes, so a change to the loss or the design that moves the estimates fails. The penalty barely moves those estimates, so the test of a system that wins every vote bounds its gap tightly enough that a tenfold change to the penalty in either direction fails.
+- The ranking fit is checked against statsmodels' `Logit` on simulated votes. A system that wins every vote separately checks the penalty's effect.
 - `tests/fixtures/report.json` and `report-early.json` are committed votes rounds after ten simulated days of voting and after one, which `make_round` in `support` simulates as a vote cut and the capped close path closes. `report-tests.json` is the tests round that `close_tests_round` in `test_report.py` closes, and the site's tests parse and render all three. `report.schema.json` is the `Report` model's JSON Schema, which the site's tests compare with its Zod schema. The tests of the generated files fail when a model or scoring change leaves one stale, and `uv run pytest --update-fixtures` rewrites it, so review the diff and commit the new fixture with the change.
 
 ## The Voting Worker
@@ -37,7 +29,7 @@ Drop a test once another covers everything it checks.
 
 ## Accessibility
 
-`site.test.ts` builds in an isolated root with a closed synthetic round so system pages and hydrated charts are included. It serves the built files and a vote API pair from `web/src/test/arena.ts` through Playwright routes, and aborts every other request. On each page in Chromium, under the light and dark color schemes and after the page's islands hydrate, it runs axe-core's default rules and `target-size`, and fails on any violation, page error, or console error. The vote page is checked on a text pair with its first Issues list open. `PlotFigure.test.tsx` also runs axe-core on a drawn chart in jsdom, which checks its ARIA but not its colors. [`AGENTS.md`](../../AGENTS.md#rules-for-every-change) gives the command that installs the browser.
+`site.test.ts` builds in an isolated root with a closed synthetic round so system pages and hydrated charts are included. It serves the built files and a vote API pair from `web/src/test/arena.ts` through Playwright routes, and aborts every other request. On each page in Chromium, under the light and dark color schemes and after the page's islands hydrate, it runs axe-core's default rules and `target-size`, and fails on any violation, page error, or console error. The vote page is checked on a text pair with its first Issues list open. `PlotFigure.test.tsx` also runs axe-core on a drawn chart in jsdom, which checks its ARIA but not its colors. [Quickstart](../guide/quickstart.md#site-verification) covers browser installation.
 
 ## Docker Trials
 

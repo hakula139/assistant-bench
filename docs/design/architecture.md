@@ -1,6 +1,6 @@
 # Architecture
 
-assistant-bench limits its code to the parts Harbor lacks, which the module map lists, while Harbor schedules trials, runs containers and verifiers, retries failures, and records every job.
+assistant-bench limits its code to the parts Harbor lacks, which the module map lists, while Harbor schedules trials, runs containers and verifiers, and records every job.
 
 ## Module Map
 
@@ -97,11 +97,11 @@ In `family.toml`, `scorer` discriminates the settings model, which decides how t
 
 The `checkers` scorer evaluates collected replies locally. Its case context, coverage targets and grader revision do not enter rendered instructions, task versions or system fingerprints. Recollection updates verdicts without generating replies, and closing requires one current verdict per configured system and case.
 
-1. `bench run [<family>...]` pins the clean checkout and private repository revisions, restores earlier trial artifacts into a temporary workspace, renders cases or checks authored tasks, and builds a Harbor job with the selected systems. It projects cost from the private D1 ledger against `budget_usd`. Request admissions and receipts are recorded in private D1 while Harbor runs locally.
-2. Harbor runs each trial's agent. A `Generate` trial starts no container: it sends one request through the system's configured API, writes the reply to `output.txt` in the trial's agent logs, and records usage and response provenance on the trial's `AgentContext`. `Terminus` drives the task's container until the model completes the task, with native context management and an operational timeout. Harbor then grades the container's `/app` with the task's tests in a fresh container.
-3. `bench run` stores completed trial artifacts in the private repository and seals a collected output generation in private D1 once Harbor exits, also after a failed run. `bench collect` restores artifacts and seals a new generation, pinning cases, collection code and public system labels. A `votes` family runs its gates over each reply, or for a task family records the diff of each graded `/app` against the task's `environment/app/` and fails the `tests` gate when the reward is below 1.
-4. `bench arena prepare <family> production|private` saves a publication of a sealed output generation in private D1. `bench arena inspect <id>` displays it for review, and `bench arena publish <target> <id>` activates it in that target's D1 database. Public and Access-protected private [arenas](arena.md) record votes independently of local execution.
-5. `bench close <family>` seals a snapshot of the counted votes in private D1, fits the [ranking](ranking.md) and writes the [report](reports.md) to `reports/<family>/<round>.json`. Snapshot replay uses its saved category order, close time and each cut's pinned output generation. A `tests` or `checkers` family closes from its collected generation and pinned case and code revisions.
+1. `bench run` pins the implementation and private source revisions, restores earlier artifacts into a disposable workspace, and checks tasks and budget admission before starting Harbor. Private D1 records request admissions and receipts while trials run locally.
+2. A single-call trial sends one request without a container. A task agent works in its task's container with native context management and an operational timeout, then Harbor grades `/app` with the task's tests in a fresh container.
+3. After Harbor exits, including a failed run, completed trial artifacts enter private Git and collection seals an output generation in private D1. `bench collect` can repeat collection from those artifacts with pinned cases, collection code and public system labels. Voted replies receive gate verdicts. Voted tasks retain the graded workspace diff and fail the `tests` gate when their reward is below 1.
+4. Arena preparation saves a publication of a sealed generation for review. Publishing activates that immutable publication in the target's D1 database. Public and Access-protected private [arenas](arena.md) record votes independently of local execution, following the [Running](../guide/running.md#voting) procedure.
+5. Closing a voted family seals counted votes, fits the [ranking](ranking.md) and writes its [report](reports.md). Replay uses the snapshot's category order, close time and each cut's pinned output generation. A `tests` or `checkers` family closes from its collected generation and pinned case and code revisions.
 
 `bench check [<family>...]` validates public sources without cloud authentication, and for a `tasks/` family also runs Harbor's oracle and nop on every task in a temporary workspace. `--private` includes a pinned private repository revision and requires GitHub authentication without opening D1. Check jobs never enter collection.
 

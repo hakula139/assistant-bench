@@ -54,7 +54,7 @@ On a task family, the harness runs until completion or the task's operational ti
 
 Installed agents require a named local Docker context using a Unix socket or Docker Desktop. Select it with `DOCKER_CONTEXT`. A standalone `DOCKER_HOST` and contexts using SSH or TCP endpoints are unsupported, since the model proxy runs on the client host. This is checked before CLI downloads or model calls.
 
-Runs require a clean checkout, an authenticated `BENCH_DATA_REPOSITORY` and the private D1 [credential source](#voting). The command pins the checkout and private case revisions before execution and refuses missing cloud authentication. Tasks and containers run locally in a disposable command workspace.
+Runs require a clean implementation revision retained by canonical GitHub `main`, as [Data](../conventions/data.md#the-data-directory) explains, an authenticated `BENCH_DATA_REPOSITORY`, and the private D1 [credential source](#voting). The command pins the implementation and private case revisions before execution. Tasks and containers run locally in a disposable command workspace.
 
 When Harbor exits, `bench run` stores completed trial artifacts in the private repository, seals the family's collected output generation in private D1 and prints the summary that [Collecting Outputs](#collecting-outputs) describes, also when Harbor fails.
 
@@ -68,7 +68,7 @@ Removing a system from the family's `systems` stops new trials and current colle
 
 A run refuses a system whose earlier trials or closed reports recorded another fingerprint, as [Systems](../design/systems.md#fingerprints) describes, and [Authoring](authoring.md#systems) gives the fix.
 
-Adding a system to the catalog is its table plus one line in each family's `systems`, then `uv run bench run --system <name>`. Adding cases is their `[[cases]]` entries in `cases.toml`, then, once they are [reviewed](authoring.md), `uv run bench run`.
+Add a system's table and list it in each family's `systems`, or add cases to `cases.toml`. Have new or edited cases [reviewed](authoring.md), merge the source changes, then run `uv run bench run --system <name>` or `uv run bench run`.
 
 ## Collecting Outputs
 
@@ -85,24 +85,11 @@ The summary counts the records, the errors by type, the gate failures by gate fo
 
 When the family lists systems, each system's verifier [pass rate](../design/ranking.md#test-pass-rates) on tasks its own vendor authored appears beside its rate on other vendors' tasks.
 
-Each record holds:
+The [output model](../../src/assistant_bench/outputs.py) records three kinds of information:
 
-| Field                                                                                      | Holds                                                                                                                                                                                                                                                                                                                |
-| ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `trial`, `job`                                                                             | The Harbor trial and job the record came from                                                                                                                                                                                                                                                                        |
-| `case`, `system`                                                                           | The case, and the system's `systems.toml` name                                                                                                                                                                                                                                                                       |
-| `fingerprint`, `nixos_config_rev`                                                          | The system's fingerprint and the export revision it ran under                                                                                                                                                                                                                                                        |
-| `harness_version`                                                                          | The Harbor version whose terminal agent wrote a task's solution                                                                                                                                                                                                                                                      |
-| `text`                                                                                     | A case's reply, or on a voted task the git-style diff of the graded `/app` against the task's `environment/app/`, without `.git` or tool caches                                                                                                                                                                      |
-| `reward`                                                                                   | A task's reward from its tests                                                                                                                                                                                                                                                                                       |
-| `gate_failures`                                                                            | The [gates](../design/families/writing.md#gate-verdicts) a voted output failed, which on a task is `tests` when its reward is below 1                                                                                                                                                                                |
-| `error`                                                                                    | The error type of a failed trial. A graded task can retain its diff and gate verdict after an agent error                                                                                                                                                                                                            |
-| `finish_reason`                                                                            | The endpoint's finish reason for a single-call reply, or for the completion failure that ended a terminal agent's run, null otherwise                                                                                                                                                                                |
-| `stop_details`                                                                             | The `type`, `category`, and `explanation` that the Messages API gave for the refusal that ended the trial, whether a single-call reply or a terminal agent's request, null otherwise                                                                                                                                 |
-| `input_tokens`, `cached_tokens`, `cache_write_tokens`, `output_tokens`, `reasoning_tokens` | Token counts summed over the trial's requests, null unless every request reports valid usage. `input_tokens` includes `cached_tokens` and `cache_write_tokens`, and `output_tokens` includes `reasoning_tokens`. An unreported cache count adds 0, while an unreported reasoning count makes `reasoning_tokens` null |
-| `cost_usd`                                                                                 | The cost at catalog prices, null when the catalog channel has no price, an input or output token count is unknown, or a cache write has no declared price                                                                                                                                                            |
-| `latency_sec`                                                                              | The end-to-end latency, or a terminal agent's execution time                                                                                                                                                                                                                                                         |
-| `response_models`, `request_id`                                                            | The distinct models the trial's responses reported, sorted, and the endpoint's request ID for a single-call reply                                                                                                                                                                                                    |
+- **Identity and result:** the source trial and job, case, system, fingerprint, export revision and terminal agent's Harbor version. Historical unknown identities remain null. The content is a case reply or a voted task's diff of graded `/app` against `environment/app/`, excluding `.git` and tool caches, with its reward, [gate verdict](../design/families/writing.md#gate-verdicts) and error. A graded task can retain its diff and verdict after an agent error.
+- **Measured usage:** token counts summed over every request, null unless all requests report valid usage. Input includes cache reads and writes, and output includes reasoning. An unreported cache count adds zero, while unreported reasoning makes its total null. Cost is null when the channel is unpriced, input or output usage is unknown, or a nonzero cache write has no declared price.
+- **Timing and response provenance:** end-to-end latency, or a terminal agent's execution time, the sorted distinct reported models, and a single-call reply's request ID. Single-call replies record their finish reason, while a terminal agent records one only for the completion failure that ended its run. Messages refusals retain their type, category and explanation when they ended either kind of trial. Finish and refusal details are null otherwise.
 
 The summary ends with each system's spend from the family's [ledger](#spend-and-budgets).
 
@@ -115,11 +102,19 @@ uv run bench spend coding-repo --system <name>
 
 Private D1 records request admissions before dispatch and receipts after responses. Collection reconciles receipts with the family's ledger, which outlives local jobs. An interrupted request can leave its final usage unknown and block another paid attempt until inspected.
 
-Each ledger entry keeps the price frozen before execution, so a later price change or a system leaving the catalog leaves recorded spend as it was. A response has no known cost when its usage is invalid, when a Messages stream broke before its final usage, or when its price cannot cost it, as when its cache write has no declared price. Each system's spend line imputes those responses from the system's own mean tokens per measured response at the entry's price, with its cache reads and writes counted as plain input when that price cannot cost them. Only a system without measured usage of its own borrows, from the costliest mean of the family's other systems, with their cache reads and writes priced as plain input since another system's caching says nothing about this one's. When no system has measured usage, a response counts at its ceiling, a full context window at the dearest declared input rate plus a full completion allowance. The line names that share for information, and the budget leaves it out until a later run measures usage to impute from. The tokens that projections draw on, and that an unpriced system reports alone, leave out those responses.
+### Recorded Spend
+
+Each ledger entry keeps the price frozen before execution, so a later price change or a system leaving the catalog leaves recorded spend as it was. A response has no known cost when its usage is invalid, when a Messages stream broke before its final usage, or when its price cannot cost it, as when its cache write has no declared price. A terminal agent's trajectory `final_metrics` counts only responses with valid usage.
+
+### Missing-Usage Estimates
+
+Each system's spend line imputes unknown costs from its own mean tokens per measured response at the entry's price, with cache reads and writes counted as plain input when that price cannot cost them. A system without measured usage of its own borrows the costliest mean of the family's other systems, with their cache reads and writes priced as plain input since another system's caching says nothing about this one's.
+
+When no system has measured usage, a response counts at its ceiling, a full context window at the dearest declared input rate plus a full completion allowance. The line names that share for information, and the budget leaves it out until a later run measures usage to impute from. The tokens that projections draw on, and that an unpriced system reports alone, leave out those responses.
+
+### Budget Admission
 
 Before Harbor starts, `bench run` prints each system's pending trials, the trials that Harbor's diff would rerun, with their projected cost. A system with usage of its own in the ledger uses its mean tokens per trial that received a response, retries included, and any other system borrows the family's costliest tokens per trial at its own prices, again with the lender's cache priced as plain input. When the family sets `budget_usd`, a run with priced pending trials refuses before any job starts if the ledger's known and imputed spend plus the projections that have an estimate exceed it, and one family over its budget refuses the whole run. A run with no priced pending trials, such as one of unpriced systems or one that only regrades, never refuses. A priced system whose pending trials have no usage to estimate from counts no projected dollars, since only a run can give it that usage, and its projection line warns that the run can exceed the budget. Unpriced systems count no dollars. `bench spend` takes the same arguments as `bench run` and prints the ledger and the projection without running anything.
-
-A terminal agent's trajectory `final_metrics` counts only responses with valid usage.
 
 Before adding family trials, a run also sends the [route canaries](../design/systems.md#model-swaps) for systems with pending work. Its printed full-context cost ceiling includes the resolved system prompt and API framing within the context allowance, plus the probe's completion allowance including reasoning. An unknown price or cache-write rate leaves that ceiling unknown. Private D1 records probe spend separately from family budgets.
 
@@ -211,14 +206,3 @@ uv run bench close writing-zh --snapshot <snapshot-id>
 ```
 
 For a voted family, `bench close` seals the available production and private votes that can no longer be undone in private D1, combines them, and writes `reports/<family>/<round>.json`. Families without `public_voting` read only the private store. `--snapshot` replays a sealed snapshot by ID, preserving its close time, category order and each store's pinned outputs without reading the current family, catalog or private repository. For a `tests` or `checkers` family, closing uses the collected generation's pinned cases, code revision and public system labels. Commit the report through a PR. [Reports](../design/reports.md) describes its contents.
-
-## The Data Directory
-
-The [data directory](../conventions/data.md#the-data-directory) contains only disposable vendor CLI downloads:
-
-```text
-assistant-bench/
-└── agents/<harness>/<version>/<platform>/  # Verified vendor CLI executables for installed agents
-```
-
-Completed trial artifacts live in the private repository, while collected outputs and runtime records live in private D1.

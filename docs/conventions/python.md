@@ -5,7 +5,8 @@ Conventions for Python code and tests that the tooling and the module map don't 
 ## Architecture
 
 - The [module map](../design/architecture.md#module-map) gives each module's responsibility, and imports stay within the [import layers](../design/architecture.md#import-layers).
-- For anything Harbor reads or writes, build on Harbor's own models so a schema change surfaces as a validation error. Keep agents on `BaseAgent`, `AgentContext`, and the logs directory, the parts of Harbor's API least likely to churn. The agents rely on private Harbor surface: both on `BaseAgent._get_env` to read their environment, and `Terminus` on `Terminus2._init_llm` to inject the endpoint client, `_query_llm`'s tenacity retry to exclude `NativeCompletionError`, `_run_agent_loop`, `_run_subagent`, and `_summarize` to keep SDK items across summaries, the `_llm` and `_chat` attributes, and `LiteLLM._build_base_kwargs` and `_extract_usage_info` to read LiteLLM's original usage. `HostEnvironment` implements `BaseEnvironment`'s changing abstract interface. Keep both integrations covered by real Harbor trials when upgrading Harbor.
+- Build Harbor inputs and results on its own models so schema changes fail validation. Keep agents on `BaseAgent`, `AgentContext`, and the logs directory where possible. The private API overrides and `HostEnvironment`'s `BaseEnvironment` implementation require real Harbor trials when upgrading Harbor.
+- Native adapters preserve SDK conversation items across summaries and read original usage counters. A semantic failure of an accepted request is terminal: `NativeCompletionError` must not regenerate the response.
 - Model each input file the bench owns with a pydantic model that sets `extra='forbid'`, so a misspelled key fails at load time. Models of the nixos-config export accept extra fields, since that schema belongs to nixos-config.
 - Branch on a family's scorer with a `match` over its settings model that ends in `case _: assert_never(...)`, so mypy reports each `match` a new scorer misses.
 - Reach the data directory only through `paths.data_dir()`.
@@ -13,7 +14,7 @@ Conventions for Python code and tests that the tooling and the module map don't 
 ## Errors
 
 - Raise `messages.InputError` for input an author or operator can fix, naming the item and the accepted values. Every message the CLI prints is one or more sentences, each starting with a capital and ending with a period, with names, files, and commands in backticks, and `messages.py` formats lists of names and pydantic errors that way. Wrap a `ValidationError` from author input in an `InputError` worded by `error_lines`, while pydantic validators keep raising `ValueError`. Commands raise these errors without catching them, and the root command group prints each `InputError` or `D1Error` to stderr and exits with code 1, keeping `typer.BadParameter` for an argument that names no family, task, or system. Any other exception is a bug and ends with its traceback. To see the traceback behind a printed error, rerun the command with `PYTHONDEVMODE=1`.
-- Let HTTP and Harbor errors propagate. Harbor records them on the trial, and its retry policy decides what reruns.
+- Let HTTP and Harbor errors propagate so Harbor records them on the trial.
 
 ## Modules
 

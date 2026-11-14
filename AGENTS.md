@@ -18,14 +18,14 @@ The tree lists only the top-level entries whose names leave their purpose unclea
 
 ```text
 .
-├── .env.example                            # Endpoint variables that `bench` loads from an ignored .env
-├── families/                               # One directory per family and leaderboard
-├── fingerprints.json                       # Each runnable system's fingerprint, kept current by a test
-├── flake.nix                               # The dev shell, pre-commit hooks, checks, and the nixos-config export
-├── src/assistant_bench/                    # The `bench` package, mapped in docs/design/architecture.md
-├── systems.toml                            # Systems under test, one table each
-├── typings/                                # Development-only type stubs for dependencies that lack them
-└── web/                                    # The results site, the vote page and its Worker, a pnpm workspace package
+├── .env.example           # Endpoint variables that `bench` loads from an ignored .env
+├── families/              # One directory per family and leaderboard
+├── fingerprints.json      # Each runnable system's fingerprint, kept current by a test
+├── flake.nix              # The dev shell, pre-commit hooks, checks, and the nixos-config export
+├── src/assistant_bench/   # The `bench` package, mapped in docs/design/architecture.md
+├── systems.toml           # Systems under test, one table each
+├── typings/               # Development-only type stubs for dependencies that lack them
+└── web/                   # The results site, the vote page and its Worker, a pnpm workspace package
 ```
 
 ## Read Before You Edit
@@ -46,7 +46,7 @@ The tree lists only the top-level entries whose names leave their purpose unclea
 
 ## Rules for Every Change
 
-- Never bypass the pre-commit hooks. In each new checkout or worktree, run `nix develop -c true` once to generate the hook configuration, then `pnpm install` and `uv sync` inside the dev shell for the Node tools and the virtualenv. On each host, and again after each Playwright update, run `pnpm --filter web exec playwright install --only-shell chromium` for the site test's browser.
+- Follow [Quickstart](docs/guide/quickstart.md#setup) for checkout and browser setup, and never bypass the pre-commit hooks.
 - Run the [verification](#verification) block before review.
 - Add new words to `.cspell/words.txt`, as `cspell` scans Python sources too.
 - Commit only synthetic or public cases to this repository. Keep transcript-derived and held-out cases and trial artifacts in the private repository, and runtime state and outputs in private D1, as [Data](docs/conventions/data.md) describes.
@@ -56,7 +56,7 @@ The tree lists only the top-level entries whose names leave their purpose unclea
 - In docs, issues, and PRs, name systems by their `systems.toml` table names, which are public model names plus a suffix naming a variant's prompt or effort, or the model's snapshot. Routes and channel IDs stay in `systems.toml`, the nixos-config export, and private records.
 - Only `bench close` writes under `reports/`, and a report holds aggregates under public system names alone.
 - Never run paid model calls in CI, as tests reach models only through the stub endpoint in `tests/support.py`.
-- Keep commands minimal and settings in config files: `bench` takes only the arguments that pick what a command acts on and reads every setting from `systems.toml` and `family.toml`, while environment variables hold only secrets and per-environment values, as [Development](docs/conventions/development.md#where-settings-live) lists.
+- `bench` takes only arguments that select what a command acts on and reads its settings from `systems.toml` and `family.toml`, as [Development](docs/conventions/development.md#where-settings-live) lists.
 - Keep no compatibility layers: no data migrations, ID aliases, redirects, case lineage, or readers for old formats. A case, family, or schema change that would orphan votes drops them. Guards that refuse mismatched data may stay. Once a replacement is verified, delete the superseded state, code, and docs with no archive. The arena's D1 schema is the one exception, as [Arena](docs/design/arena.md#schema-changes) describes.
 - In committed files, state each convention on its own terms and never name the repositories that conventions, layout, or design were drawn from. nixos-config appears only where the bench uses it: the flake input, its export, and `nixos-config:<client>` prompts. Research notes and design pages may cite the external benchmarks, papers, and tools whose methods the bench uses.
 

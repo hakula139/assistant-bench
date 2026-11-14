@@ -1,6 +1,6 @@
 # Reports
 
-A report publishes one closed round's aggregates under public system IDs. `report.py` defines the strict Pydantic schema, mirrored by the site's Zod schema.
+A report publishes one closed round's aggregates under public system IDs. [`report.py`](../../src/assistant_bench/report.py) defines the strict Pydantic schema, mirrored by the site's Zod schema. [Testing](../conventions/testing.md#cross-checks-and-the-report-fixture) describes their shared synthetic fixtures. Prettier leaves generated reports and fixtures as their writer formats them.
 
 ## Closing a Round
 
@@ -18,10 +18,9 @@ Voted systems get labels, fingerprints and the reference from the publication th
 
 `CheckersResults` records strict case pass rates and exact intervals, response and error counts, categories, the leader decision, applicable-rule diagnostics, and descriptive bare / prompted effects with nullable paired bootstrap intervals. It publishes only aggregates under system names. The grader revision identifies the collected checks independently of generation fingerprints.
 
-| Variant        | Published values                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `VotesResults` | Point standings with their score intervals and ranks, the method's parameters, interval level and actor cap, the preliminary rule, the leader decision, each store's vote cutoff with the counted votes up to it, raw and effective human counts, voters, cases, output rates, a pass rate with its 95% interval for tested outputs, cost and latency, distributions, defect tags, head-to-head records, categories and diagnostics |
-| `TestsResults` | Samples per task, then per system its tasks, trials, errored trials, pass rate with its 95% interval, pass^k, mean cost and latency percentiles, per-category pass rates, and the leader decision                                                                                                                                                                                                                                   |
+`VotesResults` records standings, score intervals and ranks, the fit and preliminary rules, the leader decision, and each store's cutoff and counted votes. Its aggregates cover human participation, output quality, measured usage, head-to-head results and categories.
+
+`TestsResults` records samples per task, task and trial counts, errors, pass rates and their 95% intervals, pass^k, cost, latency, categories and the leader decision.
 
 Preliminary markers are derived from each round's interval widths and recorded rule. In a head-to-head row, `wins`, `losses`, `ties` and `both_bad` are raw counts, while `win_rate` uses actor weights. [Ranking](ranking.md) defines the fit, the score intervals and the votes leader decision, and its [test pass rates](ranking.md#test-pass-rates) define the tests intervals and leader decision.
 
@@ -30,7 +29,3 @@ Each round's output inventory determines its measurement denominators. Cost, lat
 ## Publication Boundaries
 
 Reports contain no case ID, instruction, output, route, request ID or session. Their only identifiers are categories, public system IDs, labels and configuration fingerprints. New scorers add a results variant, a closing arm and site views, as [Architecture](architecture.md#families-and-scorers) describes.
-
-## Synthetic Fixtures
-
-Python and site tests share synthetic report fixtures, which [Testing](../conventions/testing.md#cross-checks-and-the-report-fixture) describes. Prettier leaves generated reports and fixtures as their writer formats them.
