@@ -25,7 +25,7 @@ List runnable systems and a reference for voted rankings. The reference anchors 
 
 Keep categories in board order and defects in presentation order. Category IDs appear in reports, with labels supplied by the site glossary. Omitting defects hides issue tagging. [Writing](../design/families/writing.md#gates) defines the optional language, length and script gates.
 
-Cases render as text by default or as HTML with `render = "html"`. Voted tasks require `render = "diff"` to show solutions against `environment/app/`. An HTML reply must be a complete self-contained document, bare or inside one complete HTML fence with no surrounding prose:
+Voted cases render as text by default or as HTML with `render = "html"`. Voted tasks require `render = "diff"` to show solutions against `environment/app/`. An HTML reply must be a complete self-contained document, bare or inside one complete HTML fence with no surrounding prose:
 
 - Include explicit doctype, html, head and body boundaries. Collection preserves the extracted document's bytes and records no text length.
 - Use inline CSS, data images or fonts, native controls, static SVG and CSS animation. JavaScript, external resources, form submission and persistence are unavailable.
