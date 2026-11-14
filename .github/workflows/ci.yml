@@ -16,8 +16,6 @@ concurrency:
 jobs:
   nix:
     uses: hakula139/devkit/.github/workflows/nix.yml@v3
-    with:
-      macos: false
     secrets:
       CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
 
@@ -29,80 +27,16 @@ jobs:
     secrets:
       CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
 
-  bench:
-    name: Bench Check
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-
-      - name: Set up Nix
-        uses: hakula139/devkit/.github/actions/setup-nix@v3
-
-      - name: Check editor types
-        run: nix develop -c uv run --locked basedpyright
-
-      - name: Check fingerprints
-        run: nix develop -c uv run --locked bench fingerprints
-
-  web:
-    name: Web Check
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+  node:
     permissions:
       contents: read
       id-token: write
+    uses: hakula139/devkit/.github/workflows/node.yml@v3
+    secrets:
+      CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-
-      - name: Set up Nix
-        uses: hakula139/devkit/.github/actions/setup-nix@v3
-
-      - name: Install dependencies
-        run: nix develop -c pnpm install --frozen-lockfile
-
-      - name: Lint
-        run: nix develop -c pnpm lint
-
-      - name: Type check
-        run: nix develop -c pnpm typecheck
-
-      - name: Install Chromium
-        run: nix develop -c pnpm --filter web exec playwright install --only-shell chromium
-
-      - name: Run tests
-        run: nix develop -c pnpm test
-
-      - name: Upload to Codecov
-        uses: codecov/codecov-action@v7
-        with:
-          files: web/coverage/lcov.info
-          use_oidc: true
-
-      - name: Build site
-        run: nix develop -c pnpm build
-
-      - name: Bundle the voting Worker
-        run: nix develop -c pnpm --filter web exec wrangler deploy --dry-run --env production
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: site-dist
-          path: web/dist/
-          retention-days: 7
-          if-no-files-found: error
-
-  harbor-smoke:
-    name: Harbor Smoke
+  bench:
+    name: Bench Check
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
@@ -115,6 +49,12 @@ jobs:
 
       - name: Set up Nix
         uses: hakula139/devkit/.github/actions/setup-nix@v3
+
+      - name: Check editor types
+        run: nix develop -c uv run --locked basedpyright
+
+      - name: Check fingerprints
+        run: nix develop -c uv run --locked bench fingerprints
 
       - name: Check Docker
         run: time docker info
@@ -142,6 +82,43 @@ jobs:
           timeout 10s systemctl status docker --no-pager || true
           timeout 10s journalctl --unit docker --since '-10 min' --lines 100 --no-pager
 
+  web:
+    name: Web Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Nix
+        uses: hakula139/devkit/.github/actions/setup-nix@v3
+
+      - name: Install dependencies
+        run: nix develop -c pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: nix develop -c pnpm lint
+
+      - name: Type check
+        run: nix develop -c pnpm typecheck
+
+      - name: Build site
+        run: nix develop -c pnpm build
+
+      - name: Bundle the voting Worker
+        run: nix develop -c pnpm --filter web exec wrangler deploy --dry-run --env production
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: site-dist
+          path: web/dist/
+          retention-days: 7
+          if-no-files-found: error
+
   result:
     name: CI Result
     # A skipped job counts as a passing required check, so the gate must run after failures too.
@@ -149,9 +126,10 @@ jobs:
     needs:
       - nix
       - python
+      - node
       - bench
       - web
-      - harbor-smoke
+      - preview
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -168,7 +146,9 @@ jobs:
       github.event_name == 'pull_request' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.event.pull_request.user.login != 'dependabot[bot]'
-    needs: web
+    needs:
+      - node
+      - web
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # Serialize previews with cleanup so cancellation cannot leave old deployments behind.
@@ -242,12 +222,9 @@ jobs:
           record=$(jq -c 'select(.type == "preview")' "$WRANGLER_OUTPUT_FILE_PATH")
           preview_url=$(jq -er '.preview_urls[0]' <<<"$record")
           deployment_url=$(jq -er '.deployment_urls[0]' <<<"$record")
-          deploy_time=$(date -u +'%Y-%m-%d %H:%M UTC')
           cat >> "$GITHUB_OUTPUT" <<OUTPUT
-          short_sha=${PR_SHA:0:7}
           preview_url=$preview_url
           deployment_url=$deployment_url
-          deploy_time=$deploy_time
           OUTPUT
 
       - name: Comment preview
@@ -256,27 +233,7 @@ jobs:
         with:
           header: preview-url
           message: |
-            ## ⚡ Cloudflare Workers preview
-
-            <table>
-              <tr>
-                <td><strong>Preview</strong></td>
-                <td><a href="${{ steps.meta.outputs.preview_url }}">${{ steps.meta.outputs.preview_url }}</a></td>
-              </tr>
-              <tr>
-                <td><strong>This commit</strong></td>
-                <td><a href="${{ steps.meta.outputs.deployment_url }}">${{ steps.meta.outputs.deployment_url }}</a></td>
-              </tr>
-              <tr>
-                <td><strong>Commit</strong></td>
-                <td><code>${{ steps.meta.outputs.short_sha }}</code></td>
-              </tr>
-              <tr>
-                <td><strong>Updated</strong></td>
-                <td>${{ steps.meta.outputs.deploy_time }}</td>
-              </tr>
-            </table>
-
+            [Preview](${{ steps.meta.outputs.preview_url }}) · [This commit](${{ steps.meta.outputs.deployment_url }})
             [View deploy logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
 
   deploy:

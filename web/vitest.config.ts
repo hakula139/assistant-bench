@@ -13,6 +13,7 @@ export default getViteConfig({
       enabled: true,
       // workerd exposes no V8 coverage, so both projects instrument their sources.
       provider: 'istanbul',
+      reportsDirectory: '../coverage',
       include: ['src/**/*.{astro,ts,tsx}', 'worker/**/*.ts'],
       exclude: ['src/components/ui/**', 'src/test/**', 'worker/test/**'],
       // Codecov matches lcov paths against the repository, so they start at its root.
