@@ -29,7 +29,7 @@
 
 ## Accessibility
 
-`site.test.ts` builds in an isolated root with a closed synthetic round so system pages and hydrated charts are included. It serves the built files and a vote API pair from `web/src/test/arena.ts` through Playwright routes, and aborts every other request. On each page in Chromium, under the light and dark color schemes and after the page's islands hydrate, it runs axe-core's default rules and `target-size`, and fails on any violation, page error, or console error. The vote page is checked on a text pair with its first Issues list open. `PlotFigure.test.tsx` also runs axe-core on a drawn chart in jsdom, which checks its ARIA but not its colors. [Quickstart](../guide/quickstart.md#site-verification) covers browser installation.
+`site.test.ts` builds in an isolated root with a closed synthetic round so system pages and hydrated charts are included. It serves the built files and a vote API pair from `web/src/test/arena.ts` through Playwright routes, and aborts every other request. On each page in Chromium, under the light and dark color schemes and after the page's islands hydrate, it runs axe-core's default rules and `target-size`, and fails on any violation, page error, or console error. The vote page is checked on a text pair with its first Issues list open. `PlotFigure.test.tsx` also runs axe-core on a drawn chart in jsdom, which checks its ARIA but not its colors. `pnpm test` installs the matching Chromium headless shell through its `pretest` script.
 
 ## Docker Trials
 

@@ -25,14 +25,7 @@ If you use [direnv](https://direnv.net), run `direnv allow` once so `.envrc` loa
 
 ### Site Verification
 
-On each host, and after updating Playwright, install the site's test browser inside the dev shell:
-
-```bash
-pnpm \
-  --filter web \
-  exec playwright install \
-    --only-shell chromium
-```
+`pnpm test` installs the matching Chromium headless shell before running the site and voting Worker tests, reusing the browser cache on later runs.
 
 ## The Smoke Families
 

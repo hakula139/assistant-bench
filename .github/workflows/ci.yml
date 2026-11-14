@@ -119,26 +119,6 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
-  result:
-    name: CI Result
-    # A skipped job counts as a passing required check, so the gate must run after failures too.
-    if: ${{ !cancelled() }}
-    needs:
-      - nix
-      - python
-      - node
-      - bench
-      - web
-      - preview
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      actions: read
-
-    steps:
-      - name: Check results
-        uses: hakula139/devkit/.github/actions/ci-result@v3
-
   preview:
     name: Deploy Preview
     # Pull requests from forks and Dependabot receive no deploy secrets.
@@ -235,6 +215,26 @@ jobs:
           message: |
             [Preview](${{ steps.meta.outputs.preview_url }}) · [This commit](${{ steps.meta.outputs.deployment_url }})
             [View deploy logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+  result:
+    name: CI Result
+    # A skipped job counts as a passing required check, so the gate must run after failures too.
+    if: ${{ !cancelled() }}
+    needs:
+      - nix
+      - python
+      - node
+      - bench
+      - web
+      - preview
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+
+    steps:
+      - name: Check results
+        uses: hakula139/devkit/.github/actions/ci-result@v3
 
   deploy:
     name: Deploy Voting
