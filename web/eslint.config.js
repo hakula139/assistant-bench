@@ -1,28 +1,10 @@
+import base from '@hakula139/eslint-config';
+import typescript from '@hakula139/eslint-config/typescript';
 import astro from 'eslint-plugin-astro';
-import perfectionist from 'eslint-plugin-perfectionist';
 import reactHooks from 'eslint-plugin-react-hooks';
 import { defineConfig } from 'eslint/config';
+import globals from 'globals';
 import tseslint from 'typescript-eslint';
-
-const sharedRules = {
-  'curly': ['error', 'all'],
-  'eqeqeq': ['error', 'always'],
-  'no-throw-literal': 'error',
-  'prefer-const': 'error',
-  'perfectionist/sort-imports': [
-    'error',
-    {
-      groups: [
-        ['type-builtin', 'value-builtin'],
-        ['type-external', 'value-external'],
-        ['type-internal', 'value-internal'],
-        'unknown',
-      ],
-      internalPattern: ['^@/'],
-    },
-  ],
-  'perfectionist/sort-named-imports': ['error', { groups: ['value-import', 'type-import'] }],
-};
 
 const classicZod =
   "Build classic Zod schemas only at build time. Constructing one runs Zod's eval probe, which the pages' script policy reports as a violation.";
@@ -31,27 +13,25 @@ const namedZod =
   "Import zod/mini as a namespace, since the named `z` export keeps all of Zod in the Worker's bundle.";
 
 export default defineConfig([
-  {
-    plugins: { perfectionist },
-  },
+  base,
+  typescript,
   {
     files: ['**/*.{ts,tsx}'],
-    extends: [tseslint.configs.strictTypeChecked, reactHooks.configs.flat.recommended],
+    extends: [reactHooks.configs.flat.recommended],
     languageOptions: {
       parserOptions: {
-        projectService: true,
         tsconfigRootDir: import.meta.dirname,
       },
     },
-    rules: {
-      ...sharedRules,
-      '@typescript-eslint/consistent-type-imports': [
-        'error',
-        { prefer: 'type-imports', fixStyle: 'separate-type-imports' },
-      ],
-      '@typescript-eslint/restrict-template-expressions': ['error', { allowNumber: true }],
-      '@typescript-eslint/switch-exhaustiveness-check': 'error',
-    },
+  },
+  {
+    files: ['**/*.astro'],
+    extends: [tseslint.configs.recommended],
+  },
+  astro.configs.recommended,
+  {
+    files: ['**/*.astro/*.ts'],
+    extends: [tseslint.configs.disableTypeChecked],
   },
   {
     files: ['src/**/*.{ts,tsx}'],
@@ -93,14 +73,8 @@ export default defineConfig([
     },
   },
   {
-    files: ['**/*.astro'],
-    extends: [astro.configs.recommended],
-    rules: sharedRules,
-  },
-  {
-    files: ['**/*.js'],
-    extends: [tseslint.configs.recommended],
-    rules: sharedRules,
+    files: ['eslint.config.js'],
+    languageOptions: { globals: globals.node },
   },
   {
     ignores: ['.astro/', '.wrangler/', 'dist/', 'worker-configuration.d.ts'],

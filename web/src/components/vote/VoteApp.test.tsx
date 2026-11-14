@@ -243,8 +243,8 @@ describe('VoteApp', () => {
         constructor(callback: () => void) {
           resize = callback;
         }
-        observe() {}
-        disconnect() {}
+        observe = vi.fn();
+        disconnect = vi.fn();
       },
     );
   });
@@ -362,7 +362,7 @@ describe('VoteApp', () => {
       if (family !== null) {
         query.set('family', family);
       }
-      history.replaceState(null, '', `/vote/?${query}#outputs`);
+      history.replaceState(null, '', `/vote/?${query.toString()}#outputs`);
       const href = location.href;
       const reload = stubReload();
       const user = userEvent.setup();

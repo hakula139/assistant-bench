@@ -82,7 +82,8 @@ export async function admitOwner(db: D1Database, actor: string, now: number): Pr
 
 /** The actor ID the cookie carries under a valid signature, before any lookup. */
 export async function claimedActor(c: Context<Api>): Promise<string | null> {
-  return (await getSignedCookie(c, c.env.ACTOR_KEY, COOKIE, 'host')) || null;
+  const actor = await getSignedCookie(c, c.env.ACTOR_KEY, COOKIE, 'host');
+  return typeof actor === 'string' && actor !== '' ? actor : null;
 }
 
 export async function issueCookie(c: Context<Api>, actor: string): Promise<void> {

@@ -206,9 +206,10 @@ describe('GET /api/previews/:pair/:side', () => {
     expect(response.status).toBe(409);
     expect(await response.json()).toEqual({ error: 'stale_pair' });
     expect(replacement).toEqual(expect.any(String));
-    expect((await htmlPair(from)).id).toBe(replacement);
+    const pair = await htmlPair(from);
+    expect(pair.id).toBe(replacement);
     for (const side of ['a', 'b']) {
-      const preview = await call(from, 'GET', `/previews/${replacement}/${side}`);
+      const preview = await call(from, 'GET', `/previews/${pair.id}/${side}`);
       expect(preview.status).toBe(200);
       expect(await preview.text()).toContain('<title>New ');
     }
