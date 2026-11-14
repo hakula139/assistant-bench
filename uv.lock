@@ -609,7 +609,7 @@ wheels = [
 
 [[package]]
 name = "fastapi"
-version = "0.162.7"
+version = "0.163.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "annotated-doc" },
@@ -620,9 +620,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "typing-inspection" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ea/82/6b9764e52f89a8aaf68a5005093bcb8fdcadcb6ba30571def786c0d3bfc0/fastapi-0.162.7.tar.gz", hash = "sha256:b7503029c8ef2d2d5fea9049294cf8d0f2805c6621f4677ede269fce19f01efb", size = 535511, upload-time = "2026-11-13T17:47:18.517Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f1/98/5411252e1c08bdd919c5d55774cebe9da0bebfb174c4e4ffa1a5821935ff/fastapi-0.163.0.tar.gz", hash = "sha256:ef55fa066d74b922aac7231af7869c4469b88ca00cac5d0421e42ceee213a902", size = 543109, upload-time = "2026-11-14T16:53:16.356Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a0/49/2d76050f652082f1435f34a8ac9af6207b9aed8b81cde42e0bb121fa7c5a/fastapi-0.162.7-py3-none-any.whl", hash = "sha256:fa3be857122ec8d91d4d234e86ac19acf4ef23f5c6c3dfcce78ec0c27c0c5ab4", size = 152411, upload-time = "2026-11-13T17:47:16.598Z" },
+    { url = "https://files.pythonhosted.org/packages/de/b0/2d68e967b2fc6012ef1e7e91253c8222a2a895a45dee3677562deb93987e/fastapi-0.163.0-py3-none-any.whl", hash = "sha256:7572550ab4935e3ff373dc0191aea410d6c48127cc5477bc290b992fe539e345", size = 154381, upload-time = "2026-11-14T16:53:14.67Z" },
 ]
 
 [[package]]
@@ -1036,11 +1036,11 @@ wheels = [
 
 [[package]]
 name = "justhtml"
-version = "3.17.0"
+version = "3.17.1"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/87/78/42acc877d9e662a3ead17cfb8d26a06eb70e905d5fbe7e2467e789db7bc1/justhtml-3.17.0.tar.gz", hash = "sha256:e7f8dd96e6da5c2683a3fa7596bf831ed00753a1969f735190d6a5e587986e5c", size = 986429, upload-time = "2026-11-09T22:10:18.621Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/1d/44/9aa491139db1e708b2bbe971d0d39e75267e96b7813e72cc80e7b9242dca/justhtml-3.17.1.tar.gz", hash = "sha256:6cd82e832562dc4e1bfaa4ec605ea7bbb3abd9d7862ad93e45b2d2972d3f3088", size = 986209, upload-time = "2026-11-14T10:37:53.796Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/94/f7/7d55736b50b15d8cf30b99f5ec2f4468aaf183bd288a614bb74b66fed4dc/justhtml-3.17.0-py3-none-any.whl", hash = "sha256:d26eef6793856a229323463b50d8c054769abab804462eda1ec90aad24ca52ef", size = 177199, upload-time = "2026-11-09T22:10:16.894Z" },
+    { url = "https://files.pythonhosted.org/packages/46/f5/1464ed99b632f2497a1a4bd32df72965914b37611007ab9e00f084a022ff/justhtml-3.17.1-py3-none-any.whl", hash = "sha256:91f9840a44231cbf5af8fa420d5a8b80635c5d77b9c897a4b22a9c78b93d44e3", size = 177383, upload-time = "2026-11-14T10:37:51.93Z" },
 ]
 
 [[package]]
