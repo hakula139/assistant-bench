@@ -12,7 +12,7 @@ export function stubPlotFrame(width = 600) {
       observe() {
         this.callback([{ contentRect: { width } } as ResizeObserverEntry], this as never);
       }
-      disconnect() {}
+      disconnect = vi.fn();
     },
   );
   Object.defineProperty(document, 'fonts', {

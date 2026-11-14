@@ -1,7 +1,9 @@
 import { env } from 'cloudflare:workers';
-import { describe, expect, test } from 'vitest';
+import { generateSignedCookie } from 'hono/cookie';
+import { assert, describe, expect, test, vi } from 'vitest';
 
-import { network } from './actors';
+import { ipTag, network } from './actors';
+import { app } from './index';
 import { ACTOR_MAX_AGE_MS } from './limits';
 import { actorOf, admitted, browser, call, stubSiteverify, WRITING } from './test/support';
 
@@ -88,6 +90,29 @@ describe('POST /api/actors', () => {
 });
 
 describe('admission', () => {
+  test('rate limits a signed empty actor cookie by its network', async () => {
+    const from = browser();
+    assert(env.ACTOR_KEY !== undefined);
+    const cookie = await generateSignedCookie('__Host-bench-actor', '', env.ACTOR_KEY, {
+      secure: true,
+      path: '/',
+    });
+    const limit = vi.fn(() => Promise.resolve({ success: true }));
+
+    const response = await app.request(
+      `/api/pair?family=${WRITING}`,
+      { headers: { 'Cookie': cookie, 'CF-Connecting-IP': from.ip } },
+      { ...env, RATE_LIMIT: { limit } },
+    );
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({
+      error: 'admission_required',
+      sitekey: env.TURNSTILE_SITEKEY,
+    });
+    expect(limit).toHaveBeenCalledExactlyOnceWith({ key: await ipTag(env.IP_TAG_KEY, from.ip) });
+  });
+
   test.each([
     ['no cookie', () => Promise.resolve(browser())],
     [

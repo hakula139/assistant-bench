@@ -2,7 +2,7 @@ import { env } from 'cloudflare:workers';
 import { Hono } from 'hono';
 import { setSignedCookie } from 'hono/cookie';
 import { exportJWK, generateKeyPair, SignJWT, UnsecuredJWT, type JWK } from 'jose';
-import { beforeAll, describe, expect, test, vi } from 'vitest';
+import { assert, beforeAll, describe, expect, test, vi } from 'vitest';
 
 import type { PairState } from '@/lib/arena';
 
@@ -514,7 +514,8 @@ describe('private request admission', () => {
     const pair = await (
       await fixture.send('/api/pair?family=html-fixture', assertion, { cookie })
     ).json<PairState>();
-    const path = `/api/previews/${pair.pair?.id}/a`;
+    assert(pair.pair !== null);
+    const path = `/api/previews/${pair.pair.id}/a`;
 
     const success = await fixture.send(path, assertion, { cookie });
     const missingCookie = await fixture.send(path, assertion);

@@ -43,7 +43,7 @@ describe('gateRule', () => {
     ['a lower bound alone', { min_chars: 1200 }, 'shorter than 1,200'],
     ['an upper bound alone', { max_chars: 800 }, 'longer than 800'],
   ])('names %s with its unit on the same line', (_, gates, length) => {
-    expect(gateRule(config({ gates }))).toBe(rule(`blank, cut off, or ${length} characters`));
+    expect(gateRule(config({ gates }))).toBe(rule(`blank, cut off, or ${length}\u00a0characters`));
   });
 
   test('names only blank and cut-off outputs when the family sets no gates', () => {

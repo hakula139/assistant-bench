@@ -205,7 +205,7 @@ export function useVoteSession() {
   };
 
   const start = (name: string) => {
-    history.replaceState(null, '', `?${new URLSearchParams({ [FAMILY_PARAM]: name })}`);
+    history.replaceState(null, '', `?${new URLSearchParams({ [FAMILY_PARAM]: name }).toString()}`);
     setFamily(name);
     void act(() => load(name, { restore: true }));
   };
