@@ -24,7 +24,7 @@ The [fingerprint check](../conventions/ci.md#checks), `bench fingerprints`, fail
 
 A local `bench run` refuses the same mismatch before Harbor starts, even when the system has no trials yet. It also refuses each selected system whose earlier trials recorded another fingerprint under the family's harness, naming both and requiring a new system name. Every output also records the nixos-config rev it ran under.
 
-Closed reports freeze each public label and output fingerprint in `Report.systems`, including unranked entrants. A retired system can carry its latest prior identity into a new report only when known fingerprints match. Unknown provenance remains null and cannot prove retired continuity. Display-name changes affect only later reports. [Reports](reports.md#frozen-identity) defines these checks.
+[Reports](reports.md#frozen-identity) owns frozen public identities. A retired system can carry its latest prior identity into a new report only when known fingerprints match. Unknown provenance remains null and cannot prove retired continuity.
 
 ### Model Swaps
 
@@ -57,7 +57,7 @@ Terminus routes Chat Completions through LiteLLM under an `openai/` prefix, whic
 
 A single-call response that exhausts its allowance, refuses, or fails remains an incomplete attempt, while Terminus keeps Harbor's output-length handling, which salvages or re-requests a truncated turn. Neither harness retries for quality. Thinking blocks, signatures, and reasoning items stay in private artifacts and conversation state, outside model-visible user text and public outputs. Harbor owns the terminal command loop, its context management, and summarization.
 
-Every harness validates reported token counters through one accounting boundary, so an invalid or missing required count leaves tokens and cost unknown, while a reported zero stays zero. Each real inference request needs a durable admission before network I/O and a confirmed terminal receipt before its result returns. The ledger retains admitted requests when a later turn fails, including requests with unknown usage. Collection uses the price frozen before execution and prices cache reads and writes separately. Cost stays unknown when nonzero cache writes lack a declared price. The native clients add no cache breakpoints.
+Every harness validates reported token counters through one accounting boundary, so an invalid or missing required count leaves tokens and cost unknown, while a reported zero stays zero. Each real inference request needs a durable admission before network I/O and a confirmed terminal receipt before its result returns. The ledger retains admitted requests when a later turn fails, including requests with unknown usage. [Running](../guide/running.md#spend-and-budgets) owns pricing and estimation. The native clients add no cache breakpoints.
 
 Installed agents use Harbor's native command loop, context management, session logs, and ATIF trajectory conversion. Their CLI release and generation options enter the fingerprint with the locked Harbor version. The host downloads the target architecture's Linux executable into the data directory's `agents/` cache, verifies the vendor's published SHA-256, and uploads it into the container without changing the task image or its install-time network access. Trial metadata records the executable's SHA-256.
 

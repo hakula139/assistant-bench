@@ -6,21 +6,21 @@ Conventions for the site under `web/` that the tooling doesn't already state.
 
 ```text
 web/src/
-├── components/boards/                      # The hydrated boards, plus the tables their pages share
-├── components/charts/                      # Observable Plot charts and their table twins
-├── components/scorers/                     # The scorer registry and each scorer's board, home panel, and methodology section
-├── components/site/                        # Shared page composition, navigation, terminology, and static plots
-├── components/ui/                          # shadcn/ui copies
-├── components/vote/                        # The vote island
-├── content.config.ts                       # The families, reports, and public systems collections
-├── env.d.ts                                # The shape of .astro modules for plain TypeScript and ESLint
-├── integrations/voting.ts                  # Injects the vote route
-├── layouts/                                # The page shell
-├── lib/                                    # Schemas, domain helpers, presentation rules, and vote API client
-├── pages/                                  # Public routes only
-├── styles/global.css                       # Tokens, fonts, and the shadcn/ui and chart variables
-├── test/                                   # The fixture, JSON Schema, chart stub, score track, and vote pair helpers, and the page, built-site, and Wrangler config tests
-└── vote/vote.astro                         # The vote page, routed by the integration
+├── components/boards/       # The hydrated boards, plus the tables their pages share
+├── components/charts/       # Observable Plot charts and their table twins
+├── components/scorers/      # The scorer registry and each scorer's board, home panel, and methodology section
+├── components/site/         # Shared page composition, navigation, terminology, and static plots
+├── components/ui/           # shadcn/ui copies
+├── components/vote/         # The vote island
+├── content.config.ts        # The families, reports, and public systems collections
+├── env.d.ts                 # The shape of .astro modules for plain TypeScript and ESLint
+├── integrations/voting.ts   # Injects the vote route
+├── layouts/                 # The page shell
+├── lib/                     # Schemas, domain helpers, presentation rules, and vote API client
+├── pages/                   # Public routes only
+├── styles/global.css        # Tokens, fonts, and the shadcn/ui and chart variables
+├── test/                    # The fixture, JSON Schema, chart stub, score track, and vote pair helpers, and the page, built-site, and Wrangler config tests
+└── vote/vote.astro          # The vote page, routed by the integration
 ```
 
 ## Comments

@@ -21,19 +21,19 @@ Every case belongs to one category, which the per-category leaderboards split on
 
 The site labels these categories Reply, Message, Docs, Fiction, Essay, and Review from its glossary.
 
-The counts include the held-out cases, so each family has 59: 42 committed and 17 held-out.
+The counts include held-out cases.
 
 Most instructions supply the material a reply must use and ask for that material alone, so a vote can weigh fidelity, register, and structure on equal content. Many cases make that material hard to use as given: sources that conflict or have gone stale, a question resting on a false premise, a decisive detail buried in a longer context, or author notes that contradict the code they describe. Their checklists name what the reply must reconcile, correct, or flag.
 
 Cases that explain a concept fix the reader and the length, and most leave the content to the model. Fiction, essay, and review instructions specify a point of view or required beats, with length bands where needed. Their checklists follow the brief.
 
-A review case supplies the material on its invented work. Personal essays use fictional narrators. One essay in each language asks the writer to engage a well-known concept from a named thinker, and its checklist checks that the concept is used accurately. The thinker essays ban quoting the thinker beyond the concept's own name, and ban inventing quotations.
-
 Voters can optionally tag missed requirements, incorrect facts, unclear writing, unsuitable tone, language errors, formulaic prose, and excessive length, in that order. These tags describe the comparison and do not change the vote's weight. Fictional invention is allowed unless it contradicts supplied material or presents invented evidence as fact.
 
 ## Case Sourcing
 
-The committed `cases.toml` of each family holds 42 synthetic cases. The data directory's `cases/<family>.toml` holds 17 more, about 30% of each family, as synthetic `held-out` cases that keep the leaderboard from being fit to the public set. A `transcript` case drawn from the owner's real tasks belongs there too, as [Data](../../conventions/data.md#data-classes) describes. A committed case derived from such a task keeps only its scenario type, never its text.
+Each family has 59 cases: 42 synthetic cases in its committed `cases.toml` and 17 synthetic `held-out` cases in the private repository, about 30% of the family. Held-out cases keep the leaderboard from being fit to the public set. A `transcript` case drawn from the owner's real tasks also belongs in the private repository, as [Data](../../conventions/data.md#data-classes) describes. A committed case derived from such a task keeps only its scenario type, never its text.
+
+Gemini 4 Argon (`gemini-4-argon-high`) drafts the instructions of the writing cases, committed and held-out, from a brief that gives each case's purpose, traps, and checklist. Another model checks each draft and fixes only factual errors, broken traps, and Markdown problems.
 
 Chinese cases are written in Chinese and keep code, paths, and commands in their original form. Code-comment cases in `writing-zh` ask for Chinese comments.
 
@@ -61,7 +61,7 @@ The script gate works per character, using the CC-CEDICT character sets that zho
 
 ## Gate Verdicts
 
-`gate_failures` is the verdict the arena reads from each record of `outputs/<family>.jsonl`:
+The arena reads `gate_failures` from each output in a sealed D1 collection generation, as [Data](../../conventions/data.md#the-data-directory) describes:
 
 | Value      | Meaning                                                                                                               |
 | ---------- | --------------------------------------------------------------------------------------------------------------------- |

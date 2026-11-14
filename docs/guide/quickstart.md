@@ -12,6 +12,8 @@ Set up a checkout and run the two smoke families.
 
 ## Setup
 
+Run setup in each new checkout or worktree:
+
 ```bash
 nix develop                                     # Dev shell with uv, Node.js, and the hooks
 uv sync                                         # Virtualenv with Harbor and the bench
@@ -20,6 +22,17 @@ cp .env.example .env                            # Then fill in the endpoint vari
 ```
 
 If you use [direnv](https://direnv.net), run `direnv allow` once so `.envrc` loads the dev shell whenever you enter the repository.
+
+### Site Verification
+
+On each host, and after updating Playwright, install the site's test browser inside the dev shell:
+
+```bash
+pnpm \
+  --filter web \
+  exec playwright install \
+    --only-shell chromium
+```
 
 ## The Smoke Families
 

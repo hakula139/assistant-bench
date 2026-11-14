@@ -4,15 +4,7 @@ The arena shows blind pairs of outputs from a family scored by votes and records
 
 ## Publication and Closing
 
-The `bench` process publishes outputs to a vote store and reads votes back through Cloudflare's D1 REST API, one statement per request. `web/wrangler.toml` names the account and each target's database, and `.env` names the [credential source](../guide/running.md#voting).
-
-```bash
-uv run bench arena prepare writing-zh production
-uv run bench arena inspect <publication-id>
-uv run bench arena publish production <publication-id>
-uv run bench arena status production writing-zh
-uv run bench close writing-zh
-```
+The `bench` process publishes outputs to a vote store and reads votes back through Cloudflare's D1 REST API. [Running](../guide/running.md#voting) covers credentials and the publication procedure. `web/wrangler.toml` names the account and each target's database.
 
 Production votes on the public and synthetic cases of a family that sets `public_voting`. Every other case is voted in the private cloud store. `bench close` combines both stores. `prepare` pins the family's sealed output collection and reconstructs its recorded family, cases and system names, keeps the listed systems' outputs for the selected target, and stages the normalized publication in private D1. A production preparation requires `public_voting`. `inspect` reconstructs the prepared publication and renders its instruction, checklist, passing outputs under system names, and failing or ungraded outputs with gates from the pinned collection. Reviewing this listing and publishing its exact ID approves it.
 
@@ -61,17 +53,19 @@ Production D1 holds public votes. Staging has a separate D1 database for validat
 
 `pair_vote_counts` holds counted votes per family and unordered system pair. SQL triggers maintain these counts atomically when votes are inserted, withdrawn, excluded or restored, so coverage and freshness reads scale with the number of system pairs.
 
-`publication_pair_cases` holds the immutable eligible case keys per publication and unordered system pair. Pair requests read these facts to filter the browser's completed comparisons and count what remains, then read passing sample metadata only for the chosen case and systems. A pending-pair reload reads no sample metadata.
+`publication_pair_cases` materializes eligible cases per publication and system pair, so pair selection reads sample metadata only for the chosen comparison. A pending-pair reload reads no sample metadata.
 
 ## Private Voting
 
-Prepare a private publication with `bench arena prepare <family> private`, review it with `inspect`, and activate it with `bench arena publish private <id>`. The private Worker serves the same vote API behind its configured access policy. Its D1 database and signing keys persist independently of the execution checkout. Cases retain their actual source and the coarse split `public`, `held-out` or `private` in the store.
+The private Worker serves the same vote API behind its configured access policy, using the [private publication procedure](../guide/running.md#private-voting). Its D1 database and signing keys persist independently of the execution checkout. Cases retain their actual source and the coarse split `public`, `held-out` or `private` in the store.
 
 ## Moderation
 
-Each vote row keeps its browser's actor ID, a keyed tag of its network and `elapsed_ms`, the time the voting Worker measured from issuing the pair to recording the vote. A tag is a digest of the network address under a key only the Worker holds, so `bench arena votes` lists tags as opaque handles and the owner selects one by copying it. The listing reads a family's votes in keyset pages and aggregates them in the `bench` process, which keeps the medians out of SQL.
+Each vote row keeps its browser's actor ID, a keyed tag of its network and `elapsed_ms`, the time the voting Worker measured from issuing the pair to recording the vote. A tag is a digest of the network address under a key only the Worker holds, so `bench arena votes` lists tags as opaque handles and the owner selects one by copying it.
 
-`exclude` and `restore` are each one `UPDATE` of the `exclusion` column, selected by family and by one tag, one actor or a list of vote IDs bound as a single JSON parameter. A null `exclusion` means counted. Excluding skips votes already excluded, so each keeps its first reason, and the reported count is the votes that changed. The update covers only the votes recorded when it runs and blocks nothing, so later votes from the same tag or actor count until excluded too. An excluded vote stays in the store and keeps its comparison in `votes_comparison`, so its browser cannot vote that comparison again, while the cut, `status` and the round count it apart from the counted votes. The browser's vote count includes its excluded votes, so the page shows no exclusion. Undo passes over excluded votes and never withdraws one, so only an exclusion inside the [undo window](#vote-api) can show, as Undo turning unavailable or restoring the browser's earlier pair. A closed report keeps its votes until the next `bench close`, which counts the excluded ones in `dropped_votes`.
+`exclude` and `restore` each atomically update existing votes selected by family and one tag, one actor or a list of vote IDs. Excluding skips votes already excluded, preserving their first reason, and reports how many changed. The update covers only votes recorded when it runs, so later votes from the same tag or actor count until excluded too.
+
+An excluded vote stays in the store and keeps its comparison, so its browser cannot vote that comparison again. The cut, `status` and round distinguish excluded votes from counted votes, while the browser's vote count includes both and shows no exclusion. Undo passes over excluded votes and never withdraws one, so only an exclusion inside the [undo window](#vote-api) can show, as Undo turning unavailable or restoring the browser's earlier pair. A closed report keeps its votes until the next `bench close`, which counts the excluded ones in `dropped_votes`.
 
 Speed, minority preferences and disagreement with the owner are signals to investigate, and none alone is a reason to exclude. No vote is excluded automatically or for its outcome alone.
 

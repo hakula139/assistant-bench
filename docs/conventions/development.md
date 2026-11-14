@@ -2,7 +2,7 @@
 
 ## Dev Shell
 
-The dev shell provides uv, Node.js, and pnpm, installs the pre-commit hooks, and exports `BENCH_NIXOS_CONFIG`, described [below](#the-nixos-config-input). [Quickstart](../guide/quickstart.md#setup) sets up a checkout, and [`AGENTS.md`](../../AGENTS.md#rules-for-every-change) lists the steps every new checkout and host needs.
+The dev shell provides uv, Node.js, and pnpm, and exports `BENCH_NIXOS_CONFIG`, described [below](#the-nixos-config-input). Follow [Quickstart](../guide/quickstart.md#setup) to set up a checkout and its test browser.
 
 The root Python project contains the `assistant_bench` CLI, and `uv sync` installs its dependencies with the `dev` group. The voting Worker is TypeScript in `web/worker/`, which `web/wrangler.toml` configures and the `web` package's Wrangler deploys.
 
@@ -12,7 +12,7 @@ The project supports Python 3.14, selected by `.python-version` and bounded by t
 
 ## Pre-Commit Hooks
 
-Entering the dev shell installs the hooks that `flake.nix` enables, and `nix develop -c run-hooks` runs them on every file. basedpyright and pytest stay out of them because they take longer. mypy and Prettier, with its Astro and Tailwind plugins, run from the lockfiles, so a new checkout runs `uv sync` and `pnpm install` before its first commit.
+`flake.nix` enables devkit's [pre-commit hooks](https://github.com/hakula139/devkit/blob/v3/docs/hooks.md). [`AGENTS.md`](../../AGENTS.md#verification) lists the checks outside the hooks. mypy and Prettier, with its Astro and Tailwind plugins, run from the lockfiles.
 
 The authored task applications, reference solutions and hidden tests follow the host code's formatting and spelling too. Deliberately wrong variants are unformatted, untyped patches, and the root verifier test requires each one to fail on an assertion.
 
