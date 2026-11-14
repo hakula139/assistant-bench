@@ -297,12 +297,7 @@ class TestEndpoint:
             for name, value in environment.items():
                 monkeypatch.setenv(name, value)
             configured = Endpoint.read(environment.get, api)
-            system = make_system(
-                api=api,
-                thinking_mode='anthropic-adaptive'
-                if api == 'anthropic-messages'
-                else None,
-            )
+            system = make_system(api=api)
             family = load_family('smoke-text')
             tasks = render_tasks(
                 family,

@@ -1,10 +1,13 @@
 """The kwargs each harness builds from a system's generation identity."""
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
-from assistant_bench.catalog import Api, SystemIdentity, ThinkingMode
+from assistant_bench.catalog import Api, SystemIdentity
+
+
+ThinkingMode = Literal['anthropic-adaptive']
 
 
 class ApiOptions(BaseModel):
@@ -12,16 +15,19 @@ class ApiOptions(BaseModel):
     thinking_mode: ThinkingMode | None = None
 
 
+def _thinking_mode(identity: SystemIdentity) -> dict[str, ThinkingMode]:
+    if identity.api != 'anthropic-messages':
+        return {}
+    return {'thinking_mode': 'anthropic-adaptive'}
+
+
 def generate(identity: SystemIdentity) -> dict[str, Any]:
-    values: dict[str, Any] = {
+    return {
         'api': identity.api,
         'effort': identity.effort,
         'system_prompt': identity.prompt,
         'max_output_tokens': identity.max_output_tokens,
-    }
-    if identity.api == 'anthropic-messages':
-        values['thinking_mode'] = identity.thinking_mode
-    return values
+    } | _thinking_mode(identity)
 
 
 def terminus(identity: SystemIdentity) -> dict[str, Any]:
@@ -32,9 +38,7 @@ def terminus(identity: SystemIdentity) -> dict[str, Any]:
             'max_output_tokens': identity.max_output_tokens,
         },
         'record_terminal_session': False,
-    }
-    if identity.api == 'anthropic-messages':
-        values['thinking_mode'] = identity.thinking_mode
+    } | _thinking_mode(identity)
     if identity.api == 'openai-chat-completions':
         values['llm_call_kwargs'] = {
             'max_completion_tokens': identity.max_output_tokens

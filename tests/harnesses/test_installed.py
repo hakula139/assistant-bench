@@ -46,7 +46,6 @@ class TestInstalled:
         claude = agent_type is ClaudeCode
         system = make_system(
             api='anthropic-messages' if claude else 'openai-responses',
-            thinking_mode='anthropic-adaptive' if claude else None,
             harness='claude-code' if claude else 'codex',
             version='1.2.3',
         )
@@ -100,7 +99,6 @@ class TestInstalled:
             api=api,
             harness=harness,
             version='1.2.3',
-            thinking_mode='anthropic-adaptive' if harness == 'claude-code' else None,
         )
         payload = message() if harness == 'claude-code' else response()
         event = {'type': 'response.completed', 'response': payload}
@@ -195,7 +193,6 @@ class TestInstalled:
         claude = agent_type is ClaudeCode
         system = make_system(
             api='anthropic-messages' if claude else 'openai-responses',
-            thinking_mode='anthropic-adaptive' if claude else None,
             harness='claude-code' if claude else 'codex',
             version='1.2.3',
         )

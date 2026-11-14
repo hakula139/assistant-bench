@@ -6,7 +6,8 @@ from assistant_bench.harnesses import options
 from support import make_system
 
 
-MESSAGES = {'api': 'anthropic-messages', 'thinking_mode': 'anthropic-adaptive'}
+MESSAGES = {'api': 'anthropic-messages'}
+MESSAGES_KWARGS = MESSAGES | {'thinking_mode': 'anthropic-adaptive'}
 
 
 class TestGenerate:
@@ -33,7 +34,7 @@ class TestGenerate:
             ),
             (
                 MESSAGES | {'effort': 'high'},
-                MESSAGES
+                MESSAGES_KWARGS
                 | {'effort': 'high', 'system_prompt': None, 'max_output_tokens': 64},
             ),
         ],
@@ -91,7 +92,7 @@ class TestTerminus:
             ),
             (
                 MESSAGES | {'effort': 'high'},
-                MESSAGES
+                MESSAGES_KWARGS
                 | {
                     'model_info': {'max_input_tokens': 8128, 'max_output_tokens': 64},
                     'reasoning_effort': 'high',

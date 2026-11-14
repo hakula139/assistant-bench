@@ -31,10 +31,10 @@ model = "deepseek-v4.1-flash"
 effort = "high"
 display_name = "DeepSeek V4.1 Flash 1017 · High"
 
-["kimi-k3-high"]
-model = "kimi-k3"
+["kimi-k3.1-pro-high"]
+model = "kimi-k3.1-pro"
 effort = "high"
-display_name = "Kimi K3 · High"
+display_name = "Kimi K3.1 Pro · High"
 
 ["opus-5.5-high-nixos"]
 model = "claude-opus-5-5"
@@ -75,11 +75,11 @@ effort = "high"
 prompt = "nixos-config:claudeCode"
 display_name = "DeepSeek V4.1 Flash 1017 · High · Instructions"
 
-["kimi-k3-high-nixos"]
-model = "kimi-k3"
+["kimi-k3.1-pro-high-nixos"]
+model = "kimi-k3.1-pro"
 effort = "high"
 prompt = "nixos-config:claudeCode"
-display_name = "Kimi K3 · High · Instructions"
+display_name = "Kimi K3.1 Pro · High · Instructions"
 
 ["opus-5.5-claude-code-high"]
 model = "claude-opus-5-5"
