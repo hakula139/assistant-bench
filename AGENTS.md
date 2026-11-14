@@ -1,16 +1,6 @@
 # AGENTS.md: assistant-bench
 
-assistant-bench publishes leaderboards for AI models and agents, ranked through public blind pairwise voting or automated tests. Every system in a family receives the same instruction. [Harbor](https://github.com/harbor-framework/harbor) runs every family, while the `bench` command renders cases, runs Harbor jobs, and collects their trials.
-
-This file specifies the rules for every change and points to the conventions for each area. `README.md` covers the project for users, while [`docs/`](docs/) contains the guides, conventions, design, and research.
-
-```bash
-uv run bench check                               # Validate every family and its reference solutions
-uv run bench run --system <name>                  # Generate a system's missing trials
-uv run bench arena prepare writing-zh private    # Prepare private voting from collected outputs
-uv run bench arena status production writing-zh  # Inspect the published voting family
-uv run bench close writing-zh                    # Close a voted round from the production votes
-```
+Read the area conventions below before editing. [Documentation](docs/README.md) covers setup, operation and design.
 
 ## Project Layout
 
@@ -48,10 +38,8 @@ The tree lists only the top-level entries whose names leave their purpose unclea
 
 - Follow [Quickstart](docs/guide/quickstart.md#setup) for checkout and browser setup, and never bypass the pre-commit hooks.
 - Run the [verification](#verification) block before review.
-- Add new words to `.cspell/words.txt`, as `cspell` scans Python sources too.
 - Commit only synthetic or public cases to this repository. Keep transcript-derived and held-out cases and trial artifacts in the private repository, and runtime state and outputs in private D1, as [Data](docs/conventions/data.md) describes.
 - Keep internal hostnames, the endpoint's operator and product names, its specific headers, registry mirrors, tokens, and local paths out of committed files, fixtures, log lines, issues, and PRs. Configure endpoint-specific headers through the inputs in [Running](docs/guide/running.md#the-model-endpoint), and committed text calls the endpoint an OpenAI-compatible endpoint configured in `.env`.
-- Keep lockfiles and requirements files throughout the repository, including `families/`, on public registries, with `pyproject.toml` naming PyPI and `.npmrc` naming npm.
 - Name a key file by path in `.env`, and never put a key value in `.env`, a fixture, a log line, or a Harbor job config. Harbor writes each agent's `kwargs` and `env` into the job's `config.json`, so a secret reaches an agent only through a file one of those values names.
 - In docs, issues, and PRs, name systems by their `systems.toml` table names, which are public model names plus a suffix naming a variant's prompt or effort, or the model's snapshot. Routes and channel IDs stay in `systems.toml`, the nixos-config export, and private records.
 - Only `bench close` writes under `reports/`, and a report holds aggregates under public system names alone.

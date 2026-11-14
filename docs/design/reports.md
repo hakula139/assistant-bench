@@ -10,17 +10,13 @@ Voted closure uses each cut's publication facts, frozen labels and associated ou
 
 ## Frozen Identity
 
-`Report` holds `family`, `round`, `closed_at`, `systems` and `results`. `systems` maps exactly every ID referenced by the results to its public `display_name` and output `fingerprint`. An unknown fingerprint stays null. Standing rows reference this shared identity map. A historical round's labels and fingerprints never depend on today's catalog.
+A historical round freezes every referenced system's public label and output fingerprint. An unknown fingerprint stays null. Historical identity never depends on today's catalog.
 
 Voted systems get labels, fingerprints and the reference from the publication the closing cut read. Test-scored systems get labels from the catalog names frozen by collection and fingerprints from that generation's outputs. A known fingerprint that differs from the one an earlier report froze under the same ID fails closure, while display names may change between rounds.
 
 ## Results
 
-`CheckersResults` records strict case pass rates and exact intervals, response and error counts, categories, the leader decision, applicable-rule diagnostics, and descriptive bare / prompted effects with nullable paired bootstrap intervals. It publishes only aggregates under system names. The grader revision identifies the collected checks independently of generation fingerprints.
-
-`VotesResults` records standings, score intervals and ranks, the fit and preliminary rules, the leader decision, and each store's cutoff and counted votes. Its aggregates cover human participation, output quality, measured usage, head-to-head results and categories.
-
-`TestsResults` records samples per task, task and trial counts, errors, pass rates and their 95% intervals, pass^k, cost, latency, categories and the leader decision.
+The [schema](../../src/assistant_bench/report.py) defines each scorer's aggregates. The grader revision identifies collected checks independently of generation fingerprints.
 
 Preliminary markers are derived from each round's interval widths and recorded rule. In a head-to-head row, `wins`, `losses`, `ties` and `both_bad` are raw counts, while `win_rate` uses actor weights. [Ranking](ranking.md) defines the fit, the score intervals and the votes leader decision, and its [test pass rates](ranking.md#test-pass-rates) define the tests intervals and leader decision.
 
@@ -28,4 +24,4 @@ Each round's output inventory determines its measurement denominators. Cost, lat
 
 ## Publication Boundaries
 
-Reports contain no case ID, instruction, output, route, request ID or session. Their only identifiers are categories, public system IDs, labels and configuration fingerprints. New scorers add a results variant, a closing arm and site views, as [Architecture](architecture.md#families-and-scorers) describes.
+Reports contain no case ID, instruction, output, route, request ID or session. Their only identifiers are categories, public system IDs, labels and configuration fingerprints. [Architecture](architecture.md#families-and-scorers) describes adding a scorer.

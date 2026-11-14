@@ -6,29 +6,25 @@ The site under `web/` has two views built from one Astro project and one compone
 
 The site lists only families with `public = true` and their reports. Before its first round closes, a family shows unmeasured systems under their current display names. Closed rounds use their own frozen public identities. Titles and meta tags use full family names. The build rejects incomplete report metadata, public family IDs without their aspect prefix, and reports scored by another scorer than their family's.
 
-A board lives at `/<aspect>/<slug>/`, where the slug is the family ID after its aspect prefix, so only a family rename moves it. The board's path shows the latest round, and each closed round keeps its own page at `/<aspect>/<slug>/rounds/<round>/`, so a family page carries only the round it shows however many rounds close. Every board page links all its rounds by static links, which carry the query string once the page loads, so the board's filters hold on the next round. The home page groups boards under their aspects at `/#<aspect>`. Family pages link sibling boards, and a system page links its family, the round it shows, and the same system's pages on sibling boards.
+A board's path shows its latest round, while each closed round keeps a permanent page. Round links preserve filters. Family pages link sibling boards, and system pages link appearances across those boards.
 
 Each board uses the shared scorer and render registries for steps, labels, and its methodology link. Captions explain the family's configuration, and legends show only marks the figure draws. Definitions open by tap, click, or Enter. A fallback anchor's definition names the reference it stands in for.
 
-A votes board shows one round, with its category filter kept in the URL. The category filter shows each category's label while the URL keeps its ID:
-
-- **Leaderboard:** a sortable table with point scores and their intervals on one shared axis. Preliminary systems use hollow dots, derived from that round's interval widths and threshold, and a note below names the leader and the systems its test cannot separate from it. Category refits carry no interval, so their points are always hollow. The axis begins at most 600 points below the top score and represents clipped points with arrowheads. A category selection uses its refit and labels family-wide columns. When a round's outputs have test rewards, a family-wide pass rate with its 95% interval replaces the gate-failure column. Unranked systems follow by name.
-- **Categories:** point plots share an axis starting at the lowest of their own cuts, and follow the family's declared category order. Rows follow the family board's order, followed by systems ranked only in that category.
-- **Cost and latency:** point scores against mean cost per output and p50 latency, with a labelled Pareto frontier. Each metric uses a log axis when every value is positive and a linear axis when it includes zero. A chart without priced or timed systems is omitted.
+A votes board shows one round. Category selections refit its scores without intervals, mark them as preliminary, and distinguish family-wide measurements. The board identifies systems its leader test cannot separate. Chart axes share the comparison's scale and identify clipped points. Cost and latency charts label their Pareto frontier and omit unavailable measurements.
 
 Each system's page uses its latest appearance for its heading and results. Each history row retains its own label, fingerprint, reference, anchor, method and rules. Compare scores within one family's round because the anchor can change.
 
 A tests board shows pass rates with their 95% intervals on one axis from 0 to 100% and the [reported measurements](reports.md#results) in its table. A category selection, kept in the URL, shows that category's pass rates and task counts. A note names the leader and the systems its paired test cannot separate from it.
 
-Every chart has a table twin with the same values, and its tooltips use values the twin also shows. Static point plots are tables themselves. Token and latency ranges show observed output percentiles. Charts read colors from CSS variables so theme changes need no re-render.
+Every chart has a table twin with the same values, and its tooltips use values the twin also shows. Static point plots are tables themselves. Token and latency ranges show observed output percentiles.
 
 ## The Vote Page
 
-`/vote/` is emitted in every build. The page fetches pairs from the same-origin [vote API](arena.md#vote-api) at runtime, so no vote data enters a build. On public deployments, a browser the Worker has not admitted solves an interaction-only Turnstile challenge in place, whose frame the `/vote/*` rule in `web/public/_headers` allows. A private deployment verifies Cloudflare Access before serving any page, asset or API and admits its owner when serving `/vote/`. The owner's allowed login addresses share one persistent actor. Static previews without the API show an unavailable state.
+`/vote/` is emitted in every build. The page fetches pairs from the same-origin [vote API](arena.md#vote-api) at runtime, so no vote data enters a build. On public deployments, a browser the Worker has not admitted solves an interaction-only Turnstile challenge in place, whose frame the `/vote/*` rule in `web/public/_headers` allows. Turnstile is the page's only third-party content. A private deployment verifies Cloudflare Access before serving any page, asset or API and admits its owner when serving `/vote/`. The owner's allowed login addresses share one persistent actor. Static previews without the API show an unavailable state.
 
-The server keeps each browser's pending pair, and the tab keeps its draft in `sessionStorage`: the choice, issues, Markdown toggle, collapsed prompt and scroll offsets of that pair. A reload restores the draft only while the server still holds the same pair and never sends a vote. `sessionStorage` keeps two tabs' drafts apart and clears when the tab closes, so a shared device keeps no unsent choices.
+Each tab keeps its own draft only while the server still holds the same pair. Reloading never sends a vote, and closing the tab clears unsent choices on a shared device.
 
-The prompt and the checklist are separate because the model never saw the checklist. The pair's category label sits beside the prompt, with its definition on tap. Outputs scroll independently and render as text, diffs, or isolated HTML pages. Only text outputs use the side-by-side prompt layout on wide screens. HTML pages use a fixed responsive iframe viewport, and their internal scroll offsets cannot be restored by the parent page. [Voting](../guide/voting.md) owns the controls, shortcuts, and rendering options.
+The prompt and the checklist are separate because the model never saw the checklist. Outputs render as text, diffs, or isolated HTML pages. HTML pages use a fixed responsive iframe viewport, and their internal scroll offsets cannot be restored by the parent page. [Voting](../guide/voting.md) owns the controls, shortcuts, and rendering options.
 
 Nothing is preselected. Each new pair clears the previous control's focus so the next key acts as a shortcut. The page reveals no system identity, timing, or server error details beyond the API's message.
 
@@ -40,4 +36,4 @@ The remaining design uses ink text, one ultramarine accent, tabular numbers, and
 
 Lists of aspects and families must scale to many more entries, so none uses a fixed slot per entry. Visible copy stays minimal, with details in tooltips or popovers that a tap also opens.
 
-No paragraph ends on a lone word in any browser. The base style sets `text-pretty` and, where a browser lacks `pretty`, `text-balance` on text blocks, while headings, labels, and short notes that still end on one word take `text-balance` or tighter wording. Screenshot review catches orphans, so no test checks for them.
+Prevent paragraphs, headings, labels and short notes from ending on a lone word. Check screenshots in both themes and at phone and desktop widths, since automated layout metrics miss these orphans.

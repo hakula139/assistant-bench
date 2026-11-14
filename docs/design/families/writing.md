@@ -2,26 +2,7 @@
 
 `writing-zh` and `writing-en` measure how each system writes everyday prose in Chinese and in English when it receives the instruction alone, without a system prompt, from technical documents and messages to blog posts, essays, reviews, and fiction. Both are case families ranked through blind pairwise voting. They share the categories, sourcing, and gates below, differing in language and gate bounds.
 
-## Systems and Samples
-
-Both families send every case to the systems each [`family.toml`](../../../families/writing-zh/family.toml) lists, with high effort or its supported equivalent explicitly selected in `systems.toml`. [Systems](../systems.md#resolution) defines their completion and context allowances. Each case and system pair runs twice, so every vote can draw one of two samples. `gemini-3.8-flash-high` is the reference whose score anchors both boards at 1,000 when a round ranks it.
-
-## Categories
-
-Every case belongs to one category, which the per-category leaderboards split on:
-
-| Category  | The instruction asks for                                                                                             | Cases per family |
-| --------- | -------------------------------------------------------------------------------------------------------------------- | ---------------: |
-| `reply`   | An assistant's final reply after a task, or an answer to a teammate's decision or status question                    |                8 |
-| `message` | A commit message, PR description, issue or review reply, handoff, or announcement                                    |               14 |
-| `docs`    | Documentation, code comments where a maintainer needs them, or a concept explained, including in reply to a teammate |               21 |
-| `fiction` | A scene, dialogue, continuation, or letter                                                                           |                5 |
-| `essay`   | A personal or critical essay, blog post, project write-up, or tutorial for a general reader                          |                8 |
-| `review`  | A review or close reading of an invented work from supplied material                                                 |                3 |
-
-The site labels these categories Reply, Message, Docs, Fiction, Essay, and Review from its glossary.
-
-The counts include held-out cases.
+## What the Cases Measure
 
 Most instructions supply the material a reply must use and ask for that material alone, so a vote can weigh fidelity, register, and structure on equal content. Many cases make that material hard to use as given: sources that conflict or have gone stale, a question resting on a false premise, a decisive detail buried in a longer context, or author notes that contradict the code they describe. Their checklists name what the reply must reconcile, correct, or flag.
 
@@ -51,11 +32,7 @@ Every collection runs the gates on each output of a trial that finished without 
 
 The minimums sit below the shortest valid answer in each family, a commit message or a short chat reply, so they reject only near-empty output, and `writing-zh`'s is half of `writing-en`'s, since English takes about two to three times as many characters as Chinese for the same content. The maximums sit well above every length a case asks for, at about 3x the longest zh band and 2.4x the longest en band, so they catch only runaway output that stays under the token cap.
 
-The language gate parses the output as CommonMark with markdown-it-py and compares Han characters with Latin words in its natural language. It counts inline text and visible HTML prose, excluding inline code and the content of closed HTML `code`, `pre`, `script`, and `style` elements. An element left unclosed contributes its content, so a stray raw tag does not hide the prose after it. URLs, attributes, and markup comments do not contribute. A fence tagged `markdown`, `md`, `text`, or `txt` is parsed the same way.
-
-Every other fenced or indented code block contributes only its comments: the rest of a line after `#` and whitespace or after `//`, where the marker starts the line or follows whitespace, `/* */` blocks, and triple-quoted strings. Code-comment outputs are therefore judged by the language of their comments.
-
-An output with as many Han characters as Latin words, including one with neither, passes.
+The language gate compares Han characters with Latin words in visible prose and code comments. Code, URLs and markup do not determine the prose's language. A tie, including an output with neither, passes.
 
 The script gate works per character, using the CC-CEDICT character sets that zhon ships: a character fails when it is Traditional and never Simplified, unless the instruction also contains it, so an output may quote a Traditional name the case supplies. Because a failure is an automatic loss, the gate never flags a character valid in both scripts. It therefore misses Traditional text written only in such characters, which a phrase-level converter would catch, a gap that narrows with length because longer Traditional text rarely avoids every Traditional-only character.
 
@@ -68,5 +45,3 @@ The arena reads `gate_failures` from each output in a sealed D1 collection gener
 | `[]`       | The output passed every gate and is eligible for an approved public comparison                                        |
 | Gate names | The output failed those gates, which make it an automatic loss in each of its pairs, or both-bad when both sides fail |
 | `null`     | No verdict: a case trial errored, a task was ungraded, or the family's scorer has no gates                            |
-
-The names are the values of `families.Gate` and follow the gate order above. `scoring.gates.failed_gates` computes the same list for one output, and every collection prints the count of outputs that failed a gate and the failures by gate.

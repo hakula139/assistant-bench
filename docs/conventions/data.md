@@ -29,7 +29,7 @@ New runs and collections require a clean implementation revision retained by the
 
 Production publications exclude transcript-derived and held-out cases. The Access-protected private arena accepts them, as [Arena](../design/arena.md#publication-and-closing) describes. Prepared publications pin cases, outputs and public system labels. Sealed vote snapshots pin each store's output generation, category order, closing revision and close time, so replay needs no current family or catalog.
 
-`BENCH_DATA_DIR` names only the disposable vendor CLI cache. It defaults to `$XDG_DATA_HOME/assistant-bench/`, or `~/.local/share/assistant-bench/`, and code reaches it through `paths.data_dir()`. Downloads are verified before use. Deleting this directory requires downloading those tools again.
+`BENCH_DATA_DIR` names only the disposable vendor CLI cache. It defaults to `$XDG_DATA_HOME/assistant-bench/`, or `~/.local/share/assistant-bench/`. Downloads are verified before use. Deleting this directory requires downloading those tools again.
 
 ```text
 assistant-bench/
