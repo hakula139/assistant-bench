@@ -51,10 +51,6 @@ Production D1 holds public votes. Staging has a separate D1 database for validat
 
 `web/wrangler.toml` names each target's database, whose tables `web/migrations/` defines, and the voting Worker in `web/worker/` serves each target's vote API from it.
 
-`pair_vote_counts` holds counted votes per family and unordered system pair. SQL triggers maintain these counts atomically when votes are inserted, withdrawn, excluded or restored, so coverage and freshness reads scale with the number of system pairs.
-
-`publication_pair_cases` materializes eligible cases per publication and system pair, so pair selection reads sample metadata only for the chosen comparison. A pending-pair reload reads no sample metadata.
-
 ## Private Voting
 
 The private Worker serves the same vote API behind its configured access policy, using the [private publication procedure](../guide/running.md#private-voting). Its D1 database and signing keys persist independently of the execution checkout. Cases retain their actual source and the coarse split `public`, `held-out` or `private` in the store.
@@ -75,16 +71,7 @@ Speed, minority preferences and disagreement with the owner are signals to inves
 
 ## Vote API
 
-| Route                                                               | Request                           | Success                                                                                                 | Errors                                                                    |
-| ------------------------------------------------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| `GET /api/families`                                                 | None                              | `{families: [{family, display_name, aspect}]}` for each active publication                              | None                                                                      |
-| `POST /api/actors`                                                  | `{token}`                         | 204 and the cookie, or 204 alone when a valid cookie already names a browser                            | 400 `challenge_failed`, 429 `daily_limit`                                 |
-| `GET /api/pair?family=<name>`                                       | Cookie                            | `{pair: {id, instruction, checklist, category, render, a, b, defects} \| null, votes, remaining, undo}` | 401 `admission_required` with `sitekey`, 404 `no_round`, 409 `stale_pair` |
-| `GET /api/previews/<pair>/<a-or-b>`                                 | Cookie                            | The selected pending HTML document                                                                      | Fixed friendly text for every error                                       |
-| `POST /api/pair/skip`                                               | `{pair}`                          | The same body as `GET /api/pair`                                                                        | 409 `stale_pair`                                                          |
-| `POST /api/votes`                                                   | `{pair, choice, defects: {a, b}}` | 204, also for a repeated identical request                                                              | 400 `invalid_request`, 409 `stale_pair`, 429 `daily_limit`                |
-| `POST /api/votes/undo`                                              | `{family}`                        | 204, after which `GET /api/pair` returns the restored pair                                              | 409 `nothing_to_undo`                                                     |
-| `GET /api/freshness?family=<name>[&<store>=<id>&<store>_votes=<n>]` | None                              | `{status: "current" \| "stale" \| "unknown"}`                                                           | 400 `invalid_request`                                                     |
+The shared request and response schemas define the routes. These contracts constrain clients and storage:
 
 - **Pair state.** `votes` counts the browser's votes in the family, `remaining` its candidates, and `undo` whether it has a counted vote in the family inside the undo window.
 - **HTML previews.** HTML pair state omits `a` and `b`. Each preview reads one selected output only while the actor owns that pending pair in the active HTML publication. Voting, skipping or changing publication invalidates the URL, and undo restores the original pair ID. Responses use private no-store caching, no referrer, disabled DNS prefetch and a sandbox CSP allowing only inline CSS and data images or fonts. The empty-sandbox iframe cannot execute JavaScript, submit forms, load external dependencies or access its parent's origin. Native disclosures and current-document fragments remain available. Chromium can omit the Strict cookie when reloading the iframe itself, so an unavailable preview instructs the voter to reload the outer voting page.

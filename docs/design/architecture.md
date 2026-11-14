@@ -78,32 +78,25 @@ Imports point downward through these layers, so a module never imports one above
 
 ## Families and Scorers
 
-A family directory holds `family.toml` and either `cases.toml` or `tasks/`, with `load_family` inferring the source from whichever exists. The coding family also holds `shared/`, the authoring source for the files that `task_assets` copies into every task. The source decides how trials run and what grades them:
+A family holds either cases for single-call generation or authored tasks for an agent harness. Cases run without a verifier and receive the family's gates. Tasks run their tests and collect rewards, with a workspace diff when voters judge the solution. [Authoring](../guide/authoring.md) owns the source and task contracts.
 
-| Source          | Agent                  | Verifier | Each output holds                                           |
-| --------------- | ---------------------- | -------- | ----------------------------------------------------------- |
-| `cases.toml`    | `generate`             | Disabled | The reply, which the family's gates check                   |
-| `tasks/<task>/` | The family's `harness` | Enabled  | The task's `reward`, and the diff of its `/app` for `votes` |
+The scorer determines how collected outputs rank:
 
-In `family.toml`, `scorer` discriminates the settings model, which decides how the outputs rank, and each place that depends on the scorer matches on that model and ends in `assert_never`, so mypy reports any scorer that a `match` misses:
+| Scorer     | Sources        | Ranking                                                       |
+| ---------- | -------------- | ------------------------------------------------------------- |
+| `votes`    | Cases or tasks | Blind pairwise votes, with gate failures settling comparisons |
+| `tests`    | Tasks          | Mean rewards                                                  |
+| `checkers` | Cases          | Binary passes across applicable format rules                  |
 
-| Scorer     | Sources           | Ranks by                                                                                                      |
-| ---------- | ----------------- | ------------------------------------------------------------------------------------------------------------- |
-| `votes`    | Both              | Blind pairwise votes, after `gate_failures` settle each pair a gate decides: a case's gates or a task's tests |
-| `tests`    | `tasks/` only     | The mean of each system's rewards                                                                             |
-| `checkers` | `cases.toml` only | Binary case passes across every applicable format rule                                                        |
+A new scorer needs collection, closing, its report variant and site views. Exhaustive matches on the scorer settings make missing handling a type error.
 
 ## Data Flow
 
-The `checkers` scorer evaluates collected replies locally. Its case context, coverage targets and grader revision do not enter rendered instructions, task versions or system fingerprints. Recollection updates verdicts without generating replies, and closing requires one current verdict per configured system and case.
+Runs pin implementation and source revisions before creating disposable workspaces. Private D1 records request admission and measured usage. Completed artifacts enter private Git, and collection seals immutable output generations in private D1, including after a failed run. Collection can be repeated from those artifacts with the pinned sources, collection code and public labels.
 
-1. `bench run` pins the implementation and private source revisions, restores earlier artifacts into a disposable workspace, and checks tasks and budget admission before starting Harbor. Private D1 records request admissions and receipts while trials run locally.
-2. A single-call trial sends one request without a container. A task agent works in its task's container with native context management and an operational timeout, then Harbor grades `/app` with the task's tests in a fresh container.
-3. After Harbor exits, including a failed run, completed trial artifacts enter private Git and collection seals an output generation in private D1. `bench collect` can repeat collection from those artifacts with pinned cases, collection code and public system labels. Voted replies receive gate verdicts. Voted tasks retain the graded workspace diff and fail the `tests` gate when their reward is below 1.
-4. Arena preparation saves a publication of a sealed generation for review. Publishing activates that immutable publication in the target's D1 database. Public and Access-protected private [arenas](arena.md) record votes independently of local execution, following the [Running](../guide/running.md#voting) procedure.
-5. Closing a voted family seals counted votes, fits the [ranking](ranking.md) and writes its [report](reports.md). Replay uses the snapshot's category order, close time and each cut's pinned output generation. A `tests` or `checkers` family closes from its collected generation and pinned case and code revisions.
+The `checkers` scorer evaluates collected replies locally. Its case context, coverage targets and grader revision stay outside rendered instructions, task versions and system fingerprints. Recollection updates verdicts without generating replies, and closing requires one current verdict per configured system and case.
 
-`bench check [<family>...]` validates public sources without cloud authentication, and for a `tasks/` family also runs Harbor's oracle and nop on every task in a temporary workspace. `--private` includes a pinned private repository revision and requires GitHub authentication without opening D1. Check jobs never enter collection.
+An [arena publication](arena.md) freezes a generation for voting. Closing uses the publication facts and counted votes, or a test-scored generation, to write an aggregate [report](reports.md). [Running](../guide/running.md) describes the commands and recovery procedure. Check jobs never enter collection.
 
 ## Reruns
 

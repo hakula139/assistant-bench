@@ -18,9 +18,8 @@ The [voting guide](docs/guide/voting.md) explains the site's blind comparisons. 
 
 ## Documentation
 
-- [User guide](docs/guide/): setup, running and voting on a family, and authoring cases, families, and systems
-- [Design](docs/design/): how systems, the arena, ranking, reports, the site, and each family work
-- [`AGENTS.md`](AGENTS.md): the entry point for contributors, linking the [conventions](docs/conventions/)
+- [Documentation](docs/README.md): setup, operation, methods and contributor conventions
+- [`AGENTS.md`](AGENTS.md): contributor entry point and required verification
 
 ## License
 

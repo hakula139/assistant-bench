@@ -1,31 +1,26 @@
 # Testing
 
+[AGENTS.md](../../AGENTS.md#verification) lists the complete verification commands. Run Python checks inside the dev shell so tests of committed systems use the real nixos-config export.
+
 ## Placement
 
-- Tests mirror the package: a module's tests live in `tests/test_<module>.py`, and a subpackage member's in `tests/<subpackage>/test_<module>.py`. `pyproject.toml` sets pytest's `--import-mode=importlib` so that same-named test files in different directories do not collide.
-- The site's Vitest tests sit beside their modules as `web/src/**/*.test.{ts,tsx}`, except the page tests in `web/src/test/`, since Astro routes every file under `pages/`. Checks that need the built site go in `site.test.ts` there, which builds it once, because concurrent `astro build` runs of one root race on its cache. `web/src/test/fixture.ts` reads the report fixture for them, and tests that need a DOM opt into jsdom with a `@vitest-environment` comment. `web/src/test/plot.ts` stubs what `PlotFigure` needs to draw a chart in jsdom, and `web/src/test/track.ts` reads how a row's `ScoreTrack` draws its system.
-- `test_repository.py` checks committed data, lockfiles, and dependency stubs, and `test_harbor_smoke.py` holds the trials that need Docker.
-- Fixtures live in `tests/conftest.py`, data fixtures in `tests/fixtures/`, and builders and the stub endpoint in `tests/support.py`, which tests import as `support`.
-- Each function's tests sit in a class named after it, with the classes in the module's function order. A method's class nests in a class named after its type.
+Python tests mirror package paths under `tests/`. Shared builders and stub endpoints live in `tests/support.py`, imported as `support`, and data fixtures in `tests/fixtures/`. Group a function's tests in its named class, in module order, nesting method classes under their type.
+
+Vitest tests live beside their modules, with page and built-site tests under `web/src/test/` because Astro treats every file in `pages/` as a route. Build a given site root only once at a time to avoid racing Astro's cache.
 
 ## Models and Harbor
 
-- Fixtures use generic, invented names. Real model names appear only where the code matches on them, as in the test of the committed `systems.toml`.
-- `conftest.py` sets the environment `bench` gives Harbor before any test module imports LiteLLM, so no import, fixture, or test loads a local `.env`. An autouse fixture points `BENCH_DATA_DIR` at a scratch directory, runs each test from it, and clears the endpoint and proxy variables the shell exports, so no test reads the real data directory or endpoint. Another points the reports directory there too, so no test reads or writes the committed `reports/`.
-- Tests reach models only through the `endpoint` fixture or its variants: a Chat Completions, Responses, and native Messages server on 127.0.0.1 that records each request and returns a configurable response, `tls_endpoint`, the same server behind a test CA, and `ipv6_endpoint`, the same server on `::1`. The network guard covers both HTTPX transports before SDK requests run, and HTTPX's synchronous transport too, so the D1 client's tests answer through `httpx.MockTransport`.
-- The `export` fixture points `BENCH_NIXOS_CONFIG` at `tests/fixtures/nixos-config.json`. The CLI tests and the test of the committed `systems.toml` read the dev shell's real export, so the suite runs inside `nix develop`.
-- Cover the host environment with an in-process Harbor job in the default suite. Exercise reuse through the Harbor CLI too, since it imports recorded paths. Check trial logs for refused operations, which Harbor can log and ignore.
-- Tests of the vote stores use `arena_store`, backed by the context-managed `arena_database()` in `support` and built from `web/migrations/`. Command tests substitute it for `connect`. The fixture test in `tests/arena/test_publication.py` dumps the rows `publish` writes for one text family and one diff family to `tests/fixtures/arena-publication.sql`.
-- CLI tests replace `jobs.run_job` with a recorder. Reuse the trial builders in `support` and Harbor's own planned locks to check submitted configs and later reuse without starting Harbor.
+Tests isolate the working directory, reports, data cache and endpoint environment from real runtime state. Use invented fixture names and the `endpoint` fixtures for model requests. D1 tests use local databases or mocked transports. No test may read local credentials or call a real model.
+
+Most tests use the synthetic `export` fixture. CLI and committed-system checks also validate the dev shell's real export. Harbor upgrades require real host and Docker trials, including CLI reuse and inspection of logs for operations Harbor may refuse without failing the job.
+
+Vote-store fixtures apply `web/migrations/` to disposable databases. Worker tests run the same schema under the `local` environment, and command tests substitute local stores for cloud connections.
 
 ## Cross-Checks and the Report Fixture
 
-- The ranking fit is checked against statsmodels' `Logit` on simulated votes. A system that wins every vote separately checks the penalty's effect.
-- `tests/fixtures/report.json` and `report-early.json` are committed votes rounds after ten simulated days of voting and after one, which `make_round` in `support` simulates as a vote cut and the capped close path closes. `report-tests.json` is the tests round that `close_tests_round` in `test_report.py` closes, and the site's tests parse and render all three. `report.schema.json` is the `Report` model's JSON Schema, which the site's tests compare with its Zod schema. The tests of the generated files fail when a model or scoring change leaves one stale, and `uv run pytest --update-fixtures` rewrites it, so review the diff and commit the new fixture with the change.
+The ranking fit is checked against statsmodels, including unanimous wins. Python and site tests share synthetic voted and test-scored rounds in `tests/fixtures/`, plus `report.schema.json` for cross-language schema checks.
 
-## The Voting Worker
-
-`web/vitest.config.ts` runs two projects. The `site` project runs in Node and jsdom, and the `worker` project runs `web/worker/` in workerd through `@cloudflare/vitest-plugin`, under the `local` environment of `web/wrangler.toml` with test keys and `STORE` set to `production`. Its setup applies `web/migrations/` and, before each test, empties the tables and loads `tests/fixtures/arena-publication.sql`, since storage persists between tests. Tests call the Worker through `exports.default.fetch` with the helpers in `worker/test/support.ts` and stub siteverify by spying on `fetch`. workerd exposes no V8 coverage, so both projects report through istanbul.
+When a schema or scoring change makes generated fixtures stale, run `uv run pytest --update-fixtures`, inspect the resulting diff and commit it with the change. Fixture updates run in one process because other workers would read the files being rewritten.
 
 ## Accessibility
 
@@ -41,9 +36,7 @@ Installed-agent trials download fixed official CLI releases, verify their publis
 
 ## Parallel Runs
 
-`pyproject.toml` runs pytest on one pytest-xdist worker per CPU, and workers steal queued tests from each other so the slow coding verifiers spread evenly. Tests must not depend on the order they run in or on state another test leaves. A subprocess that listens binds port 0 and reports the port it bound, since another worker can take a port probed and then released before the subprocess binds it.
-
-Once a test spends `faulthandler_timeout` across its setup, call, and teardown with no phase failing, faulthandler dumps every thread's stack and ends the process without running teardown. pytest-xdist reports the crash as a failure of that test and starts a replacement worker, while pytest-cov lists the ended worker as failing to return coverage. Under `-n 0`, the run ends there.
+Tests must not depend on execution order or another test's state. Bind a listening subprocess to port 0 and report its actual port, since probing and releasing a port races other workers. A timed-out worker can terminate without teardown, so keep its resources isolated.
 
 Pass `-n 0` for a targeted run, which otherwise pays every worker's startup, and set `PYTEST_XDIST_AUTO_NUM_WORKERS` to cap the workers on a shared host. `--update-fixtures` always runs in one process, since tests on other workers read the fixtures it rewrites.
 
