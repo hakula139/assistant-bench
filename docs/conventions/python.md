@@ -13,7 +13,8 @@ Conventions for Python code and tests that the tooling and the module map don't 
 
 ## Errors
 
-- Raise `messages.InputError` for input an author or operator can fix, naming the item and the accepted values. Every message the CLI prints is one or more sentences, each starting with a capital and ending with a period, with names, files, and commands in backticks, and `messages.py` formats lists of names and pydantic errors that way. Wrap a `ValidationError` from author input in an `InputError` worded by `error_lines`, while pydantic validators keep raising `ValueError`. Commands raise these errors without catching them, and the root command group prints each `InputError` or `D1Error` to stderr and exits with code 1, keeping `typer.BadParameter` for an argument that names no family, task, or system. Any other exception is a bug and ends with its traceback. To see the traceback behind a printed error, rerun the command with `PYTHONDEVMODE=1`.
+- Raise `messages.InputError` for input an author or operator can fix, naming the item and accepted values. Use `error_lines` for author-facing validation errors, while pydantic validators raise `ValueError`. Commands let `InputError` and `D1Error` reach the root handler, which prints them and exits with code 1. Other exceptions retain their traceback. `PYTHONDEVMODE=1` also exposes the traceback behind a handled error.
+- Write CLI messages as complete sentences, starting with a capital and ending with a period. Put names, files and commands in backticks.
 - Let HTTP and Harbor errors propagate so Harbor records them on the trial.
 
 ## Modules
@@ -27,4 +28,4 @@ Conventions for Python code and tests that the tooling and the module map don't 
 - Pin Harbor to an exact release, since it ships daily dev builds. Give every other dependency a lower bound at the version first locked, and let `uv.lock` pin the rest.
 - Prefer packages already in Harbor's tree.
 
-The development-only package under `typings/` supplies partial contracts for dependencies without typing metadata, covering only what the bench uses. `tests/test_repository.py` runs `mypy.stubtest` over every stub against the installed versions, checking each declared signature while allowing undeclared APIs.
+The development-only `typings/` package supplies partial contracts for dependencies without typing metadata. Cover only APIs the bench uses.

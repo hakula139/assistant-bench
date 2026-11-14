@@ -81,17 +81,9 @@ uv run bench collect smoke-text
 
 It restores the family's trial artifacts and seals a new output generation in private D1, keeping at most `samples` records per case, system, and fingerprint. Each generation pins its cases, collection revision and public system labels. Which trial fills each slot follows [Architecture](../design/architecture.md#reruns).
 
-The summary counts the records, the errors by type, the gate failures by gate for a `votes` family, and the mean reward when the family has one. For a task family it also names the tasks that no system solved, which are suspects for a wrong specification or a task too hard to rank by, and the Harbor versions when the outputs span several.
+Collection names errors, gate failures and unsolved tasks, which can reveal a wrong specification or a task too hard to rank by. For vendor-authored tasks, compare each system's pass rate on its own vendor's tasks with its rate on the others. The summary ends with [ledger spend](#spend-and-budgets).
 
-When the family lists systems, each system's verifier [pass rate](../design/ranking.md#test-pass-rates) on tasks its own vendor authored appears beside its rate on other vendors' tasks.
-
-The [output model](../../src/assistant_bench/outputs.py) records three kinds of information:
-
-- **Identity and result:** the source trial and job, case, system, fingerprint, export revision and terminal agent's Harbor version. Historical unknown identities remain null. The content is a case reply or a voted task's diff of graded `/app` against `environment/app/`, excluding `.git` and tool caches, with its reward, [gate verdict](../design/families/writing.md#gate-verdicts) and error. A graded task can retain its diff and verdict after an agent error.
-- **Measured usage:** token counts summed over every request, null unless all requests report valid usage. Input includes cache reads and writes, and output includes reasoning. An unreported cache count adds zero, while unreported reasoning makes its total null. Cost is null when the channel is unpriced, input or output usage is unknown, or a nonzero cache write has no declared price.
-- **Timing and response provenance:** end-to-end latency, or a terminal agent's execution time, the sorted distinct reported models, and a single-call reply's request ID. Single-call replies record their finish reason, while a terminal agent records one only for the completion failure that ended its run. Messages refusals retain their type, category and explanation when they ended either kind of trial. Finish and refusal details are null otherwise.
-
-The summary ends with each system's spend from the family's [ledger](#spend-and-budgets).
+A graded task keeps its diff and verdict even after an agent error. Measurements remain unknown unless every required request reports valid usage, while a reported zero stays zero. Input includes cache reads and writes, and output includes reasoning. An unreported cache count adds zero, while unreported reasoning leaves its total unknown. [Reports](../design/reports.md#results) defines the aggregate denominators and missing-cost labels.
 
 ## Spend and Budgets
 

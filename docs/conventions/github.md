@@ -5,7 +5,6 @@ Repository rules for pull requests and issues beyond the general Git workflow.
 ## Pull Requests
 
 - After a batch of related PRs merges, make one simplification pass over the merged changes.
-- Give each PR one review round, and merge it once every finding from that round is fixed and the required checks pass, without per-PR approval or a second review, even after a rebase.
 - Commit a PR's screenshots to one directory per PR on the orphan `docs/pr-screenshots` branch, link them by commit SHA, and show only synthetic data in them.
 
 ## Issues
