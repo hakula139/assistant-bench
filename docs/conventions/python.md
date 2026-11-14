@@ -14,6 +14,7 @@ Conventions for Python code and tests that the tooling and the module map don't 
 ## Errors
 
 - Raise `messages.InputError` for input an author or operator can fix, naming the item and accepted values. Use `error_lines` for author-facing validation errors, while pydantic validators raise `ValueError`. Commands let `InputError` and `D1Error` reach the root handler, which prints them and exits with code 1. Other exceptions retain their traceback. `PYTHONDEVMODE=1` also exposes the traceback behind a handled error.
+- Write CLI messages as complete sentences, starting with a capital and ending with a period. Put names, files and commands in backticks.
 - Let HTTP and Harbor errors propagate so Harbor records them on the trial.
 
 ## Modules
