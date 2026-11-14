@@ -12,7 +12,8 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { decisionNote } from '@/lib/decision';
-import { formatPercent, formatPercentRange } from '@/lib/format';
+import { formatPercent, formatPercentRange, MISSING } from '@/lib/format';
+import { byCheckersPassRate } from '@/lib/ranking';
 import type { CheckersReport } from '@/lib/reports';
 import { reportNames, systemName } from '@/lib/systems';
 import { useCategory } from '@/lib/use-category';
@@ -36,7 +37,7 @@ export function CheckersBoard({ round: { systems, results } }: { round: Checkers
       : (results.categories.find((board) => board.category === category)?.standings ?? [])
   )
     .map((row) => ({ ...row, name: systemName(names, row.system) }))
-    .toSorted((a, b) => b.pass_rate.rate - a.pass_rate.rate || a.system.localeCompare(b.system));
+    .toSorted(byCheckersPassRate);
 
   return (
     <div className="flex flex-col gap-6">
@@ -113,7 +114,7 @@ export function CheckersBoard({ round: { systems, results } }: { round: Checkers
                 </TableCell>
                 <TableCell numeric>{formatPercent(pair.delta)}</TableCell>
                 <TableCell numeric>
-                  {pair.interval ? formatPercentRange(pair.interval) : '—'}
+                  {pair.interval ? formatPercentRange(pair.interval) : MISSING}
                 </TableCell>
               </TableRow>
             ))}

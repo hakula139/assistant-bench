@@ -43,9 +43,6 @@ jobs:
       - name: Set up Nix
         uses: hakula139/devkit/.github/actions/setup-nix@v3
 
-      - name: Install dependencies
-        run: nix develop -c uv sync --locked
-
       - name: Check editor types
         run: nix develop -c uv run --locked basedpyright
 
@@ -119,16 +116,13 @@ jobs:
       - name: Set up Nix
         uses: hakula139/devkit/.github/actions/setup-nix@v3
 
-      - name: Install dependencies
-        run: nix develop -c uv sync --locked
-
       - name: Check Docker
         run: time docker info
 
       - name: Run trials under Docker
         env:
           GH_TOKEN: ${{ github.token }}
-        run: nix develop -c uv run pytest -m docker
+        run: nix develop -c uv run --locked pytest -m docker
 
       - name: Check the coding family
         shell: bash
@@ -139,7 +133,7 @@ jobs:
           if [[ -n $BASE_SHA ]]; then
             args+=("$BASE_SHA")
           fi
-          nix develop -c uv run python -m assistant_bench.ci "${args[@]}"
+          nix develop -c uv run --locked python -m assistant_bench.ci "${args[@]}"
 
       - name: Diagnose Docker failure
         if: failure()
