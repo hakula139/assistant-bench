@@ -33,13 +33,7 @@
       nixos-config,
       ...
     }:
-    let
-      systems = [
-        "aarch64-darwin"
-        "x86_64-linux"
-      ];
-    in
-    devkit.lib.eachSystem systems (
+    devkit.lib.eachSystem devkit.lib.systems (
       system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
