@@ -6,57 +6,59 @@ assistant-bench limits its code to the parts Harbor lacks, which the module map 
 
 ```text
 src/assistant_bench/
-├── cli.py                                  # The Typer `bench` command
-├── ci.py                                   # Coding task selection and checks for Harbor Smoke
-├── task_assets.py                          # Regeneration of each coding task's shared files
+├── cli.py               # The Typer `bench` command
+├── ci.py                # Coding task selection and checks for Harbor Smoke
+├── task_assets.py       # Regeneration of each coding task's shared files
 ├── arena/
-│   ├── commands.py                         # Publication, status and moderation commands
-│   ├── d1.py                               # Each hosted target's database and credential sources
-│   ├── publication.py                      # Immutable reviewed publications and their conditional activation
-│   └── votes.py                            # Vote cuts and moderation, the snapshots that save cuts, and the round they close
-├── collection.py                           # Collection of a family's trials into output records
-├── canaries.py                             # Route probes, their baseline comparison, and independent attempt records
-├── arguments.py                            # The family arguments, system option, and name refusals the commands share
-├── tasks.py                                # Rendering of cases into Harbor tasks, checks of authored tasks, and task versions
-├── spend.py                                # The spend ledger of agent attempts, its pricing, and a run's projection and budget
-├── jobs.py                                 # A family's systems, its Harbor job configs, and their runs
-├── report.py                               # The report schema and inputs, one results variant per scorer, and closing a round
-├── outputs.py                              # Output records, immutable cloud generations, fingerprints and pool conflicts
+│   ├── commands.py      # Publication, status and moderation commands
+│   ├── d1.py            # Each hosted target's database and credential sources
+│   ├── publication.py   # Immutable reviewed publications and their conditional activation
+│   └── votes.py         # Vote cuts and moderation, the snapshots that save cuts, and the round they close
+├── collection.py        # Collection of a family's trials into output records
+├── canaries.py          # Route probes, their baseline comparison, and independent attempt records
+├── arguments.py         # The family arguments, system option, and name refusals the commands share
+├── tasks.py             # Rendering of cases into Harbor tasks, checks of authored tasks, and task versions
+├── spend.py             # The spend ledger of agent attempts, its pricing, and a run's projection and budget
+├── jobs.py              # A family's systems, its Harbor job configs, and their runs
+├── report.py            # The report schema and inputs, one results variant per scorer, and closing a round
+├── outputs.py           # Output records, immutable cloud generations, fingerprints and pool conflicts
 ├── harnesses/
-│   ├── __init__.py                         # System harnesses, their agent kwargs, and fingerprints
-│   ├── accounting.py                       # Paid request admission and durable usage receipts
-│   ├── cache.py                            # Verified, pinned vendor CLI downloads
-│   ├── docker.py                           # Installed-agent host access within Harbor's network policy
-│   ├── endpoint.py                         # Endpoint variables and native SDK transports
-│   ├── generate.py                         # The single-call agent
-│   ├── host.py                             # The Harbor environment for single-call jobs, which starts no container
-│   ├── installed.py                        # Installed agent adapters and native trace collection
-│   ├── labels.py                           # The kwargs that label a trial for collection
-│   ├── messages.py                         # Native Messages streaming and conversation content
-│   ├── native.py                           # The native SDK model client, conversation, and errors Terminus shares
-│   ├── options.py                          # The kwargs each harness builds from a system's generation identity
-│   ├── proxy.py                            # Trial-scoped inference forwarding with credentials kept on the host
-│   ├── responses.py                        # Native SDK results and stateless conversation items
-│   ├── terminus.py                         # Harbor's terminus-2 agent through the bench's endpoint
-│   └── usage.py                            # Validated measured token counters shared by every transport
+│   ├── __init__.py      # System harnesses, their agent kwargs, and fingerprints
+│   ├── accounting.py    # Paid request admission and durable usage receipts
+│   ├── cache.py         # Verified, pinned vendor CLI downloads
+│   ├── docker.py        # Installed-agent host access within Harbor's network policy
+│   ├── endpoint.py      # Endpoint variables and native SDK transports
+│   ├── generate.py      # The single-call agent
+│   ├── host.py          # The Harbor environment for single-call jobs, which starts no container
+│   ├── installed.py     # Installed agent adapters and native trace collection
+│   ├── labels.py        # The kwargs that label a trial for collection
+│   ├── messages.py      # Native Messages streaming and conversation content
+│   ├── native.py        # The native SDK model client, conversation, and errors Terminus shares
+│   ├── options.py       # The kwargs each harness builds from a system's generation identity
+│   ├── proxy.py         # Trial-scoped inference forwarding with credentials kept on the host
+│   ├── responses.py     # Native SDK results and stateless conversation items
+│   ├── terminus.py      # Harbor's terminus-2 agent through the bench's endpoint
+│   └── usage.py         # Validated measured token counters shared by every transport
 ├── scoring/
-│   ├── gates.py                            # Eligibility gates for voted outputs
-│   ├── length.py                           # Shared output length measurement
-│   ├── pass_rates.py                       # Task-clustered pass-rate intervals, pass^k, and the paired leader test
-│   ├── ranking.py                          # Bradley-Terry point fit and its descriptive diagnostics
-│   └── weighting.py                        # Family-wide cumulative actor caps
-├── families.py                             # Family, gate, case and vote models with explicit pinned source roots
-├── catalog.py                              # Systems and prices from systems.toml and the nixos-config export
-├── state.py                                # Private run claims, immutable records and active collection pointers
-├── artifacts.py                            # Pinned private Git cases and immutable raw trial archives
-├── runtime.py                              # Command-owned materialization of pinned private sources
-├── execution.py                            # Harbor lifecycle claims, audited archives and settlement
-├── database.py                             # The SQL protocol, SQLite adapter and D1 REST client
-├── generation.py                           # Revision-owned generation protocol and locked native agent version
-├── messages.py                             # The style of author-facing messages: code spans and validation errors
-├── paths.py                                # Repo and data directory locations, and atomic file writes
-├── diffs.py                                # Git-style diffs of a task's workspace against its repository
-└── html.py                                 # Unchanged complete HTML extraction and preview eligibility
+│   ├── checkers.py      # Deterministic instruction checks for collected replies
+│   ├── gates.py         # Eligibility gates for voted outputs
+│   ├── length.py        # Shared output length measurement
+│   ├── pass_rates.py    # Task-clustered pass-rate intervals, pass^k, and the paired leader test
+│   ├── ranking.py       # Bradley-Terry point fit and its descriptive diagnostics
+│   └── weighting.py     # Family-wide cumulative actor caps
+├── families.py          # Family, gate, case and vote models with explicit pinned source roots
+├── catalog.py           # Systems and prices from systems.toml and the nixos-config export
+├── state.py             # Private run claims, immutable records and active collection pointers
+├── artifacts.py         # Pinned private Git cases and immutable raw trial archives
+├── git.py               # Repository-local environment isolation for Git subprocesses
+├── runtime.py           # Command-owned materialization of pinned private sources
+├── execution.py         # Harbor lifecycle claims, audited archives and settlement
+├── database.py          # The SQL protocol, SQLite adapter and D1 REST client
+├── generation.py        # Revision-owned generation protocol and locked native agent version
+├── messages.py          # The style of author-facing messages: code spans and validation errors
+├── paths.py             # Repo and data directory locations, and atomic file writes
+├── diffs.py             # Git-style diffs of a task's workspace against its repository
+└── html.py              # Unchanged complete HTML extraction and preview eligibility
 ```
 
 ## Import Layers
@@ -72,7 +74,7 @@ Imports point downward through these layers, so a module never imports one above
 7. `report`
 8. `outputs`, `harnesses`, and `scoring`
 9. `families`, `catalog`, and `state`
-10. `artifacts`, `database`, `generation`, `messages`, `paths`, `diffs`, and `html`
+10. `artifacts`, `database`, `generation`, `git`, `messages`, `paths`, `diffs`, and `html`
 
 `families` and `outputs` are separated from `collection`, `tasks`, and `jobs` so that the arena and the reports read family settings and output records without the Harbor job code. `report` sits below the arena modules because it owns the report inputs and the fixed votes method, which the arena builds from vote cuts. A module becomes a subpackage only once it holds several members along one axis, as `harnesses/` does for agents and the environment single-call agents run in, and `scoring/` does for the ways outputs are scored.
 

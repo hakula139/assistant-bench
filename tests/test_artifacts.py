@@ -1106,7 +1106,39 @@ class TestArtifactRepository:
             )
 
             assert [archive.manifest for archive in restored] == [first, second]
-            for archive, expected in zip(restored, originals, strict=True):
+            calls = [call.args[0] for call in command_calls.call_args_list]
+            assert [command for command in calls if command[:2] == ['gh', 'api']] == [
+                ['gh', 'api', f'repos/{SLUG}']
+            ]
+            commands = [
+                command[3:] for command in calls if command[:2] == ['git', '-C']
+            ]
+            clones = [command for command in commands if command[0] == 'clone']
+            assert len(clones) == 1
+            assert '--filter=blob:none' not in clones[0]
+            assert not [command for command in commands if command[0] == 'fetch']
+
+            optimized = tmp_path / 'optimized'
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    '-O',
+                    str(FIXTURES / 'artifacts' / 'materialize.py'),
+                    SLUG,
+                    str(optimized),
+                    first_ref.model_dump_json(),
+                    second_ref.model_dump_json(),
+                ],
+                capture_output=True,
+                text=True,
+            )
+            assert completed.returncode == 0, completed.stderr
+            restored.extend(
+                MaterializedTrial(optimized / str(index) / 'job', manifest)
+                for index, manifest in enumerate((first, second))
+            )
+
+            for archive, expected in zip(restored, originals * 2, strict=True):
                 for item in archive.manifest.files:
                     path = archive.job / Path(item.path).relative_to('job')
                     assert contents(path) == expected[item.path], item.path
@@ -1131,17 +1163,6 @@ class TestArtifactRepository:
                 assert not (workspace / 'vendor' / '.git').exists()
                 assert not (workspace / '.git').exists()
                 assert not (workspace / '__pycache__').exists()
-            calls = [call.args[0] for call in command_calls.call_args_list]
-            assert [command for command in calls if command[:2] == ['gh', 'api']] == [
-                ['gh', 'api', f'repos/{SLUG}']
-            ]
-            commands = [
-                command[3:] for command in calls if command[:2] == ['git', '-C']
-            ]
-            clones = [command for command in commands if command[0] == 'clone']
-            assert len(clones) == 1
-            assert '--filter=blob:none' not in clones[0]
-            assert not [command for command in commands if command[0] == 'fetch']
 
         @pytest.mark.parametrize(
             ('minor_bump', 'expected'),

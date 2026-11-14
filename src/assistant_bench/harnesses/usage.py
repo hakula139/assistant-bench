@@ -126,17 +126,11 @@ def record_calls(context: AgentContext, calls: list[dict[str, Any]]) -> None:
             call.get('cache_write_unpriced', False) for call in calls
         ),
     }
-    if calls and all('input_tokens' in call for call in calls):
-        context.n_input_tokens = sum(call['input_tokens'] for call in calls)
-        context.n_cache_tokens = sum(call['cache_tokens'] for call in calls)
-        context.n_output_tokens = sum(call['output_tokens'] for call in calls)
-        context.metadata['cache_write_tokens'] = sum(
-            call['cache_write_tokens'] for call in calls
-        )
-        reasoning = [call['reasoning_tokens'] for call in calls]
-        context.metadata['reasoning_tokens'] = (
-            None if None in reasoning else sum(reasoning)
-        )
+    measured = combined_usage([MeasuredUsage.from_details(call) for call in calls])
+    if measured is not None:
+        measured.record(context)
+        context.metadata['cache_write_tokens'] = measured.cache_write_tokens
+        context.metadata['reasoning_tokens'] = measured.reasoning_tokens
     else:
         context.n_input_tokens = None
         context.n_cache_tokens = None

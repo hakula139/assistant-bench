@@ -1,5 +1,3 @@
 # Keep link validation independent of remote availability.
 offline = true
 include_fragments = "full"
-# Test data holds URLs that are inputs to the code under test.
-exclude_path = ["^tests/"]

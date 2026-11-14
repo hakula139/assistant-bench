@@ -12,3 +12,11 @@ export function byPassRate(
 ): number {
   return b.pass_rate.rate - a.pass_rate.rate || a.name.localeCompare(b.name);
 }
+
+/** Matches the frozen checker standings' identifier tie-break. */
+export function byCheckersPassRate(
+  a: { system: string; pass_rate: PassRate },
+  b: { system: string; pass_rate: PassRate },
+): number {
+  return b.pass_rate.rate - a.pass_rate.rate || a.system.localeCompare(b.system);
+}

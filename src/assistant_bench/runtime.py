@@ -17,6 +17,7 @@ from assistant_bench import jobs, tasks
 from assistant_bench.arena.d1 import connect
 from assistant_bench.artifacts import ArtifactRepository
 from assistant_bench.families import Case, Family, load_cases, load_family
+from assistant_bench.git import git_environment
 from assistant_bench.messages import InputError
 from assistant_bench.paths import REPO_ROOT
 from assistant_bench.state import State
@@ -143,12 +144,7 @@ def open_context() -> Generator[RunContext]:
 def implementation_revision() -> str:
     """Identify committed checkout inputs and refuse a mutable execution source."""
     try:
-        variables = subprocess.check_output(
-            ['git', 'rev-parse', '--local-env-vars'], text=True
-        ).splitlines()
-        environment = {
-            name: value for name, value in os.environ.items() if name not in variables
-        }
+        environment = git_environment()
 
         def git(*arguments: str) -> str:
             return subprocess.check_output(
@@ -205,12 +201,7 @@ def materialize_implementation(revision: str, destination: Path) -> None:
         raise InputError(
             'A collection implementation revision must be a Git commit SHA.'
         )
-    environment = os.environ.copy()
-    local_variables = subprocess.check_output(
-        ['git', 'rev-parse', '--local-env-vars'], text=True
-    ).splitlines()
-    for name in local_variables:
-        environment.pop(name, None)
+    environment = git_environment()
     try:
         subprocess.run(
             [

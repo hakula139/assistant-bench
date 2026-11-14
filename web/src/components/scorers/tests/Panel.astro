@@ -10,7 +10,7 @@ import {
 } from '@/components/ui/table';
 import { formatPercent, formatPercentRange } from '@/lib/format';
 import { terms } from '@/lib/glossary';
-import { byPassRate } from '@/lib/ranking';
+import { byCheckersPassRate, byPassRate } from '@/lib/ranking';
 import type { CheckersFamily, CheckersReport, TestsFamily, TestsReport } from '@/lib/reports';
 import { reportNames, systemName } from '@/lib/systems';
 
@@ -22,11 +22,7 @@ function passRows({ systems, results }: TestsReport | CheckersReport) {
   const names = reportNames(systems);
   return results.standings
     .map(({ system, pass_rate }) => ({ system, name: systemName(names, system), pass_rate }))
-    .toSorted(
-      results.scorer === 'checkers'
-        ? (a, b) => b.pass_rate.rate - a.pass_rate.rate || a.system.localeCompare(b.system)
-        : byPassRate,
-    );
+    .toSorted(results.scorer === 'checkers' ? byCheckersPassRate : byPassRate);
 }
 
 const { family } = Astro.props;

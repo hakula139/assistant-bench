@@ -15,6 +15,7 @@ from typing import Annotated, Literal, Self, cast
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from assistant_bench.diffs import LEFT_OUT
+from assistant_bench.git import git_environment
 from assistant_bench.messages import InputError
 
 
@@ -698,12 +699,15 @@ def _git(
     content: bytes | None = None,
     check: bool = True,
 ) -> subprocess.CompletedProcess[bytes]:
-    variables = (
-        _command(['git', 'rev-parse', '--local-env-vars']).stdout.decode().splitlines()
-    )
-    environment = {
-        name: value for name, value in os.environ.items() if name not in variables
-    }
+    try:
+        environment = git_environment()
+    except FileNotFoundError as error:
+        raise InputError('Private artifacts require `git` and `gh` on PATH.') from error
+    except subprocess.CalledProcessError as error:
+        raise InputError(
+            'Private artifact `git` command failed. '
+            'Check native Git access over SSH and GitHub CLI authentication.'
+        ) from error
     return _command(
         ['git', '-C', str(root), *arguments],
         content=content,
@@ -771,7 +775,8 @@ def _tree_files(root: Path, commit: str, path: str) -> dict[str, tuple[GitMode, 
         _, kind, size = stream.readline().decode().split()
         assert kind == 'blob'
         content = stream.read(int(size))
-        assert stream.read(1) == b'\n'
+        terminator = stream.read(1)
+        assert terminator == b'\n'
         files[entry.path] = (entry.mode, content)
     return files
 
