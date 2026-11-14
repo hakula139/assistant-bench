@@ -415,10 +415,10 @@ class TestRunCanaries:
 
         if probe_failure or status_failure:
             with pytest.raises(InputError) as failure:
-                cli._run_canaries([probe], cloud)
+                cli._run_canaries([probe], cloud)  # pyright: ignore[reportPrivateUsage]
             assert failure.value is (original if probe_failure else status_error)
         else:
-            cli._run_canaries([probe], cloud)
+            cli._run_canaries([probe], cloud)  # pyright: ignore[reportPrivateUsage]
 
         assert ('https://example.com/pull/1' in capsys.readouterr().out) == (
             not status_failure
