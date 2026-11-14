@@ -29,7 +29,7 @@
 
 ## Accessibility
 
-`site.test.ts` builds in an isolated root with a closed synthetic round so system pages and hydrated charts are included. It serves the built files and a vote API pair from `web/src/test/arena.ts` through Playwright routes, and aborts every other request. On each page in Chromium, under the light and dark color schemes and after the page's islands hydrate, it runs axe-core's default rules and `target-size`, and fails on any violation, page error, or console error. The vote page is checked on a text pair with its first Issues list open. `PlotFigure.test.tsx` also runs axe-core on a drawn chart in jsdom, which checks its ARIA but not its colors. [Quickstart](../guide/quickstart.md#site-verification) covers browser installation.
+`site.test.ts` builds in an isolated root with a closed synthetic round so system pages and hydrated charts are included. It serves the built files and a vote API pair from `web/src/test/arena.ts` through Playwright routes, and aborts every other request. On each page in Chromium, under the light and dark color schemes and after the page's islands hydrate, it runs axe-core's default rules and `target-size`, and fails on any violation, page error, or console error. The vote page is checked on a text pair with its first Issues list open. `PlotFigure.test.tsx` also runs axe-core on a drawn chart in jsdom, which checks its ARIA but not its colors. `pnpm test` installs the matching Chromium headless shell through its `pretest` script.
 
 ## Docker Trials
 
@@ -37,7 +37,7 @@ Tests marked `docker` run real Harbor jobs against stub endpoints. Cover oracle 
 
 Installed-agent trials download fixed official CLI releases, verify their published checksums, and exercise tool execution, native trajectories, usage, and diff collection. Only their dedicated fixture registers the exact HTTPS GET release and asset paths with the network guard. Model transports remain loopback-only.
 
-`pyproject.toml` deselects Docker tests by default, and Harbor Smoke selects them with `uv run pytest -m docker`. They need a running Docker daemon and build the smoke task's image on first use.
+`pyproject.toml` deselects Docker tests by default, and Bench Check selects them with `uv run pytest -m docker`. They need a running Docker daemon and build the smoke task's image on first use.
 
 ## Parallel Runs
 
@@ -49,4 +49,4 @@ Pass `-n 0` for a targeted run, which otherwise pays every worker's startup, and
 
 ## Coverage
 
-`uv run pytest` reports coverage and writes `coverage.xml`, and `pnpm test` measures the site the same way and writes `web/coverage/lcov.info`, leaving out the shadcn/ui copies and the test helpers. The Python report leaves out each `case _: assert_never(...)` arm, which mypy proves unreachable. [CI](ci.md#checks) uploads both to Codecov.
+`uv run pytest` reports coverage and writes `coverage.xml`, and `pnpm test` measures the site the same way and writes `coverage/lcov.info`, leaving out the shadcn/ui copies and the test helpers. The Python report leaves out each `case _: assert_never(...)` arm, which mypy proves unreachable. [CI](ci.md#checks) uploads both to Codecov.

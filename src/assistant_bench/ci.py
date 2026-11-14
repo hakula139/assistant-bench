@@ -1,4 +1,4 @@
-"""Run Harbor Smoke on coding tasks affected by repository changes."""
+"""Validate coding tasks affected by repository changes."""
 
 import argparse
 import subprocess

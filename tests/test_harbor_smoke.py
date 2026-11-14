@@ -1,4 +1,4 @@
-"""Harbor trials under Docker, which the Harbor Smoke job runs."""
+"""Harbor trials under Docker."""
 
 import json
 import threading
