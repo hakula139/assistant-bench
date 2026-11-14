@@ -5,7 +5,7 @@ import subprocess
 import sys
 import tempfile
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from contextlib import nullcontext
 from datetime import UTC, datetime
 from pathlib import Path
@@ -27,6 +27,7 @@ from assistant_bench.arguments import (
     SystemOptions,
     known_names,
 )
+from assistant_bench.artifacts import Publication
 from assistant_bench.catalog import (
     SYSTEMS_FILE,
     NixosConfigExport,
@@ -231,6 +232,16 @@ def _run_families(
     systems: dict[str, System],
     context: RunContext,
 ) -> None:
+    targets = _run_targets(
+        families, names, systems, root=context.public_root / 'families'
+    )
+    pending = context.reconcile_publications(
+        scopes=[family.name for family, _ in targets],
+        canary_systems=[system.name for _, selected in targets for system in selected],
+    )
+    if pending:
+        _echo_publications(pending)
+        return
     prepared = _prepare(families, names, export, systems, context)
     problems: list[str] = []
     for family, selected, job in prepared:
@@ -282,10 +293,14 @@ def _run_families(
             raise
         finally:
             try:
-                context.refresh_sources(family)
-                _echo_conflicts(
-                    family, _collect(family, systems, export, context).outputs
-                )
+                pending = context.reconcile_publications(scopes=[family.name])
+                if pending:
+                    _echo_publications(pending)
+                else:
+                    context.refresh_sources(family)
+                    _echo_conflicts(
+                        family, _collect(family, systems, export, context).outputs
+                    )
             except Exception:
                 if failure is None:
                     raise
@@ -333,6 +348,14 @@ def collect(families: FamilyArguments = None) -> None:
     The outputs form an immutable generation in private cloud state.
     """
     with open_context() as context:
+        pending = context.reconcile_publications(
+            scopes=families
+            if families is not None
+            else family_names(root=context.public_root / 'families')
+        )
+        if pending:
+            _echo_publications(pending)
+            return
         names = families if families is not None else _families_with_jobs(context)
         if not names:
             typer.echo('No family has jobs yet. Run `uv run bench run` first.')
@@ -805,6 +828,11 @@ def _collect(
         typer.echo(f'The outputs span Harbor versions {code(versions)}.')
 
     return collected
+
+
+def _echo_publications(publications: Sequence[Publication]) -> None:
+    for request in publications:
+        typer.echo(f'Artifacts await review at `{request.url}`.')
 
 
 def _echo_conflicts(family: Family, outputs: list[Output]) -> None:

@@ -68,6 +68,8 @@ from support import (
     make_system,
     make_trial,
     record_vote,
+    review_publications,
+    reviewed_artifacts,
     run_host_job,
     write_task_family,
     write_trial,
@@ -202,9 +204,9 @@ def archive_trials(
             case_revision=run.case_revision,
         )
         archives.append(MaterializedTrial(root, manifest))
-    references = context.artifacts.publish_trials(archives)
+    references = reviewed_artifacts(context.artifacts, archives)
     for result, reference in zip(results, references, strict=True):
-        context.state.record_trial_artifact(
+        context.state.record_pending_artifact(
             run.id,
             result.trial_name,
             str(result.id),
@@ -212,6 +214,9 @@ def archive_trials(
             reference.path,
             reference.manifest_digest,
         )
+    context.state.seal_publication(run.id)
+    if references:
+        context.state.finalize_publication(run.id, references[0].commit_sha)
     context.refresh_sources(load_family(scope))
 
 
@@ -1335,7 +1340,22 @@ class TestRun:
         result = invoke('run', 'f')
 
         assert result.exit_code == 0, result.output
-        assert 'Family `f`: 1 output, 0 errored.\n' in result.output
+        assert 'Artifacts await review at' in result.output
+        assert cloud.state.artifact_generation('f').artifacts == ()
+        with monkeypatch.context() as pending:
+            prepare = Mock(
+                side_effect=AssertionError('Pending work must stop before preparation.')
+            )
+            pending.setattr(cli, '_prepare', prepare)
+            waiting = invoke('run', 'f')
+            assert waiting.exit_code == 0, waiting.output
+            assert 'Artifacts await review at' in waiting.output
+            prepare.assert_not_called()
+        assert len(endpoint.requests) == 1
+        review_publications(cloud)
+        collected = invoke('collect', 'f')
+        assert collected.exit_code == 0, collected.output
+        assert 'Family `f`: 1 output, 0 errored.\n' in collected.output
         (output,) = read_outputs('f', cloud.state)
         assert output.text == 'Hello there.'
         assert output.input_tokens == 120

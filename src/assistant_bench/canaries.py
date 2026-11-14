@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict
 from pydantic_core import to_jsonable_python
 
 from assistant_bench import execution, jobs
-from assistant_bench.artifacts import ArtifactRef
+from assistant_bench.artifacts import ArtifactRef, build_manifest
 from assistant_bench.catalog import System, SystemIdentity
 from assistant_bench.harnesses import fingerprint
 from assistant_bench.harnesses.accounting import RequestReceipt
@@ -246,10 +246,51 @@ def _record(
     directory = jobs.job_path(probe.config)
     state = context.state
     trial = result.trial_name if result else None
+    pending = next(
+        (
+            row
+            for row in state.pending_artifacts(run_id)
+            if result is not None
+            and row.canonical_commit_sha is None
+            and row.trial_id == result.trial_name
+            and row.source_trial_id == str(result.id)
+        ),
+        None,
+    )
     audited = result is not None and state.trial_registered(
         run_id, result.trial_name, str(result.id)
     )
-    if audited and result is not None:
+    if pending is not None and result is not None:
+        snapshot = (
+            context.root
+            / 'snapshots'
+            / pending.path.split('/')[-1]
+            / state.run(run_id).job
+        )
+        manifest = build_manifest(
+            snapshot,
+            scope=state.run(run_id).scope,
+            run_id=run_id,
+            artifact_id=pending.path.split('/')[-1],
+            trial_id=str(result.id),
+            job_name=state.run(run_id).job,
+            trial_name=result.trial_name,
+            code_revision=state.run(run_id).code_revision,
+            case_revision=state.run(run_id).case_revision,
+        )
+        if hashlib.sha256(manifest.content()).hexdigest() != pending.manifest_digest:
+            raise InputError(
+                'The canary snapshot differs from its audited pending receipt.'
+            )
+        frozen = TrialResult.model_validate_json(
+            (snapshot / result.trial_name / 'result.json').read_text()
+        )
+        if frozen.id != result.id or frozen.trial_name != result.trial_name:
+            raise InputError('The canary result differs from its pending identity.')
+        result = frozen
+        directory = snapshot
+        audited = True
+    elif audited and result is not None:
         row = state.trial_artifact(run_id, result.trial_name)
         archive = context.artifacts.materialize(
             ArtifactRef(

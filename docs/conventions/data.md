@@ -19,7 +19,7 @@ A `transcript` case or task passes gitleaks before it enters the private reposit
 
 The private repository holds private case sources and immutable Harbor trial artifacts. `BENCH_DATA_REPOSITORY` names its `owner/repository`. GitHub CLI authenticates repository metadata, while native Git needs SSH access to the same repository. Verify both with `gh auth status` and `ssh -T git@github.com` before running cloud commands. Runs pin the private source revision before loading cases. Outputs of committed cases also remain private, since they carry routes, request IDs and endpoint metadata.
 
-Private D1 holds runs, request admissions and receipts, the spend ledger, collected output generations, canary records, prepared publications and sealed vote snapshots. Prices and source revisions are frozen with their records. Historical records retain unknown provenance when the original revision is unavailable.
+Private D1 holds runs, request admissions and receipts, pending artifact publication receipts, the spend ledger, collected output generations, canary records, prepared publications and sealed vote snapshots. Prices and source revisions are frozen with their records. Pending trial artifacts enter the formal inventory and settle authorized paid claims only after their reviewed PR merges and its canonical payload passes audit. Historical records retain unknown provenance when the original revision is unavailable.
 
 Rendered tasks, restored artifacts and Harbor jobs exist in a temporary workspace for the command's lifetime. Docker execution stays on the client host. Removing local directories preserves completed cloud records, but deleting an active workspace interrupts execution and can lose unfinished output.
 

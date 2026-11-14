@@ -82,14 +82,27 @@ def execute(
             expected_source_revision=expected_source_revision,
         ).model_dump_json()
     )
+    failure: BaseException | None = None
     try:
         jobs.run_job(
             config, log=log, plugin_context=path, source_root=context.public_root
         )
     except BaseException as error:
+        failure = error
         _cancel_unstarted(context.state, run.id, error)
         raise
-    if not context.state.complete_run(run.id):
+    finally:
+        try:
+            context.state.seal_publication(run.id)
+            if context.state.pending_artifacts(run.id):
+                context.artifacts.ensure_publication(run.id)
+        except Exception as error:
+            if failure is None:
+                raise
+            failure.add_note(f'Artifact publication also failed: {error}')
+    if not context.state.complete_run(
+        run.id
+    ) and not context.state.pending_claims_authorized(run.id):
         raise InputError('The execution has unsettled work and cannot complete.')
     return run
 
@@ -243,7 +256,7 @@ class ExecutionPlugin(BaseJobPlugin):
             await self._publish(event, recorder.secrets())
             if recorder.fatal:
                 raise InputError('A trial has uncertain accounting and cannot settle.')
-            self._state.settle_claim(claim.id)
+            self._state.authorize_pending_claim(claim.id)
         except BaseException:
             await recorder.uncertain()
             raise
@@ -284,7 +297,7 @@ class ExecutionPlugin(BaseJobPlugin):
                 code_revision=run.code_revision,
                 case_revision=run.case_revision,
             )
-            (reference,) = repository.publish_trials(
+            (reference,) = repository.stage_trials(
                 (MaterializedTrial(job=destination, manifest=manifest),)
             )
             return reference.commit_sha, reference.path, reference.manifest_digest
@@ -294,7 +307,7 @@ class ExecutionPlugin(BaseJobPlugin):
             await asyncio.shield(publication)
         finally:
             commit, path, digest = await publication
-            self._state.record_trial_artifact(
+            self._state.record_pending_artifact(
                 run.id, event.trial_name, str(event.trial_id), commit, path, digest
             )
 

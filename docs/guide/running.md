@@ -56,7 +56,9 @@ Installed agents require a named local Docker context using a Unix socket or Doc
 
 Runs require a clean implementation revision retained by canonical GitHub `main`, as [Data](../conventions/data.md#the-data-directory) explains, an authenticated `BENCH_DATA_REPOSITORY`, and the private D1 [credential source](#voting). The command pins the implementation and private case revisions before execution. Tasks and containers run locally in a disposable command workspace.
 
-When Harbor exits, `bench run` stores completed trial artifacts in the private repository, seals the family's collected output generation in private D1 and prints the summary that [Collecting Outputs](#collecting-outputs) describes, also when Harbor fails.
+When Harbor exits, `bench run` stages completed trial artifacts on a private `artifacts/<run_id>` branch and prints its ordinary review PR, also when Harbor fails. Review and merge each PR before running `bench collect` or resuming the affected family. Those commands verify the merged payload against its pending receipts, register its canonical commit and settle eligible paid claims. Pending artifacts remain outside formal collection and reuse, and occupied claims prevent another payment for the same work. An unrelated family remains usable.
+
+The same command evaluates its canary's frozen, audited snapshot before family trials start. A PR API failure leaves the branch and receipt recoverable through `bench run` or `bench collect`, without another model call. A closed, unmerged PR needs reopening. A process killed before sealing its receipts leaves an unfinished publication that requires operator inspection, and affected commands stop before paying for new work.
 
 Because a rerun generates only the trials that no earlier job of the family finished, adding a system to `family.toml` and rerunning sends requests for that system alone.
 

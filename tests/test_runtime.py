@@ -1,5 +1,6 @@
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 from unittest.mock import Mock
@@ -15,6 +16,7 @@ from assistant_bench.catalog import NixosConfigExport, System
 from assistant_bench.messages import InputError
 from assistant_bench.outputs import write_outputs
 from assistant_bench.runtime import RunContext
+from assistant_bench.state import Run
 from support import (
     PrivateRepository,
     commit_all,
@@ -27,6 +29,41 @@ from support import (
 
 REVISION = 'a' * 40
 runner = CliRunner()
+
+
+class TestReconcilePublications:
+    def test_unsealed_run_blocks_only_its_selected_scope_without_creating_a_pr(
+        self,
+        run_context: RunContext,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        run = Run(
+            'run-a',
+            'sample',
+            'job-a',
+            REVISION,
+            REVISION,
+            datetime.now(UTC).isoformat(),
+        )
+        run_context.state.create_run(run)
+        run_context.state.record_pending_artifact(
+            run.id,
+            'trial-a',
+            'source-a',
+            REVISION,
+            'runs/run-a/trials/artifact-a',
+            'b' * 64,
+        )
+        publication = Mock(
+            side_effect=AssertionError('An unsealed Run cannot create a PR.')
+        )
+        monkeypatch.setattr(run_context.artifacts, 'ensure_publication', publication)
+
+        assert run_context.reconcile_publications(scopes=['other']) == ()
+        with pytest.raises(InputError, match='unfinished artifact publication'):
+            run_context.reconcile_publications(scopes=['sample'])
+
+        publication.assert_not_called()
 
 
 @dataclass(frozen=True)

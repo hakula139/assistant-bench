@@ -1,6 +1,7 @@
 """Immutable private Git sources and trials through authenticated `gh` and Git."""
 
 import io
+import json
 import os
 import re
 import stat
@@ -85,6 +86,38 @@ class ArtifactRef(_Model):
         if len(parts) != 4 or parts[0] != 'runs' or parts[2] != 'trials':
             raise ValueError('an artifact reference names runs/<run>/trials/<artifact>')
         return self
+
+
+class StagedArtifact(ArtifactRef):
+    run_id: Component
+    trial_id: Component
+    source_trial_id: Component
+
+
+class Publication(_Model):
+    run_id: Component
+    url: str
+    state: Literal['OPEN', 'CLOSED', 'MERGED']
+    merge_sha: Commit | None = None
+
+
+class _PullRequestRepository(BaseModel):
+    full_name: str
+
+
+class _PullRequestBranch(BaseModel):
+    ref: str
+    repo: _PullRequestRepository | None
+
+
+class _PullRequest(BaseModel):
+    number: int
+    html_url: str
+    state: Literal['open', 'closed']
+    merged_at: str | None
+    merge_commit_sha: str | None
+    head: _PullRequestBranch
+    base: _PullRequestBranch
 
 
 class TrialManifest(_Model):
@@ -282,10 +315,10 @@ class ArtifactRepository:
             _restore(destination, entries)
         return destination / 'cases'
 
-    def publish_trials(
+    def stage_trials(
         self, archives: Sequence[MaterializedTrial]
-    ) -> tuple[ArtifactRef, ...]:
-        """Publish audited trials in one commit and confirm every remote reference.
+    ) -> tuple[StagedArtifact, ...]:
+        """Stage one Run's audited trials and confirm its remote branch references.
 
         Archives must name distinct immutable paths. Existing identical trials
         retain their original commits. A competing writer is reconciled only by
@@ -293,6 +326,10 @@ class ArtifactRepository:
         """
         if not archives:
             return ()
+        run_ids = {archive.manifest.run_id for archive in archives}
+        if len(run_ids) != 1:
+            raise InputError('A staging batch must belong to one run.')
+        branch = f'artifacts/{archives[0].manifest.run_id}'
         expected: dict[str, dict[str, tuple[GitMode, bytes]]] = {}
         contents: dict[str, bytes] = {}
         for archive in archives:
@@ -325,7 +362,8 @@ class ArtifactRepository:
         with tempfile.TemporaryDirectory(prefix='bench-artifacts-') as temporary:
             clone = _clone(repository, Path(temporary), partial=True)
             while True:
-                parent = _remote_head(clone)
+                staged_head = _remote_head(clone, branch)
+                parent = staged_head or _remote_head(clone)
                 references: dict[str, ArtifactRef] = {}
                 if parent is not None:
                     _git(clone, ['fetch', '--no-tags', 'origin', parent])
@@ -363,10 +401,8 @@ class ArtifactRepository:
                     if path not in references
                 }
                 if not missing:
-                    self._confirm(clone, tuple(references.values()), contents)
-                    return tuple(
-                        references[archive.manifest.path] for archive in archives
-                    )
+                    self._confirm(clone, tuple(references.values()), contents, branch)
+                    return _staged(archives, references)
                 _git(
                     clone,
                     [
@@ -444,10 +480,12 @@ class ArtifactRepository:
                     )
                 self._metadata()
                 pushed = _git(
-                    clone, ['push', 'origin', f'{commit}:refs/heads/main'], check=False
+                    clone,
+                    ['push', 'origin', f'{commit}:refs/heads/{branch}'],
+                    check=False,
                 )
                 if pushed.returncode:
-                    if _remote_head(clone) != parent:
+                    if _remote_head(clone, branch) != staged_head:
                         continue
                     raise InputError(
                         'The immutable trial could not be pushed to the repository.'
@@ -458,8 +496,159 @@ class ArtifactRepository:
                         path=path,
                         manifest_digest=sha256(contents[path]).hexdigest(),
                     )
-                self._confirm(clone, tuple(references.values()), contents)
-                return tuple(references[archive.manifest.path] for archive in archives)
+                self._confirm(clone, tuple(references.values()), contents, branch)
+                return _staged(archives, references)
+
+    def ensure_publication(self, run_id: str) -> Publication:
+        """Find or create the run's exact private branch PR without merging it."""
+        if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]*', run_id):
+            raise InputError('An artifact run ID must be a single path component.')
+        branch = f'artifacts/{run_id}'
+        _path_parts(branch)
+        self._metadata()
+        endpoint = f'repos/{self.repository_slug}/pulls'
+        response = _command(
+            [
+                'gh',
+                'api',
+                '--method',
+                'GET',
+                endpoint,
+                '-f',
+                'state=all',
+                '-f',
+                f'head={self.repository_slug.split("/")[0]}:{branch}',
+                '-f',
+                'base=main',
+                '-f',
+                'per_page=100',
+            ]
+        )
+        try:
+            requests = [
+                _PullRequest.model_validate(value)
+                for value in json.loads(response.stdout)
+            ]
+        except (ValidationError, ValueError, TypeError) as error:
+            raise InputError(
+                'GitHub returned unreadable artifact pull requests.'
+            ) from error
+        if len(requests) > 1:
+            raise InputError('The artifact run has multiple publication pull requests.')
+        if not requests:
+            response = _command(
+                [
+                    'gh',
+                    'api',
+                    '--method',
+                    'POST',
+                    endpoint,
+                    '-f',
+                    f'head={branch}',
+                    '-f',
+                    'base=main',
+                    '-f',
+                    f'title=feat(artifacts): record run {run_id}',
+                    '-f',
+                    'body=Record immutable, audited trial artifacts for this run.',
+                ]
+            )
+            try:
+                requests = [_PullRequest.model_validate_json(response.stdout)]
+            except ValidationError as error:
+                raise InputError(
+                    'GitHub returned an unreadable artifact pull request.'
+                ) from error
+        request = requests[0]
+        for side, reference in ((request.head, branch), (request.base, 'main')):
+            if (
+                side.ref != reference
+                or side.repo is None
+                or side.repo.full_name != self.repository_slug
+            ):
+                raise InputError(
+                    'The artifact pull request names another repository or branch.'
+                )
+        state: Literal['OPEN', 'CLOSED', 'MERGED']
+        if request.merged_at:
+            state = 'MERGED'
+        elif request.state == 'open':
+            state = 'OPEN'
+        else:
+            state = 'CLOSED'
+        return Publication(
+            run_id=run_id,
+            url=request.html_url,
+            state=state,
+            merge_sha=request.merge_commit_sha if request.merged_at else None,
+        )
+
+    def confirm_publication(
+        self, publication: Publication, receipts: Sequence[StagedArtifact]
+    ) -> str | None:
+        """Audit the merged Run against its staged bytes and immutable receipts."""
+        if publication.state == 'CLOSED':
+            raise InputError(
+                f'Artifact publication `{publication.url}` needs reopening.'
+            )
+        if publication.state != 'MERGED':
+            return None
+        canonical = publication.merge_sha
+        if canonical is None:
+            raise InputError('The merged artifact publication has no canonical commit.')
+        repository = self._metadata()
+        with tempfile.TemporaryDirectory(prefix='bench-artifacts-') as temporary:
+            clone = _clone(repository, Path(temporary), partial=False)
+            head = _remote_head(clone)
+            if head is None:
+                raise InputError('The artifact repository has no canonical main.')
+            _git(clone, ['fetch', '--no-tags', 'origin', head, canonical])
+            if _git(
+                clone, ['merge-base', '--is-ancestor', canonical, head], check=False
+            ).returncode:
+                raise InputError(
+                    'The merged artifact commit is not retained by remote `main`.'
+                )
+            expected_paths: set[str] = set()
+            for index, receipt in enumerate(receipts):
+                if receipt.run_id != publication.run_id:
+                    raise InputError('The publication receipt belongs to another run.')
+                staged = _materialize_trial(
+                    clone,
+                    ArtifactRef(
+                        commit_sha=canonical,
+                        path=receipt.path,
+                        manifest_digest=receipt.manifest_digest,
+                    ),
+                    Path(temporary) / f'canonical-{index}',
+                )
+                expected_paths.update(
+                    f'{receipt.path}/{entry.path}' for entry in staged.manifest.files
+                )
+                expected_paths.add(f'{receipt.path}/manifest.json')
+                if (
+                    staged.manifest.run_id != receipt.run_id
+                    or staged.manifest.trial_name != receipt.trial_id
+                    or staged.manifest.trial_id != receipt.source_trial_id
+                ):
+                    raise InputError(
+                        'The publication receipt has a conflicting trial identity.'
+                    )
+            actual = _tree_files(clone, canonical, f'runs/{publication.run_id}')
+            if set(actual) != expected_paths:
+                raise InputError(
+                    'The merged Run contains artifacts outside its pending receipts.'
+                )
+            changed = _git(
+                clone, ['diff', '--name-only', '-z', f'{canonical}^1', canonical]
+            ).stdout
+            if {
+                os.fsdecode(path) for path in changed.split(b'\0') if path
+            } != expected_paths:
+                raise InputError(
+                    'The artifact publication changed paths outside its audited Run.'
+                )
+        return canonical
 
     def materialize(
         self, reference: ArtifactRef, destination: Path
@@ -511,17 +700,18 @@ class ArtifactRepository:
         clone: Path,
         references: Sequence[ArtifactRef],
         contents: Mapping[str, bytes],
+        branch: str,
     ) -> None:
-        head = _remote_head(clone)
+        head = _remote_head(clone, branch)
         if head is None:
-            raise InputError('The published trials are missing from remote `main`.')
+            raise InputError('The staged trials are missing from their remote branch.')
         _git(clone, ['fetch', '--no-tags', 'origin', head])
         for commit in {reference.commit_sha for reference in references}:
             ancestor = _git(
                 clone, ['merge-base', '--is-ancestor', commit, head], check=False
             )
             if ancestor.returncode:
-                raise InputError('A published trial is not retained by remote `main`.')
+                raise InputError('A staged trial is not retained by its remote branch.')
         for reference in references:
             confirmed = _git(
                 clone,
@@ -531,6 +721,20 @@ class ArtifactRepository:
                 raise InputError(
                     'The remote trial manifest differs from the published manifest.'
                 )
+
+
+def _staged(
+    archives: Sequence[MaterializedTrial], references: Mapping[str, ArtifactRef]
+) -> tuple[StagedArtifact, ...]:
+    return tuple(
+        StagedArtifact(
+            **references[archive.manifest.path].model_dump(),
+            run_id=archive.manifest.run_id,
+            trial_id=archive.manifest.trial_name,
+            source_trial_id=archive.manifest.trial_id,
+        )
+        for archive in archives
+    )
 
 
 def _materialize_trial(
@@ -737,8 +941,10 @@ def _clone(repository: _Repository, root: Path, *, partial: bool) -> Path:
     return clone
 
 
-def _remote_head(root: Path) -> str | None:
-    output = _git(root, ['ls-remote', '--heads', 'origin', 'refs/heads/main']).stdout
+def _remote_head(root: Path, branch: str = 'main') -> str | None:
+    output = _git(
+        root, ['ls-remote', '--heads', 'origin', f'refs/heads/{branch}']
+    ).stdout
     return output.decode().split()[0] if output else None
 
 
