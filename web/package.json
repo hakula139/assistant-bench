@@ -6,6 +6,7 @@
     "build": "astro build",
     "dev": "astro dev",
     "lint": "astro sync && wrangler types && eslint .",
+    "pretest": "playwright install --only-shell chromium",
     "preview": "astro preview",
     "test": "vitest run",
     "typecheck": "astro check && wrangler types && tsc -p worker"

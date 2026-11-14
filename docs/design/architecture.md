@@ -7,7 +7,7 @@ assistant-bench limits its code to the parts Harbor lacks, which the module map 
 ```text
 src/assistant_bench/
 ├── cli.py               # The Typer `bench` command
-├── ci.py                # Coding task selection and checks for Harbor Smoke
+├── ci.py                # Coding task selection and checks for Bench Check
 ├── task_assets.py       # Regeneration of each coding task's shared files
 ├── arena/
 │   ├── commands.py      # Publication, status and moderation commands

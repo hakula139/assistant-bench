@@ -2,50 +2,42 @@
 
 ## Checks
 
-GitHub Actions runs on pushes to `main`, pull requests, and manual dispatch:
+GitHub Actions runs on pushes to `main`, pull requests, and manual dispatch. The shared devkit workflows own Nix checks, Python and Node dependency setup, tests, caching, and coverage uploads. Project jobs keep the checks and deployment steps specific to the bench.
 
-| Job                           | Checks                                                                                                                                                                       |
-| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| nix / Nix (Linux)             | The shared Nix workflow runs `nix flake check`, which holds the GitLab Pages pin checks, and `nix develop -c run-hooks`.                                                     |
-| python / Python Check (Linux) | The shared Python workflow runs pytest and uploads its coverage to Codecov.                                                                                                  |
-| Bench Check                   | basedpyright and the fingerprint check.                                                                                                                                      |
-| Web Check                     | `pnpm lint`, `pnpm typecheck`, and `pnpm test` with coverage uploaded to Codecov, then `pnpm build` and a dry-run voting Worker bundle, uploading `web/dist` as `site-dist`. |
-| Harbor Smoke                  | `uv run pytest -m docker` under Docker, including the oracle and nop check that `bench check smoke` runs, then `bench check coding-repo` on the coding tasks selected below. |
-| CI Result                     | Fails when any job above fails or is cancelled.                                                                                                                              |
+| Job                           | Responsibility                                                                       |
+| ----------------------------- | ------------------------------------------------------------------------------------ |
+| nix / Nix (Linux)             | Flake checks, including the GitLab Pages pins, and all pre-commit hooks.             |
+| nix / Nix (macOS)             | Flake checks and the native Darwin dev shell build.                                  |
+| python / Python Check (Linux) | Python tests and Python coverage upload.                                             |
+| node / Node Check (Linux)     | Site and voting Worker tests and web coverage upload.                                |
+| Bench Check                   | Editor types, closed-report fingerprints, Docker trials, and affected coding tasks.  |
+| Web Check                     | Site lint, types, build, voting Worker dry-run bundle, and the `site-dist` artifact. |
+| Deploy Preview                | Publish a static PR preview after Node and Web checks pass.                          |
+| CI Result                     | Wait for all checks and the preview, then fail on any failed or cancelled job.       |
 
-The fingerprint check runs `uv run bench fingerprints`, which enforces the rule in [Systems](../design/systems.md#fingerprints) against the fingerprints that the closed reports under `reports/` froze. It reads only the checked-out tree, so the push run on `main` catches a fingerprint change and a close that pass alone but conflict once both land.
+Bench Check reads fingerprints from the checked-out tree and the closed reports under `reports/`, enforcing [Systems](../design/systems.md#fingerprints). Its coding-task selector compares the PR base or previous `main` head with the current tree. Added and renamed tasks are checked, while deleted tasks need no trial. Changes to shared code, configuration, dependencies, or the workflow check every coding task. Manual runs also check every task. The core Docker trials run for every event and use the automatic read-only GitHub token to fetch pinned agent releases.
 
-Harbor Smoke selects changed coding tasks against the PR base or the previous head on a push to `main`, passing each ID through `bench check coding-repo --task <id>`. Added and renamed tasks are checked, while deleted tasks need no trial. Changes under `src/`, to the coding family's shared files, `systems.toml`, the coding family's `family.toml`, Python dependencies or version, Nix inputs or shell, or Harbor Smoke's workflow check every coding task. Other changes skip the coding-family trials. Manual runs have no comparison base and check every coding task. The core Docker smoke tests run for every event.
+The `main` ruleset requires CI Result and both Codecov patch statuses: `codecov/patch` for Python and `codecov/patch/web` for the site. `codecov.yml` scopes them to `src/` and `web/`, sets an 80% changed-line threshold, and waits for both uploads. Python and Node request `id-token: write` for Codecov's OIDC upload, while fork pull requests use tokenless uploads. The shared workflows may receive `CACHIX_AUTH_TOKEN` for their cache.
 
-The `main` ruleset requires CI Result and both Codecov patch statuses: `codecov/patch` for Python and `codecov/patch/web` for the site. `codecov.yml` scopes each status to `src/` or `web/`, fails a patch status when tests cover less than 80% of a PR's changed lines, and waits for both uploads. The Python and Web jobs request `id-token: write` for Codecov's OIDC upload, while fork pull requests use Codecov's tokenless upload instead.
+List each check job in CI Result's `needs`. Its shared result action inspects the workflow's job results through the Actions API, including matrix jobs cancelled before starting. Waiting for Deploy Preview makes a preview failure part of the gate regardless of when it finishes. Fork and Dependabot previews are skipped because those PRs receive no deploy secrets.
 
-The shared Nix and Python jobs may receive `CACHIX_AUTH_TOKEN` for the Cachix cache. Only the deploy jobs below read `CLOUDFLARE_API_TOKEN`, and only in the steps that run Wrangler. Harbor Smoke uses the automatic read-only GitHub token to fetch pinned Codex release metadata. List each new check job in CI Result's `needs`, since the gate skips a job it does not wait for.
-
-Set every job's `timeout-minutes` to several times its measured successful duration, including the full coding-family run for Harbor Smoke.
-
-Web Check installs Playwright's Chromium headless shell without `--with-deps`, since the runner image already carries its system libraries and the apt downloads stalled the job past its timeout.
+Set each project's job timeout to several times its measured successful duration, including a full coding-family check. `pnpm test` installs Playwright's Chromium headless shell through the web package's `pretest` script. It uses the browser cache and leaves system-library installation to the host, since runner apt downloads have stalled past the job timeout.
 
 ## Deploy
 
-Production applies the pending D1 migrations of `web/migrations/` and then deploys the voting Worker with the built site as its assets, both through Wrangler in `web/`. `web/wrangler.toml` configures each environment's Worker, database, rate limit and cron.
+Production and PR previews consume Web Check's `site-dist` artifact. `web/wrangler.toml` owns their Worker and database bindings. Deploy secrets are scoped to the steps that run Wrangler.
 
-Static PR previews use the asset-only `assistant-bench-preview` Worker in `web/wrangler.toml`, with no production routes or voting bindings. Both deploy jobs consume the `site-dist` artifact, and a separate workflow removes previews:
+- **Deploy Voting:** runs after CI Result on `main`, in the `production` environment. Its concurrency group retains up to 100 pending deploys and lets a running deploy finish. Before deploying, it compares the commit with the current `main` head and skips a superseded commit. It applies pending D1 migrations before deploying the voting Worker and its site assets.
+- **Deploy Preview:** waits for Node and Web checks on same-repository PRs. It publishes an asset-only Worker Preview named `pr-<number>` and comments the stable preview URL, the commit's deployment URL, and the workflow logs. Its `workers.dev` URL sends `X-Robots-Tag: noindex`. The `preview-<number>` concurrency group is shared with cleanup. A deploy checks that the PR is still open after joining that group, so one starting after cleanup skips deployment.
+- **Preview Cleanup:** runs on PR closure through `pull_request_target`, deletes the preview, deactivates its deployments, and updates the comment. It uses the trusted default-branch workflow and checkout because the event carries secrets, including for PRs with merge conflicts. Changes to cleanup take effect once merged.
 
-- **Deploy Voting:** runs on each push to `main` and on manual dispatch from `main` once CI Result passes. It deploys in the `production` environment, which only `main` may deploy to. The `production` concurrency group retains up to 100 pending deploys without cancelling a running deploy. Each queued deploy skips a commit that `main` has moved past, so older checks finishing later preserve the current head's queued deployment.
+All three jobs use `CLOUDFLARE_API_TOKEN`, with the account configured in Wrangler. The token needs Workers Scripts Edit and D1 Edit. Applying migrations can create the `d1_migrations` table even when no migration is pending. Worker secrets configured through [Running](../guide/running.md#setting-up-a-vote-store) persist across deploys. Static previews have no voting bindings.
 
-- **Deploy Preview:** runs `wrangler preview` in the `preview` environment once Web Check passes on each PR, creating a Worker Preview named `pr-<number>` under the static preview Worker, and comments its URLs on the PR.
+### GitLab Pages
 
-  The Preview's `workers.dev` URL serves the PR's latest build with `X-Robots-Tag: noindex`, and each push also gets a URL of its own.
+`.gitlab-ci.yml` includes `.gitlab/ci/pages.yml`, which other project pipelines can also include. Pages needs GitLab 17.11 or later and Premium parallel deployments for MR previews. It builds outside the dev shell using `BENCH_NODE_IMAGE` and `BENCH_PNPM_VERSION`. The flake's `pages-node` and `pages-pnpm` checks keep those pins aligned with the dev shell, as [Development](development.md#toolchain-and-pins) describes.
 
-  It joins the concurrency group `preview-<number>`, which it shares with Preview Cleanup, only once Web Check passes, so closing a PR cancels a deploy already in the group, while a deploy that starts after the close finds the PR closed and skips.
-
-- **Preview Cleanup:** deletes the Preview once the PR closes, marks the PR's deployments inactive, and updates the comment to say so. It runs on `pull_request_target`, which also fires for a PR with merge conflicts and runs `main`'s copy of the workflow, so changes to it take effect only once merged.
-
-  Because that event carries the deploy secrets, the job checks out only `main` and never runs the PR's code.
-
-Deploy Voting, Deploy Preview and Preview Cleanup read the repository's `CLOUDFLARE_API_TOKEN` secret, while the account comes from `web/wrangler.toml`. That token needs D1 Edit as well as Workers Scripts Edit, because Deploy Voting applies migrations before every deploy, and `wrangler d1 migrations apply` creates its `d1_migrations` table if missing, a write, even when no migration is pending. A deploy keeps the Worker secrets that [Running](../guide/running.md#setting-up-a-vote-store) sets once per environment. Static previews have no voting bindings and skip PRs from forks and Dependabot, which receive no secrets.
-
-On GitLab, `.gitlab-ci.yml` runs the `pages` job from `.gitlab/ci/pages.yml`, which a project's own pipeline can include instead. The job needs GitLab 17.11 or later, plus parallel deployments (Premium) for merge request previews. It builds the site outside the dev shell in the image `BENCH_NODE_IMAGE` names with the pnpm `BENCH_PNPM_VERSION` pins, and the `pages-pnpm` and `pages-node` flake checks tie both pins to the dev shell, as [Development](development.md#toolchain-and-pins) describes. The job publishes the default branch and a one-week preview under `mr-<iid>/` for each merge request. Astro reads the site's URL and base path from `CI_PAGES_URL` and repository links from `CI_PROJECT_URL`. Checks stay in GitHub Actions, and a Pages build leaves out the vote page, which needs the voting Worker.
+Pages publishes the default branch and a one-week preview under `mr-<iid>/` for each MR. Astro reads the site URL and base path from `CI_PAGES_URL` and repository links from `CI_PROJECT_URL`. Checks run in GitHub Actions. Pages omits the vote page because it needs the voting Worker.
 
 ## Workflow Steps
 

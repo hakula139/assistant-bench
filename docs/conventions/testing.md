@@ -37,7 +37,7 @@ Tests marked `docker` run real Harbor jobs against stub endpoints. Cover oracle 
 
 Installed-agent trials download fixed official CLI releases, verify their published checksums, and exercise tool execution, native trajectories, usage, and diff collection. Only their dedicated fixture registers the exact HTTPS GET release and asset paths with the network guard. Model transports remain loopback-only.
 
-`pyproject.toml` deselects Docker tests by default, and Harbor Smoke selects them with `uv run pytest -m docker`. They need a running Docker daemon and build the smoke task's image on first use.
+`pyproject.toml` deselects Docker tests by default, and Bench Check selects them with `uv run pytest -m docker`. They need a running Docker daemon and build the smoke task's image on first use.
 
 ## Parallel Runs
 
@@ -49,4 +49,4 @@ Pass `-n 0` for a targeted run, which otherwise pays every worker's startup, and
 
 ## Coverage
 
-`uv run pytest` reports coverage and writes `coverage.xml`, and `pnpm test` measures the site the same way and writes `web/coverage/lcov.info`, leaving out the shadcn/ui copies and the test helpers. The Python report leaves out each `case _: assert_never(...)` arm, which mypy proves unreachable. [CI](ci.md#checks) uploads both to Codecov.
+`uv run pytest` reports coverage and writes `coverage.xml`, and `pnpm test` measures the site the same way and writes `coverage/lcov.info`, leaving out the shadcn/ui copies and the test helpers. The Python report leaves out each `case _: assert_never(...)` arm, which mypy proves unreachable. [CI](ci.md#checks) uploads both to Codecov.
