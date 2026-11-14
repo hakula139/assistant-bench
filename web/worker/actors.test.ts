@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { generateSignedCookie } from 'hono/cookie';
-import { describe, expect, test, vi } from 'vitest';
+import { assert, describe, expect, test, vi } from 'vitest';
 
 import { ipTag, network } from './actors';
 import { app } from './index';
@@ -92,6 +92,7 @@ describe('POST /api/actors', () => {
 describe('admission', () => {
   test('rate limits a signed empty actor cookie by its network', async () => {
     const from = browser();
+    assert(env.ACTOR_KEY !== undefined);
     const cookie = await generateSignedCookie('__Host-bench-actor', '', env.ACTOR_KEY, {
       secure: true,
       path: '/',
