@@ -120,9 +120,9 @@ display_name = "Claude Opus 5.5 · nixos-config"
 
 | Key            | Meaning                                                                                                                                 |
 | -------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `model`        | A nixos-config catalog model, which supplies the route, vendor, capacities, thinking mode, default effort, and prices                   |
+| `model`        | A nixos-config catalog model, which supplies the route, vendor, capacities, and prices                                                  |
 | `api`          | `openai-chat-completions` by default, `openai-responses`, or `anthropic-messages`. The catalog must support the selected API and effort |
-| `effort`       | A reasoning effort the catalog accepts for the model. A model that requires one defaults to its catalog level                           |
+| `effort`       | Required when the model has effort rules: one of its `thinking.efforts`. A model without them takes none                                |
 | `prompt`       | The system message, as `nixos-config:<client>` for a rendered instruction file                                                          |
 | `harness`      | An installed agent override, `claude-code` for native Messages or `codex` for Responses. Requires `version` and a task family           |
 | `version`      | The installed CLI's pinned `major.minor.patch` release. Requires `harness`                                                              |

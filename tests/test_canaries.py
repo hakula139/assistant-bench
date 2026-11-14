@@ -235,7 +235,6 @@ class TestPrepare:
             max_output_tokens=allowance,
             context_window=100_000,
             prompt='Use a concise answer.',
-            thinking_mode='anthropic-adaptive' if api == 'anthropic-messages' else None,
         )
         frozen = original.model_dump()
 
@@ -635,7 +634,6 @@ class TestRun:
         original = make_system(
             api=api,
             max_output_tokens=4096,
-            thinking_mode='anthropic-adaptive' if api == 'anthropic-messages' else None,
         )
         probe = prepare_probe(original, tmp_path)
 
@@ -705,10 +703,7 @@ class TestRun:
         tmp_path: Path,
         run_context: RunContext,
     ) -> None:
-        system = make_system(
-            api=api,
-            thinking_mode='anthropic-adaptive' if api == 'anthropic-messages' else None,
-        )
+        system = make_system(api=api)
         if api == 'anthropic-messages':
             endpoint.stream = message_stream(
                 message(stop_reason='max_tokens' if failure == 'length' else 'refusal')
