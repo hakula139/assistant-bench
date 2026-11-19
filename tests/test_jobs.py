@@ -17,7 +17,6 @@ from harbor.models.job.config import JobConfig, SourceJobConfig
 from harbor.models.task.task import Task
 from harbor.models.trial import config as trial_config
 from harbor.models.trial.result import TrialResult
-from harbor.trial.queue import TrialQueue
 from openai.types.responses import Response
 
 from assistant_bench import jobs
@@ -52,11 +51,6 @@ from support import (
     write_trial,
     write_votes_family,
 )
-
-
-class RetryProbe(TrialQueue):
-    def retries(self, name: str) -> bool:
-        return self._should_retry_exception(name)
 
 
 class TestCheckSystems:
@@ -288,17 +282,16 @@ class TestJob:
         config = jobs.job(
             VOTES, [make_system(api='openai-responses')], [], root=data_dir, sources=[]
         )
-        queue = RetryProbe(n_concurrent=1, retry_config=config.retry)
 
         with pytest.raises(NativeCompletionError) as error:
             result.check(complete=True)
 
-        assert not queue.retries(type(error.value).__name__)
-        assert queue.retries('APIConnectionError')
-        assert queue.retries('InternalServerError')
+        assert not config.retry.is_retryable(type(error.value).__name__)
+        assert config.retry.is_retryable('APIConnectionError')
+        assert config.retry.is_retryable('InternalServerError')
         assert config.retry.max_retries == 0
-        assert not queue.retries('AgentTimeoutError')
-        assert not queue.retries('VerifierTimeoutError')
+        assert not config.retry.is_retryable('AgentTimeoutError')
+        assert not config.retry.is_retryable('VerifierTimeoutError')
 
     def test_runs_each_case_system_through_generate_in_its_route_group(
         self, data_dir: Path
