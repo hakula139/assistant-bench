@@ -53,8 +53,7 @@ const RESTORE = `
     a_output = excluded.a_output, b_output = excluded.b_output, issued_at = excluded.issued_at`;
 const WITHDRAW = `
   DELETE FROM votes
-  WHERE actor_id = ?1 AND family = ?2 AND pair_id = ?3
-    AND EXISTS (SELECT 1 FROM pairs WHERE id = ?4 AND actor_id = ?1 AND family = ?2)
+  WHERE actor_id = ?1 AND family = ?2 AND pair_id = ?3 AND changes() = 1
   RETURNING id`;
 const FRESHNESS = `
   SELECT EXISTS (SELECT 1 FROM votes WHERE family = ?1 AND exclusion IS NULL AND id > ?2)
@@ -154,7 +153,7 @@ export async function undo(db: D1Database, actor: string, request: UndoRequest, 
   const restored = crypto.randomUUID();
   const [, withdrawn] = await db.batch([
     db.prepare(RESTORE).bind(actor, family, now - UNDO_MS, pair, restored),
-    db.prepare(WITHDRAW).bind(actor, family, pair, restored),
+    db.prepare(WITHDRAW).bind(actor, family, pair),
   ]);
   if (withdrawn.results.length === 0) {
     throw new ApiError(409, 'nothing_to_undo');

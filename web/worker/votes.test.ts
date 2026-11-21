@@ -417,13 +417,24 @@ describe('POST /api/votes/undo', () => {
   test('restores a pair from a replaced publication, which the next request redraws', async () => {
     const from = await admitted();
     const { pair } = await pairOf(from);
+    const pending = env.DB.prepare('SELECT id, publication_id FROM pairs WHERE family = ?').bind(
+      WRITING,
+    );
+    const original = await pending.first('publication_id');
     await vote(from, pair?.id ?? '');
     await publish(WRITING, { only: { 'acme-large': ['x'], 'acme-small': ['y'] } }, 'next');
 
-    await call(from, 'POST', '/votes/undo', { family: WRITING, pair: pair?.id });
+    const withdrawn = await call(from, 'POST', '/votes/undo', { family: WRITING, pair: pair?.id });
+
+    expect(withdrawn.status).toBe(204);
+    expect(await storedVotes()).toEqual([]);
+    const restored = await pending.first();
+    expect(restored?.id).not.toBe(pair?.id);
+    expect(restored?.publication_id).toBe(original);
+
     const state = await pairOf(from);
 
-    expect(state.pair?.id).not.toBe(pair?.id);
+    expect(state.pair?.id).not.toBe(restored?.id);
     expect(state.pair?.instruction).toBe('Instruction only');
   });
 });

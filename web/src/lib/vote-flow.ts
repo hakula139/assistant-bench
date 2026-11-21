@@ -45,7 +45,7 @@ export class ApiError extends Error {
   }
 }
 
-/** The request may or may not have arrived, so retrying it is the way to find out. */
+/** The service gave no usable response, so a write may have taken effect. */
 export class NetworkError extends Error {
   constructor() {
     super(errorMessages.unavailable);
