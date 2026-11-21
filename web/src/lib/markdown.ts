@@ -85,3 +85,11 @@ markdown.core.ruler.push('keep_tails', keepTails);
 markdown.core.ruler.push('mark_inline_code', markInlineCode);
 markdown.renderer.rules.tail_open = () => `<span class="${TAIL_CLASS}">`;
 markdown.renderer.rules.tail_close = () => '</span>';
+
+for (const type of ['code_block', 'fence'] as const) {
+  const render = markdown.renderer.rules[type];
+  if (render) {
+    markdown.renderer.rules[type] = (...args) =>
+      render(...args).replace(/^<pre\b/, '<pre tabindex="0"');
+  }
+}

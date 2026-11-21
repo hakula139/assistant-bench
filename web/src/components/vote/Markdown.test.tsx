@@ -105,6 +105,7 @@ describe('Markdown', () => {
     const blocks = container.querySelectorAll('code');
     expect(blocks).toHaveLength(1);
     expect(blocks[0].matches(selector)).toBe(true);
+    expect(blocks[0].parentElement?.tabIndex).toBe(0);
     expect(blocks[0].className).toBe(language);
     expect(blocks[0].closest('p')).toBeNull();
     expect(container.querySelector('.not-prose')).toBeNull();

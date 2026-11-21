@@ -280,17 +280,14 @@ describe('built pages', () => {
 
         if (path === vote) {
           const codeBlock = page.getByRole('region', { name: 'Prompt contents' }).locator('pre');
-          const { clientWidth, scrollWidth } = await codeBlock.evaluate((element) => ({
-            clientWidth: element.clientWidth,
-            scrollWidth: element.scrollWidth,
-          }));
-          expect(scrollWidth, 'the long line scrolls within its code block').toBeGreaterThan(
-            clientWidth,
-          );
+          await codeBlock.press('ArrowRight');
+          await expect
+            .poll(() => codeBlock.evaluate((element) => element.scrollLeft))
+            .toBeGreaterThan(0);
           expect(
             await page.evaluate(() => document.documentElement.scrollWidth),
             'the page stays within the viewport',
-          ).toBe(1280);
+          ).toBe(page.viewportSize()?.width);
         }
 
         expect(await page.evaluate(() => document.documentElement.dataset.theme), path).toBe(theme);
