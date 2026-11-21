@@ -43,22 +43,27 @@
         # nixos-config Export
         # ------------------------------------------------------------------------------------------
         promptFragments = import "${nixos-config}/home/modules/llm-assistants/shared/prompt-fragments";
+
         devkitSource =
           (builtins.fetchTree (builtins.fromJSON (builtins.readFile "${nixos-config}/flake.lock"))
             .nodes.devkit.locked).outPath;
+
         instructionSet = import "${nixos-config}/home/modules/llm-assistants/shared/instructions" {
           inherit promptFragments devkitSource;
           docsDir = "${nixos-config}/home/modules/llm-assistants/shared/instructions/docs";
         };
+
         nixosConfigExport = pkgs.writeText "nixos-config.json" (
           builtins.toJSON {
             inherit (nixos-config) rev;
             catalog = import "${nixos-config}/data/llm-models.nix";
+
             instructions = {
               claudeCode = builtins.concatStringsSep "\n\n" [
                 instructionSet.full
                 (builtins.readFile "${nixos-config}/home/modules/llm-assistants/claude-code/instructions.md")
               ];
+
               codex = instructionSet.full;
               omp = instructionSet.full;
             };
@@ -92,7 +97,9 @@
         # ------------------------------------------------------------------------------------------
         inherit (dk.nodeToolchain) pnpm;
         nodeMajor = pkgs.lib.versions.major dk.nodeToolchain.nodejs.version;
+
         pagesVariable = name: ".pages.variables.${name} // .variables.${name}";
+
         pagesCheck =
           name: label: query: pattern: expected:
           pkgs.runCommand name { nativeBuildInputs = [ pkgs.yq-go ]; } ''
@@ -111,8 +118,10 @@
         # ------------------------------------------------------------------------------------------
         devShells.default = pkgs.mkShell {
           name = "assistant-bench-dev";
+
           packages = builtins.attrValues dk.nodeToolchain ++ builtins.attrValues dk.uvToolchain;
           inputsFrom = [ preCommit ];
+
           env.BENCH_NIXOS_CONFIG = nixosConfigExport;
         };
 
@@ -128,6 +137,7 @@
           pages-pnpm =
             pagesCheck "pages-pnpm" "BENCH_PNPM_VERSION" (pagesVariable "BENCH_PNPM_VERSION") pnpm.version
               "pnpm ${pnpm.version}";
+
           pages-node =
             pagesCheck "pages-node" "The pages job's image"
               "(${pagesVariable "BENCH_NODE_IMAGE"}) as $v | (.pages.image // .image) | sub(\"\\$BENCH_NODE_IMAGE\"; $v)"
