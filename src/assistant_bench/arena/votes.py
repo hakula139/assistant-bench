@@ -3,11 +3,11 @@
 import hashlib
 import json
 from collections import defaultdict
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from itertools import combinations, product
 from statistics import median
-from typing import Literal, Protocol, get_args
+from typing import Literal, get_args
 
 from pydantic import (
     AwareDatetime,
@@ -24,7 +24,7 @@ from assistant_bench.arena.publication import (
     OutputFacts,
     output_key,
 )
-from assistant_bench.database import Database, Param, Row
+from assistant_bench.database import Database, Param
 from assistant_bench.families import Category, Choice, Defect, FamilyName
 from assistant_bench.messages import InputError, error_lines
 from assistant_bench.outputs import Output
@@ -250,35 +250,6 @@ def read_cut(database: Database, family: str, now: datetime) -> Cut | None:
     )
 
 
-class _Keyed(Protocol):
-    @property
-    def id(self) -> int: ...
-
-
-def _paged[T: _Keyed](
-    database: Database,
-    parse: Callable[[Row], T],
-    columns: str,
-    where: str,
-    params: Sequence[Param],
-) -> list[T]:
-    """Select `columns`, which include `id`, from the votes `where` holds, in ID order.
-
-    Each request reads one keyset page of at most `PAGE_ROWS` rows.
-    """
-    rows: list[T] = []
-    while True:
-        page = database.execute(
-            # `columns` and `where` are constant SQL from callers.
-            f'SELECT {columns} FROM votes WHERE {where} AND id > ? '  # noqa: S608
-            f'ORDER BY id LIMIT {PAGE_ROWS}',
-            [*params, rows[-1].id if rows else 0],
-        ).rows
-        rows.extend(map(parse, page))
-        if len(page) < PAGE_ROWS:
-            return rows
-
-
 class FamilyStatus(_Model):
     family: str
     publication_id: str
@@ -384,14 +355,17 @@ def listed(
         where = f'{where} AND {condition}'
         params.append(param)
 
-    return _paged(
-        database,
-        ListedVote.model_validate,
-        'id, actor_id AS actor, ip_tag, a_system, b_system, choice, elapsed_ms, '
-        'recorded_at, exclusion',
-        where,
-        params,
-    )
+    rows: list[ListedVote] = []
+    while True:
+        page = database.execute(
+            'SELECT id, actor_id AS actor, ip_tag, a_system, b_system, choice, '  # noqa: S608
+            'elapsed_ms, recorded_at, exclusion FROM votes '
+            f'WHERE {where} AND id > ? ORDER BY id LIMIT ?',
+            [*params, rows[-1].id if rows else 0, PAGE_ROWS],
+        ).rows
+        rows.extend(map(ListedVote.model_validate, page))
+        if len(page) < PAGE_ROWS:
+            return rows
 
 
 def groups(database: Database, family: str, by: Grouping) -> list[Group]:
