@@ -68,6 +68,9 @@ export function useVoteSession() {
 
   /** Shows a pair state, restoring the tab's draft only when it belongs to the same pair. */
   const show = (name: string, next: PairSnapshot, options: { restore?: boolean } = {}) => {
+    if (!mounted.current) {
+      return;
+    }
     const stored = readDraft();
     const id = next.pair?.id ?? null;
     let shown: Draft;
@@ -122,6 +125,9 @@ export function useVoteSession() {
     onRead: (next: PairSnapshot) => void,
     onError: (reason: unknown) => void,
   ) => {
+    if (!mounted.current) {
+      return;
+    }
     pairRead.current?.abort();
     const controller = new AbortController();
     pairRead.current = controller;

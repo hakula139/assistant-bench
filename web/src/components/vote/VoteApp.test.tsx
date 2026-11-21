@@ -866,6 +866,41 @@ describe('VoteApp', () => {
     expect(sessionStorage.getItem('bench-vote')).toBe('draft from the new session');
   });
 
+  test.each([
+    ['Skip', '/api/pair/skip'],
+    ['Undo', '/api/votes/undo'],
+  ])('discards the response to %s after unmounting', async (action, path) => {
+    const api = stubApi();
+    const user = userEvent.setup();
+    const page = render(<VoteApp />);
+    await user.click(await screen.findByRole('button', { name: FAMILY.display_name }));
+    await screen.findByText('Output A1');
+    await user.keyboard('a{Enter}');
+    await screen.findByText('Output A2');
+    const response = Promise.withResolvers<undefined>();
+    const original = api.fetch.getMockImplementation();
+    api.fetch.mockImplementation(async (url, init) => {
+      if (url === path) {
+        await response.promise;
+      }
+      return original?.(url, init) ?? Promise.reject(new Error('No stub'));
+    });
+
+    await user.click(screen.getByRole('button', { name: new RegExp(action) }));
+    expect(api.fetch.mock.calls.filter(([url]) => url === path)).toHaveLength(1);
+    const pairReads = api.fetch.mock.calls.filter(([url]) => url.startsWith('/api/pair?')).length;
+    page.unmount();
+    sessionStorage.setItem('bench-vote', 'draft from the new session');
+    await act(async () => {
+      response.resolve(undefined);
+    });
+
+    expect(api.fetch.mock.calls.filter(([url]) => url.startsWith('/api/pair?'))).toHaveLength(
+      pairReads,
+    );
+    expect(sessionStorage.getItem('bench-vote')).toBe('draft from the new session');
+  });
+
   test('keeps the ballot locked when the rate limit refuses a retried vote', async () => {
     const api = stubApi();
     const user = await startVoting();
