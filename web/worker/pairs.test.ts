@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { describe, expect, test, vi } from 'vitest';
 
-import { candidates, draw, next, ranker, type Comparison, type Rank } from './pairs';
+import { candidates, draw, next, ranker, type Rank } from './pairs';
 import {
   actorOf,
   admitted,
@@ -35,7 +35,7 @@ const systemsOf = (row: { a_system: string; b_system: string } | null) =>
   row === null ? null : [row.a_system, row.b_system].sort();
 
 describe('candidates', () => {
-  test('expands pair facts and skips voted comparisons regardless of their side order', () => {
+  test('groups remaining cases by system pair regardless of vote side order', () => {
     const facts = [
       { low_system: 'large', high_system: 'pro', case_keys: '["first", "second"]' },
       { low_system: 'large', high_system: 'small', case_keys: '["first"]' },
@@ -44,10 +44,10 @@ describe('candidates', () => {
 
     const found = candidates(facts, [{ case_key: 'first', a_system: 'pro', b_system: 'large' }]);
 
-    expect(found).toEqual([
-      { caseKey: 'second', systems: ['large', 'pro'] },
-      { caseKey: 'first', systems: ['large', 'small'] },
-      { caseKey: 'first', systems: ['pro', 'small'] },
+    expect([...found.values()]).toEqual([
+      { systems: ['large', 'pro'], caseKeys: ['second'] },
+      { systems: ['large', 'small'], caseKeys: ['first'] },
+      { systems: ['pro', 'small'], caseKeys: ['first'] },
     ]);
   });
 
@@ -59,19 +59,18 @@ describe('candidates', () => {
     const found = candidates(facts, []);
     const remaining = candidates(facts, [{ case_key: 'first', a_system: bmp, b_system: astral }]);
 
-    expect(found).toEqual([
-      { caseKey: 'first', systems: [astral, bmp] },
-      { caseKey: 'second', systems: [astral, bmp] },
+    expect([...found.values()]).toEqual([
+      { systems: [astral, bmp], caseKeys: ['first', 'second'] },
     ]);
-    expect(remaining).toEqual([{ caseKey: 'second', systems: [astral, bmp] }]);
+    expect([...remaining.values()]).toEqual([{ systems: [astral, bmp], caseKeys: ['second'] }]);
   });
 });
 
 describe('draw', () => {
-  const comparison = (caseKey: string, low: string, high: string): Comparison => ({
-    caseKey,
-    systems: [low, high],
-  });
+  const facts = [
+    { low_system: 'large', high_system: 'pro', case_keys: '["first"]' },
+    { low_system: 'large', high_system: 'small', case_keys: '["first", "second"]' },
+  ];
 
   /** A voter's order given as fixed ranks, with every unlisted item ranked last. */
   const fixed =
@@ -80,18 +79,11 @@ describe('draw', () => {
       Promise.resolve(ranks[parts.join(' ')] ?? 'f0');
 
   test('draws the least covered system pair over the one the voter ranks first', async () => {
-    const comparisons = [
-      comparison('first', 'large', 'pro'),
-      comparison('first', 'large', 'small'),
-      comparison('first', 'pro', 'small'),
-    ];
+    const groups = candidates(facts, []);
     const rank = fixed({ 'pair large pro': '00', 'pair large small': '10' });
-    const coverage = new Map([
-      [JSON.stringify(['large', 'pro']), 1],
-      [JSON.stringify(['pro', 'small']), 1],
-    ]);
+    const coverage = new Map([[JSON.stringify(['large', 'pro']), 1]]);
 
-    const drawn = await draw(rank, comparisons, coverage);
+    const drawn = await draw(rank, groups, coverage);
 
     expect(drawn).toEqual({ caseKey: 'first', systems: ['large', 'small'] });
   });
@@ -104,15 +96,7 @@ describe('draw', () => {
       'case large small second': '00',
     });
 
-    const drawn = await draw(
-      rank,
-      [
-        comparison('first', 'large', 'pro'),
-        comparison('first', 'large', 'small'),
-        comparison('second', 'large', 'small'),
-      ],
-      new Map(),
-    );
+    const drawn = await draw(rank, candidates(facts, []), new Map());
 
     expect(drawn).toEqual({ caseKey: 'second', systems: ['large', 'small'] });
   });
@@ -120,15 +104,13 @@ describe('draw', () => {
 
 describe('next', () => {
   test('orders one system pair differently for different voters', async () => {
-    const comparisons = candidates(
-      [{ low_system: 'a', high_system: 'b', case_keys: JSON.stringify(Object.keys(threeWay(8))) }],
-      [],
-    );
+    const caseKeys = Object.keys(threeWay(8));
+    const group = { systems: ['a', 'b'] as const, caseKeys };
     const order = async (actor: string) => {
       const rank = ranker('key', actor, 'family');
-      const seen = [comparisons[0].caseKey];
-      for (let step = 1; step < comparisons.length; step++) {
-        const drawn = await next(rank, comparisons, seen[seen.length - 1]);
+      const seen = [caseKeys[0]];
+      for (let step = 1; step < caseKeys.length; step++) {
+        const drawn = await next(rank, group, seen[seen.length - 1]);
         seen.push(drawn?.caseKey ?? 'none');
       }
       return seen;
@@ -137,7 +119,8 @@ describe('next', () => {
     const first = await order('first-actor');
     const second = await order('second-actor');
 
-    expect(new Set(first).size).toBe(comparisons.length);
+    expect(new Set(first)).toEqual(new Set(caseKeys));
+    expect(new Set(second)).toEqual(new Set(caseKeys));
     expect(first).not.toEqual(second);
   });
 });

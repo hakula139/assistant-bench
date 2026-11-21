@@ -33,22 +33,29 @@ interface VoteRow {
   recorded_at: number;
 }
 
-export interface PassingOutput {
+interface PassingOutput {
   output_key: string;
   case_key: string;
   system: string;
   content_digest: string;
 }
 
-export interface PairCases {
+interface PairCases {
   low_system: string;
   high_system: string;
   case_keys: string;
 }
 
-export interface Comparison {
+type SystemPair = readonly [string, string];
+
+interface Comparison {
   caseKey: string;
-  systems: readonly [string, string];
+  systems: SystemPair;
+}
+
+interface CandidateGroup {
+  systems: SystemPair;
+  caseKeys: readonly string[];
 }
 
 /** A case and the outputs shown as A and B. */
@@ -104,28 +111,35 @@ const REPLACE = `
     AND publication_id = (SELECT publication_id FROM active WHERE family = pairs.family)`;
 
 const key = (...parts: string[]) => JSON.stringify(parts);
-const sorted = (a: string, b: string) => (a < b ? ([a, b] as const) : ([b, a] as const));
+const sorted = (a: string, b: string): SystemPair => (a < b ? [a, b] : [b, a]);
 
 export function ranker(actorKey: string, actor: string, family: string): Rank {
   const sign = signer(actorKey);
   return async (...parts) => hex(await sign(key('draw', actor, family, ...parts)));
 }
 
-/** Every comparison whose two systems pass on the case with some differing pair of samples. */
+/** Cases still open to the voter with differing passing samples from both systems. */
 export function candidates(
   facts: readonly PairCases[],
   voted: readonly Pick<VoteRow, 'case_key' | 'a_system' | 'b_system'>[],
-): Comparison[] {
-  const done = new Set(
-    voted.map((vote) => key(vote.case_key, ...sorted(vote.a_system, vote.b_system))),
-  );
+): Map<string, CandidateGroup> {
+  const history = Map.groupBy(voted, ({ a_system: a, b_system: b }) => key(...sorted(a, b)));
+  const groups = new Map<string, CandidateGroup>();
 
-  return facts.flatMap(({ low_system: low, high_system: high, case_keys }) => {
+  for (const { low_system: low, high_system: high, case_keys } of facts) {
     const systems = sorted(low, high);
-    return (JSON.parse(case_keys) as string[]).flatMap((caseKey) =>
-      done.has(key(caseKey, ...systems)) ? [] : [{ caseKey, systems }],
-    );
-  });
+    const pairKey = key(...systems);
+    const caseKeys = JSON.parse(case_keys) as string[];
+    const votes = history.get(pairKey);
+    const done = votes && new Set(votes.map(({ case_key }) => case_key));
+    const remaining = done ? caseKeys.filter((caseKey) => !done.has(caseKey)) : caseKeys;
+
+    if (remaining.length > 0) {
+      groups.set(pairKey, { systems, caseKeys: remaining });
+    }
+  }
+
+  return groups;
 }
 
 async function ordered<T>(items: readonly T[], rank: (item: T) => Promise<string>) {
@@ -135,11 +149,9 @@ async function ordered<T>(items: readonly T[], rank: (item: T) => Promise<string
     .sort((a, b) => (a.rank < b.rank ? -1 : a.rank > b.rank ? 1 : 0));
 }
 
-/** One system pair's comparisons in the voter's order of their cases. */
-async function caseOrder(rank: Rank, comparisons: readonly Comparison[]) {
-  const order = await ordered(comparisons, ({ caseKey, systems }) =>
-    rank('case', ...systems, caseKey),
-  );
+/** One system pair's cases in the voter's order. */
+async function caseOrder(rank: Rank, { systems, caseKeys }: CandidateGroup) {
+  const order = await ordered(caseKeys, (caseKey) => rank('case', ...systems, caseKey));
   return order.map(({ item }) => item);
 }
 
@@ -171,38 +183,40 @@ async function place(
 
 /**
  * The first case, in the voter's order, of the system pair with the fewest counted votes in the
- * family, ties going to the voter's order of system pairs. `comparisons` must not be empty.
+ * family, ties going to the voter's order of system pairs. `groups` must not be empty.
  */
 export async function draw(
   rank: Rank,
-  comparisons: readonly Comparison[],
+  groups: ReadonlyMap<string, CandidateGroup>,
   coverage: ReadonlyMap<string, number>,
 ): Promise<Comparison> {
-  const pairs = [...new Map(comparisons.map(({ systems }) => [key(...systems), systems])).values()];
-  const votes = (systems: readonly string[]) => coverage.get(key(...systems)) ?? 0;
-  const fewest = Math.min(...pairs.map(votes));
+  const pairs = [...groups].map(([pairKey, group]) => ({
+    group,
+    votes: coverage.get(pairKey) ?? 0,
+  }));
+  const fewest = Math.min(...pairs.map(({ votes }) => votes));
   const [chosen] = await ordered(
-    pairs.filter((systems) => votes(systems) === fewest),
-    (systems) => rank('pair', ...systems),
+    pairs.filter(({ votes }) => votes === fewest),
+    ({ group }) => rank('pair', ...group.systems),
   );
-  const [first] = await caseOrder(
-    rank,
-    comparisons.filter(({ systems }) => key(...systems) === key(...chosen.item)),
-  );
-  return first;
+  const { group } = chosen.item;
+  const [caseKey] = await caseOrder(rank, group);
+  return { caseKey, systems: group.systems };
 }
 
 /** The case after `current` in the voter's order for one system pair, wrapping around. */
 export async function next(
   rank: Rank,
-  comparisons: readonly Comparison[],
+  group: CandidateGroup | undefined,
   current: string,
 ): Promise<Comparison | null> {
-  const order = await caseOrder(rank, comparisons);
-  const following = order.at(
-    (order.findIndex(({ caseKey }) => caseKey === current) + 1) % order.length,
-  );
-  return following === undefined || following.caseKey === current ? null : following;
+  if (group === undefined) {
+    return null;
+  }
+
+  const order = await caseOrder(rank, group);
+  const caseKey = order[(order.indexOf(current) + 1) % order.length];
+  return caseKey === current ? null : { caseKey, systems: group.systems };
 }
 
 /** An actor's standing in a family, as one batch reads it. */
@@ -211,7 +225,7 @@ interface Standing {
   /** The pending pair, while it belongs to the active publication. */
   pending: PendingRow | undefined;
   voted: VoteRow[];
-  comparisons: Comparison[];
+  groups: ReadonlyMap<string, CandidateGroup>;
 }
 
 /** Reads the family's active publication, or 404 `no_round`, with the actor's standing in it. */
@@ -233,12 +247,12 @@ async function read(db: D1Database, actor: string, family: string): Promise<Stan
     active,
     pending: pending?.publication_id === active.id ? pending : undefined,
     voted,
-    comparisons: candidates(pairRows.results as PairCases[], voted),
+    groups: candidates(pairRows.results as PairCases[], voted),
   };
 }
 
 function view(
-  { active, voted, comparisons }: Standing,
+  { active, voted, groups }: Standing,
   pending: PendingRow | undefined,
   now: number,
 ): PairState {
@@ -257,7 +271,7 @@ function view(
             defects: JSON.parse(active.defects) as Defect[],
           },
     votes: voted.length,
-    remaining: comparisons.length,
+    remaining: [...groups.values()].reduce((sum, group) => sum + group.caseKeys.length, 0),
     undo: voted.some((vote) => vote.counted && vote.recorded_at > now - UNDO_MS),
   };
 }
@@ -273,7 +287,7 @@ export async function pairState(
   const standing = await read(db, actor, family);
   const pending =
     standing.pending ??
-    (await issue(db, actorKey, actor, family, standing.active.id, standing.comparisons, now));
+    (await issue(db, actorKey, actor, family, standing.active.id, standing.groups, now));
   return view(standing, pending, now);
 }
 
@@ -283,10 +297,10 @@ async function issue(
   actor: string,
   family: string,
   publication: string,
-  comparisons: readonly Comparison[],
+  groups: ReadonlyMap<string, CandidateGroup>,
   now: number,
 ): Promise<PendingRow | undefined> {
-  if (comparisons.length === 0) {
+  if (groups.size === 0) {
     return undefined;
   }
 
@@ -297,7 +311,7 @@ async function issue(
   const rank = ranker(actorKey, actor, family);
   const comparison = await draw(
     rank,
-    comparisons,
+    groups,
     new Map(coverage.results.map(({ low, high, votes }) => [key(...sorted(low, high)), votes])),
   );
   const drawn = await place(db, publication, rank, comparison);
@@ -350,11 +364,7 @@ export async function skip(
 
   const systems = key(...sorted(pending.a_system, pending.b_system));
   const rank = ranker(actorKey, actor, family);
-  const comparison = await next(
-    rank,
-    standing.comparisons.filter((comparison) => key(...comparison.systems) === systems),
-    pending.case_key,
-  );
+  const comparison = await next(rank, standing.groups.get(systems), pending.case_key);
   if (comparison === null) {
     return view(standing, pending, now);
   }
