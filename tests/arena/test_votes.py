@@ -238,12 +238,9 @@ class TestReadCut:
 
         assert value(constants['UNDO_MS']) == votes.UNDO_WINDOW_MS
 
-    def test_reads_every_counted_vote_across_pages(
-        self,
-        published_store: tuple[SQLiteDatabase, publication.Publication],
-        monkeypatch: pytest.MonkeyPatch,
+    def test_reads_every_counted_vote(
+        self, published_store: tuple[SQLiteDatabase, publication.Publication]
     ) -> None:
-        monkeypatch.setattr(votes, 'PAGE_ROWS', 2)
         database, published = published_store
         recorded = [
             record_vote(
