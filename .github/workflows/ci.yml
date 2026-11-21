@@ -238,7 +238,8 @@ jobs:
 
   deploy:
     name: Deploy Voting
-    if: github.ref == 'refs/heads/main'
+    # The skipped PR preview propagates through the implicit success() check.
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && needs.result.result == 'success' }}
     needs: result
     runs-on: ubuntu-latest
     timeout-minutes: 10
