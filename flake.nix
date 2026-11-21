@@ -46,12 +46,21 @@
         devkitSource =
           (builtins.fetchTree (builtins.fromJSON (builtins.readFile "${nixos-config}/flake.lock"))
             .nodes.devkit.locked).outPath;
+        instructionSet = import "${nixos-config}/home/modules/llm-assistants/shared/instructions" {
+          inherit promptFragments devkitSource;
+          docsDir = "${nixos-config}/home/modules/llm-assistants/shared/instructions/docs";
+        };
         nixosConfigExport = pkgs.writeText "nixos-config.json" (
           builtins.toJSON {
             inherit (nixos-config) rev;
             catalog = import "${nixos-config}/data/llm-models.nix";
-            instructions = import "${nixos-config}/home/modules/llm-assistants/instructions" {
-              inherit promptFragments devkitSource;
+            instructions = {
+              claudeCode = builtins.concatStringsSep "\n\n" [
+                instructionSet.full
+                (builtins.readFile "${nixos-config}/home/modules/llm-assistants/claude-code/instructions.md")
+              ];
+              codex = instructionSet.full;
+              omp = instructionSet.full;
             };
           }
         );
