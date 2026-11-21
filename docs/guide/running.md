@@ -36,6 +36,22 @@ uv run bench check coding-repo --task <task>
 
 Checks use committed sources by default and need no cloud credentials. Add `--private` to include cases from the pinned private repository, which requires GitHub authentication but no D1 access.
 
+## Setting Up Private D1
+
+Runs and collection use the `DB` binding in the `private` environment of `web/wrangler.toml`. On a new private database, apply the [voting migrations](#setting-up-a-vote-store) with `--env private` first. The additional [runtime schema](../../src/assistant_bench/sql/private/) uses numbered SQL files that Wrangler's voting migration history does not track.
+
+Compare each runtime file's tables, indexes and triggers with the remote definitions returned by this query.
+
+```bash
+pnpm --filter web exec wrangler d1 execute DB --env private --remote --command 'SELECT name, sql FROM sqlite_schema WHERE sql IS NOT NULL ORDER BY name'
+```
+
+Apply a file only when all its objects are absent. If any existing definition differs or a file is partially installed, resolve the discrepancy first. Apply missing files in numeric order, replacing `<filename>` with one filename at a time. Repeat the schema query to verify the new definitions before running a family.
+
+```bash
+pnpm --filter web exec wrangler d1 execute DB --env private --remote --file "../src/assistant_bench/sql/private/<filename>"
+```
+
 ## Running a Family
 
 ```bash
@@ -152,7 +168,7 @@ Use `bench arena status private` and `bench arena votes private <family>` to ins
 
 ### Setting Up a Vote Store
 
-`web/wrangler.toml` names each target's database, and `web/migrations/` holds its schema. Create a missing database, record the `database_id` it prints under the target's `[[env.<target>.d1_databases]]` entry, then apply the migrations:
+`web/wrangler.toml` names each target's database, and `web/migrations/` holds the voting schema. Create a missing database, record the `database_id` it prints under the target's `[[env.<target>.d1_databases]]` entry, then apply the migrations:
 
 ```bash
 pnpm --filter web exec wrangler d1 create assistant-bench-arena-staging
