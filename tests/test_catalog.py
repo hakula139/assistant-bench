@@ -191,6 +191,8 @@ class TestLoadSystems:
             'opus-5.5-high': 'Claude Opus 5.5 · High',
             'gpt-6-astra-high': 'GPT-6 Astra · High',
             'gpt-6.1-sol-high': 'GPT-6.1 Sol · High',
+            'gpt-6.2-astra-high': 'GPT-6.2 Astra · High',
+            'gpt-6.2-sol-high': 'GPT-6.2 Sol · High',
             'gemini-4-argon-high': 'Gemini 4 Argon · High',
             'gemini-3.8-flash-high': 'Gemini 3.8 Flash · High',
             'deepseek-v4.1-flash-1017-high': 'DeepSeek V4.1 Flash 1017 · High',
@@ -198,6 +200,8 @@ class TestLoadSystems:
             'opus-5.5-high-nixos': 'Claude Opus 5.5 · High · Instructions',
             'gpt-6-astra-high-nixos': 'GPT-6 Astra · High · Instructions',
             'gpt-6.1-sol-high-nixos': 'GPT-6.1 Sol · High · Instructions',
+            'gpt-6.2-astra-high-nixos': 'GPT-6.2 Astra · High · Instructions',
+            'gpt-6.2-sol-high-nixos': 'GPT-6.2 Sol · High · Instructions',
             'gemini-4-argon-high-nixos': 'Gemini 4 Argon · High · Instructions',
             'gemini-3.8-flash-high-nixos': 'Gemini 3.8 Flash · High · Instructions',
             'deepseek-v4.1-flash-1017-high-nixos': (
@@ -213,8 +217,12 @@ class TestLoadSystems:
         } == {
             'gpt-6-astra-high',
             'gpt-6.1-sol-high',
+            'gpt-6.2-astra-high',
+            'gpt-6.2-sol-high',
             'gpt-6-astra-high-nixos',
             'gpt-6.1-sol-high-nixos',
+            'gpt-6.2-astra-high-nixos',
+            'gpt-6.2-sol-high-nixos',
             'gemini-3.8-flash-codex-high',
         }
         native = systems['opus-5.5-high']

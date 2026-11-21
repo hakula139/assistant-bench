@@ -4,6 +4,8 @@ systems = [
   "opus-5.5-high",
   "gpt-6-astra-high",
   "gpt-6.1-sol-high",
+  "gpt-6.2-astra-high",
+  "gpt-6.2-sol-high",
   "gemini-4-argon-high",
   "gemini-3.8-flash-high",
   "deepseek-v4.1-flash-1017-high",

@@ -16,6 +16,18 @@ api = "openai-responses"
 effort = "high"
 display_name = "GPT-6.1 Sol · High"
 
+["gpt-6.2-astra-high"]
+model = "gpt-6.2-astra"
+api = "openai-responses"
+effort = "high"
+display_name = "GPT-6.2 Astra · High"
+
+["gpt-6.2-sol-high"]
+model = "gpt-6.2-sol"
+api = "openai-responses"
+effort = "high"
+display_name = "GPT-6.2 Sol · High"
+
 ["gemini-4-argon-high"]
 model = "gemini-4-argon"
 effort = "high"
@@ -56,6 +68,20 @@ api = "openai-responses"
 effort = "high"
 prompt = "nixos-config:claudeCode"
 display_name = "GPT-6.1 Sol · High · Instructions"
+
+["gpt-6.2-astra-high-nixos"]
+model = "gpt-6.2-astra"
+api = "openai-responses"
+effort = "high"
+prompt = "nixos-config:claudeCode"
+display_name = "GPT-6.2 Astra · High · Instructions"
+
+["gpt-6.2-sol-high-nixos"]
+model = "gpt-6.2-sol"
+api = "openai-responses"
+effort = "high"
+prompt = "nixos-config:claudeCode"
+display_name = "GPT-6.2 Sol · High · Instructions"
 
 ["gemini-4-argon-high-nixos"]
 model = "gemini-4-argon"
