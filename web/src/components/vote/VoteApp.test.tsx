@@ -381,6 +381,7 @@ describe('VoteApp', () => {
       'Voting needs cookies. Allow cookies for this site, then reload the page.',
     );
     expect(screen.queryByTestId('turnstile')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Reload page' })).toBeDefined();
     expect(api.fetch.mock.calls.filter(([path]) => path === '/api/actors')).toHaveLength(1);
   });
 
@@ -428,6 +429,11 @@ describe('VoteApp', () => {
     await user.click(screen.getByRole('button', { name: /Skip/ }));
     await screen.findByRole('alert');
     const requests = api.fetch.mock.calls.length;
+    expect(screen.getByRole('button', { name: /Submit vote/ })).toHaveProperty('disabled', true);
+    expect(screen.getByRole('button', { name: /Skip/ })).toHaveProperty('disabled', true);
+    await user.keyboard('{Enter}su');
+    expect(api.fetch).toHaveBeenCalledTimes(requests);
+
     await user.click(screen.getByRole('button', { name: 'Reload page' }));
 
     expect(reload).toHaveBeenCalledExactlyOnceWith();
@@ -798,8 +804,16 @@ describe('VoteApp', () => {
   });
 
   test('requires verification again without resending the vote on a confirmation challenge', async () => {
-    const api = stubApi();
-    const user = await startVoting();
+    const api = stubApi({ admitted: false });
+    const user = userEvent.setup();
+    history.replaceState(null, '', `/vote/?family=${FAMILY.family}`);
+    render(<VoteApp />);
+    await screen.findByTestId('turnstile');
+    act(() => {
+      widget().onSuccess?.('first-proof');
+    });
+    await screen.findByText('Output A1');
+
     override(api, '/api/votes/confirm', () =>
       Promise.resolve(
         Response.json({ error: 'admission_required', sitekey: SITEKEY }, { status: 401 }),
@@ -824,6 +838,32 @@ describe('VoteApp', () => {
     await screen.findByText('Output A2');
     expect(api.casts).toEqual([{ pair: pairId(1), choice: 'b', defects: { a: ['scope'], b: [] } }]);
     expect(api.fetch.mock.calls.filter(([path]) => path === '/api/votes/confirm')).toHaveLength(1);
+  });
+
+  test('does not reload the pair or replace the tab draft after unmounting during confirmation', async () => {
+    const api = stubApi();
+    const user = userEvent.setup();
+    const page = render(<VoteApp />);
+    await user.click(await screen.findByRole('button', { name: FAMILY.display_name }));
+    await screen.findByText('Output A1');
+    const confirming = Promise.withResolvers<Response>();
+    override(api, '/api/votes/confirm', () => confirming.promise);
+    api.fetch.mockImplementationOnce(() => Promise.reject(new TypeError('Connection closed')));
+
+    await user.keyboard('a{Enter}');
+    await waitFor(() => {
+      expect(api.fetch.mock.calls.filter(([path]) => path === '/api/votes/confirm')).toHaveLength(
+        1,
+      );
+    });
+    page.unmount();
+    sessionStorage.setItem('bench-vote', 'draft from the new session');
+    await act(async () => {
+      confirming.resolve(Response.json({ error: 'stale_pair' }, { status: 409 }));
+    });
+
+    expect(api.pairRequests).toEqual([FAMILY.family]);
+    expect(sessionStorage.getItem('bench-vote')).toBe('draft from the new session');
   });
 
   test('keeps the ballot locked when the rate limit refuses a retried vote', async () => {

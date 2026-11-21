@@ -56,10 +56,11 @@ export function useVoteSession() {
   const [busy, setBusy] = useState(false);
   // A browser that keeps no cookie asks for admission again right after passing it.
   const admitted = useRef(false);
+  const mounted = useRef(true);
   const pairRead = useRef<AbortController | null>(null);
 
   const pair = state?.pair ?? null;
-  const locked = busy || sitekey !== null || failedVote !== null;
+  const locked = busy || sitekey !== null || failedVote !== null || error?.reload === true;
   const choiceBody =
     pair !== null && draft !== null && draft.choice !== null
       ? { pair: pair.id, choice: draft.choice, defects: draft.defects }
@@ -93,7 +94,7 @@ export function useVoteSession() {
 
   const failed = (reason: unknown) => {
     if (isCode(reason, 'admission_required') && admitted.current) {
-      setError({ message: COOKIES, reload: false });
+      setError({ message: COOKIES, reload: true });
     } else if (isCode(reason, 'admission_required') && reason.sitekey !== undefined) {
       setSitekey(reason.sitekey);
       setError(null);
@@ -129,6 +130,7 @@ export function useVoteSession() {
     try {
       const next = await getPair(name, signal);
       if (!signal.aborted) {
+        admitted.current = false;
         onRead(next);
       }
     } catch (reason) {
@@ -217,8 +219,10 @@ export function useVoteSession() {
   });
 
   useEffect(() => {
+    mounted.current = true;
     initialize();
     return () => {
+      mounted.current = false;
       pairRead.current?.abort();
     };
   }, []);
@@ -287,8 +291,11 @@ export function useVoteSession() {
   const confirmSubmittedVote = async (name: string, body: VoteRequest): Promise<boolean> => {
     try {
       await confirmVote(body);
-      return true;
+      return mounted.current;
     } catch (reason) {
+      if (!mounted.current) {
+        return false;
+      }
       if (!isCode(reason, 'stale_pair')) {
         holdVote(body, reason);
         return false;
@@ -332,6 +339,9 @@ export function useVoteSession() {
       try {
         await castVote(body);
       } catch (reason) {
+        if (!mounted.current) {
+          return;
+        }
         if (failedVote === null && isTransientTransport(reason)) {
           if (!(await confirmSubmittedVote(family, body))) {
             return;
@@ -349,6 +359,9 @@ export function useVoteSession() {
         }
       }
 
+      if (!mounted.current) {
+        return;
+      }
       clearBallot();
       setFailedVote(null);
       setSaved(true);
