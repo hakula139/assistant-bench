@@ -66,6 +66,11 @@ describe('blinding', () => {
     for (const pair of [drawn, skipped, skipped]) {
       await send(from, 'POST', '/votes', { pair, choice: 'a', defects: { a: [], b: [] } });
     }
+    await send(from, 'POST', '/votes/confirm', {
+      pair: skipped,
+      choice: 'a',
+      defects: { a: [], b: [] },
+    });
     await send(from, 'GET', `/pair?family=${BLIND}`);
     await send(from, 'POST', '/votes/undo', { family: BLIND, pair: skipped });
     await send(from, 'POST', '/votes/undo', { family: BLIND, pair: skipped });
@@ -104,6 +109,21 @@ describe('requests', () => {
 
     expect(response.status).toBe(403);
     expect(await response.json()).toEqual({ error: 'forbidden' });
+  });
+
+  test('requires an admitted actor and matching Origin to confirm a vote', async () => {
+    const from = await admitted();
+    const { pair } = await pairOf(from);
+    const body = { pair: pair?.id, choice: 'a', defects: { a: [], b: [] } };
+    expect((await call(from, 'POST', '/votes', body)).status).toBe(204);
+
+    const anonymous = await call(browser(), 'POST', '/votes/confirm', body);
+    const foreign = await call(from, 'POST', '/votes/confirm', body, {
+      Origin: 'https://example.com',
+    });
+
+    expect(anonymous.status).toBe(401);
+    expect(foreign.status).toBe(403);
   });
 
   test('refuse a body over 16 KB', async () => {

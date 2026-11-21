@@ -33,7 +33,7 @@ import { BODY_LIMIT_BYTES } from './limits';
 import { pairState, skip, type PairSnapshot } from './pairs';
 import { preview, previewHeaders, previewUnavailable } from './previews';
 import { retain } from './retention';
-import { cachedFreshness, freshness, record, undo } from './votes';
+import { cachedFreshness, confirm, freshness, record, undo } from './votes';
 
 /** Answers every request that fails its schema with 400 `invalid_request`. */
 function rejectInvalid(result: { success: boolean }) {
@@ -164,6 +164,11 @@ const api = new Hono<Api>()
     const now = Date.now();
     const actor = await requireActor(c, now);
     await record(c.env.DB, actor, c.get('tag'), c.req.valid('json'), now);
+    return c.body(null, 204);
+  })
+  .post('/votes/confirm', sValidator('json', voteRequest, rejectInvalid), async (c) => {
+    const actor = await requireActor(c, Date.now());
+    await confirm(c.env.DB, actor, c.req.valid('json'));
     return c.body(null, 204);
   })
   .post('/votes/undo', sValidator('json', undoRequest, rejectInvalid), async (c) => {

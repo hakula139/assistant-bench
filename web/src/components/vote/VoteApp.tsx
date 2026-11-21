@@ -581,10 +581,6 @@ export function VoteApp() {
   const recovery =
     sitekey !== null ? (
       <Verification sitekey={sitekey} onReady={verified} />
-    ) : voteFailed ? (
-      <Button disabled={busy} onClick={submit}>
-        Retry vote
-      </Button>
     ) : reloadRequired ? (
       <Button
         disabled={busy}
@@ -593,6 +589,10 @@ export function VoteApp() {
         }}
       >
         Reload page
+      </Button>
+    ) : voteFailed ? (
+      <Button disabled={busy} onClick={submit}>
+        Retry vote
       </Button>
     ) : nextPairFailure === 'no_round' ? (
       <Button asChild>

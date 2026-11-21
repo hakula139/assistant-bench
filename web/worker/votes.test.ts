@@ -275,6 +275,78 @@ describe('POST /api/votes', () => {
   });
 });
 
+describe('POST /api/votes/confirm', () => {
+  test('confirms the same choice and issue sets even at the vote cap', async () => {
+    await fillCap({ count: VOTES_PER_TAG - 1 });
+    const from = await admitted(TAG_IP);
+    const { pair } = await pairOf(from);
+    const recorded = { pair: pair?.id, choice: 'b', defects: { a: ['tone', 'facts'], b: [] } };
+    expect((await call(from, 'POST', '/votes', recorded)).status).toBe(204);
+    const before = await storedVotes();
+    const duplicate = { ...recorded, defects: { a: ['facts', 'tone', 'facts'], b: [] } };
+
+    const receipt = await call(from, 'POST', '/votes/confirm', duplicate);
+
+    expect(receipt.status).toBe(204);
+    expect(await storedVotes()).toEqual(before);
+    expect(await pendingRow(pair?.id ?? '')).toBeNull();
+  });
+
+  test('gives the same refusal for an absent, foreign or different vote', async () => {
+    const from = await admitted();
+    const other = await admitted('192.0.2.63');
+    const { pair } = await pairOf(from);
+    const body = { pair: pair?.id, choice: 'b', defects: { a: ['facts'], b: [] } };
+    const missing = await call(from, 'POST', '/votes/confirm', body);
+    expect(missing.status).toBe(409);
+    expect(await missing.json()).toEqual({ error: 'stale_pair' });
+    expect((await call(from, 'POST', '/votes', body)).status).toBe(204);
+    await env.DB.prepare("UPDATE votes SET exclusion = 'trash'").run();
+
+    const replies = await Promise.all([
+      call(from, 'POST', '/votes/confirm', { ...body, choice: 'tie' }),
+      call(from, 'POST', '/votes/confirm', { ...body, defects: { a: [], b: ['facts'] } }),
+      call(other, 'POST', '/votes/confirm', body),
+    ]);
+
+    for (const reply of replies) {
+      expect(reply.status).toBe(409);
+      expect(await reply.json()).toEqual({ error: 'stale_pair' });
+    }
+    const receipt = await call(from, 'POST', '/votes/confirm', body);
+    expect(receipt.status).toBe(204);
+    expect(await storedVotes()).toMatchObject([{ pair_id: pair?.id, choice: 'b' }]);
+    expect(await coverage()).toEqual([]);
+  });
+
+  test('leaves a pending pair untouched when an older Worker withdrew its vote', async () => {
+    const from = await admitted();
+    const { pair } = await pairOf(from);
+    const body = { pair: pair?.id, choice: 'a', defects: { a: [], b: [] } };
+    expect((await call(from, 'POST', '/votes', body)).status).toBe(204);
+    await env.DB.batch([
+      env.DB.prepare(
+        `INSERT INTO pairs
+           (id, actor_id, family, publication_id, case_key, a_output, b_output, issued_at)
+         SELECT pair_id, actor_id, family, publication_id, case_key, a_output, b_output,
+           recorded_at - elapsed_ms
+         FROM votes WHERE pair_id = ?`,
+      ).bind(pair?.id),
+      env.DB.prepare('DELETE FROM votes WHERE pair_id = ?').bind(pair?.id),
+    ]);
+    const restored = await pendingRow(pair?.id ?? '');
+    expect(restored).not.toBeNull();
+
+    const receipt = await call(from, 'POST', '/votes/confirm', body);
+
+    expect(receipt.status).toBe(409);
+    expect(await receipt.json()).toEqual({ error: 'stale_pair' });
+    expect(await storedVotes()).toEqual([]);
+    expect(await pendingRow(pair?.id ?? '')).toEqual(restored);
+    expect(await coverage()).toEqual([]);
+  });
+});
+
 describe('POST /api/votes/undo', () => {
   test('restores the same comparison and issue time and refuses a late vote on its old ID', async () => {
     const from = await admitted();

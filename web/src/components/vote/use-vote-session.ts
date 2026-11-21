@@ -5,10 +5,12 @@ import type { Defect } from '@/lib/defects';
 import {
   ApiError,
   castVote,
+  confirmVote,
   emptyDraft,
   errorMessage,
   errorMessages,
   getPair,
+  isTransientTransport,
   listFamilies,
   NetworkError,
   readDraft,
@@ -28,7 +30,7 @@ const NO_OTHER_PAIR = 'No other pair is available for these outputs.';
 const isCode = (reason: unknown, code: ApiError['code']): reason is ApiError =>
   reason instanceof ApiError && reason.code === code;
 
-/** Whether the request may have taken effect, which only resending it can settle. */
+/** Whether the request may have taken effect. */
 const unsettled = (reason: unknown) =>
   reason instanceof NetworkError || isCode(reason, 'unavailable');
 
@@ -84,6 +86,7 @@ export function useVoteSession() {
     writeDraft(shown);
     setDraft(shown);
     setState(next);
+    setFailedVote((current) => (current?.pair === id ? current : null));
     setNextPairFailure(null);
     setError(null);
   };
@@ -113,30 +116,46 @@ export function useVoteSession() {
     setError({ message: errorMessage(reason), reload: false });
   };
 
-  const load = (
+  const readPair = async (
     name: string,
-    options: { restore?: boolean; notice?: string; afterVote?: boolean } = {},
+    onRead: (next: PairSnapshot) => void,
+    onError: (reason: unknown) => void,
   ) => {
     pairRead.current?.abort();
     const controller = new AbortController();
     pairRead.current = controller;
     const { signal } = controller;
 
-    return getPair(name, signal)
-      .then((next) => {
-        if (signal.aborted) {
-          return;
-        }
+    try {
+      const next = await getPair(name, signal);
+      if (!signal.aborted) {
+        onRead(next);
+      }
+    } catch (reason) {
+      if (!signal.aborted) {
+        onError(reason);
+      }
+    } finally {
+      if (pairRead.current === controller) {
+        pairRead.current = null;
+      }
+    }
+  };
+
+  const load = (
+    name: string,
+    options: { restore?: boolean; notice?: string; afterVote?: boolean } = {},
+  ) =>
+    readPair(
+      name,
+      (next) => {
         show(name, next, options);
         if (options.notice !== undefined) {
           setSaved(false);
           setNotice(options.notice);
         }
-      })
-      .catch((reason: unknown) => {
-        if (signal.aborted) {
-          return;
-        }
+      },
+      (reason) => {
         if (!options.afterVote) {
           loadFailed(reason);
           return;
@@ -149,13 +168,8 @@ export function useVoteSession() {
         } else {
           setError({ message: 'Could not load the next pair.', reload: false });
         }
-      })
-      .finally(() => {
-        if (pairRead.current === controller) {
-          pairRead.current = null;
-        }
-      });
-  };
+      },
+    );
 
   const act = async (action: () => Promise<void>) => {
     setBusy(true);
@@ -166,27 +180,18 @@ export function useVoteSession() {
     }
   };
 
-  /**
-   * Runs a pair action. A refusal with the `stale` code loads the current pair under that code's
-   * message, and a `vote` whose outcome is unknown locks the ballot until it is resent. A retry
-   * refused by the rate limit leaves the first attempt's outcome unknown.
-   */
+  /** Reloads the family if the pending pair or Undo target changed. */
   const perform = (
     name: string,
     action: () => Promise<void>,
-    { stale, vote }: { stale: 'stale_pair' | 'nothing_to_undo'; vote?: VoteRequest },
+    stale: 'stale_pair' | 'nothing_to_undo',
   ) => {
     void act(async () => {
       try {
         await action();
       } catch (reason) {
-        const uncertain = unsettled(reason);
-        const unknown = uncertain || (vote === failedVote && isCode(reason, 'rate_limited'));
-        setFailedVote(vote !== undefined && unknown ? vote : null);
         if (isCode(reason, stale)) {
           await load(name, { notice: errorMessages[stale] });
-        } else if (vote !== undefined && uncertain) {
-          setError({ message: 'Could not confirm whether your vote was saved.', reload: false });
         } else {
           failed(reason);
         }
@@ -262,25 +267,93 @@ export function useVoteSession() {
     reconnect();
   };
 
+  const holdVote = (body: VoteRequest, reason?: unknown) => {
+    setFailedVote(body);
+    if (
+      reason instanceof ApiError &&
+      reason.code !== 'unavailable' &&
+      reason.code !== 'not_found'
+    ) {
+      failed(reason);
+    } else {
+      setError({ message: 'Could not confirm whether your vote was saved.', reload: false });
+    }
+  };
+
+  const clearBallot = () => {
+    update({ pair: null, choice: null, defects: { a: [], b: [] } });
+  };
+
+  const confirmSubmittedVote = async (name: string, body: VoteRequest): Promise<boolean> => {
+    try {
+      await confirmVote(body);
+      return true;
+    } catch (reason) {
+      if (!isCode(reason, 'stale_pair')) {
+        holdVote(body, reason);
+        return false;
+      }
+    }
+
+    await readPair(
+      name,
+      (next) => {
+        const samePair = next.pair?.id === body.pair;
+        show(name, next, { restore: samePair });
+        if (samePair) {
+          holdVote(body);
+        } else {
+          setNotice(errorMessages.stale_pair);
+        }
+      },
+      (reason) => {
+        if (isCode(reason, 'no_round')) {
+          clearBallot();
+          setFailedVote(null);
+          loadFailed(reason);
+        } else {
+          holdVote(body, reason);
+        }
+      },
+    );
+    return false;
+  };
+
   /** Resends the vote whose outcome is unknown, or else sends the draft's choice. */
   const submit = () => {
     const body = failedVote ?? choiceBody;
-    if (body === null || family === undefined || busy || sitekey !== null) {
+    if (body === null || family === undefined || busy || sitekey !== null || error?.reload) {
       return;
     }
 
-    perform(
-      family,
-      async () => {
+    void act(async () => {
+      setSaved(false);
+      setNotice(null);
+      try {
         await castVote(body);
-        update({ pair: null, choice: null, defects: { a: [], b: [] } });
-        setFailedVote(null);
-        setSaved(true);
-        setNotice(null);
-        await load(family, { afterVote: true });
-      },
-      { stale: 'stale_pair', vote: body },
-    );
+      } catch (reason) {
+        if (failedVote === null && isTransientTransport(reason)) {
+          if (!(await confirmSubmittedVote(family, body))) {
+            return;
+          }
+        } else {
+          if (isCode(reason, 'stale_pair')) {
+            setFailedVote(null);
+            await load(family, { notice: errorMessages.stale_pair });
+          } else if (failedVote !== null || unsettled(reason)) {
+            holdVote(body, reason);
+          } else {
+            failed(reason);
+          }
+          return;
+        }
+      }
+
+      clearBallot();
+      setFailedVote(null);
+      setSaved(true);
+      await load(family, { afterVote: true });
+    });
   };
 
   const skip = () => {
@@ -300,7 +373,7 @@ export function useVoteSession() {
           setNotice(null);
         }
       },
-      { stale: 'stale_pair' },
+      'stale_pair',
     );
   };
 
@@ -316,7 +389,7 @@ export function useVoteSession() {
         await undoVote({ family, pair: undoPair });
         await load(family, { notice: 'Vote withdrawn.' });
       },
-      { stale: 'nothing_to_undo' },
+      'nothing_to_undo',
     );
   };
 
