@@ -47,9 +47,18 @@ export class ApiError extends Error {
 
 /** The service gave no usable response, so a write may have taken effect. */
 export class NetworkError extends Error {
-  constructor() {
+  constructor(readonly transient = false) {
     super(errorMessages.unavailable);
   }
+}
+
+const isGatewayFailure = (status: number) => status === 502 || status === 503 || status === 504;
+
+export function isTransientTransport(error: unknown): boolean {
+  return (
+    (error instanceof NetworkError && error.transient) ||
+    (error instanceof ApiError && error.code === 'unavailable' && isGatewayFailure(error.status))
+  );
 }
 
 /** What to tell the voter about a failure, with `fallback` for one the API did not describe. */
@@ -72,12 +81,12 @@ async function send(
       signal,
     });
   } catch {
-    throw new NetworkError();
+    throw new NetworkError(!signal?.aborted);
   }
   if (!response.ok) {
     const parsed = errorView.safeParse(await response.json().catch(() => null));
     if (!parsed.success) {
-      throw new NetworkError();
+      throw new NetworkError(isGatewayFailure(response.status));
     }
     throw new ApiError(response.status, parsed.data.error, parsed.data.sitekey);
   }
@@ -85,9 +94,13 @@ async function send(
 }
 
 async function decode<T>(schema: z.ZodMiniType<T>, response: Response): Promise<T> {
-  const parsed = schema.safeParse(
-    response.status === 204 ? undefined : await response.json().catch(() => null),
-  );
+  const value: unknown =
+    response.status === 204
+      ? undefined
+      : await response.json().catch((error: unknown) => {
+          throw new NetworkError(error instanceof TypeError);
+        });
+  const parsed = schema.safeParse(value);
   if (!parsed.success) {
     throw new NetworkError();
   }
@@ -113,8 +126,9 @@ async function requestPair(
   method: 'GET' | 'POST',
   path: string,
   body?: unknown,
+  signal?: AbortSignal,
 ): Promise<PairSnapshot> {
-  const response = await send(method, path, body);
+  const response = await send(method, path, body, signal);
   const state = await decode(pairState, response);
   const token = response.headers.get(UNDO_HEADER);
   const undoPair = token === UNDO_NONE ? null : pairId.safeParse(token).data;
@@ -125,7 +139,38 @@ const query = (values: Record<string, string>) => new URLSearchParams(values).to
 
 export const listFamilies = () => request(familiesView, 'GET', '/families');
 export const admit = (token: string) => request(z.undefined(), 'POST', '/actors', { token });
-export const getPair = (family: string) => requestPair('GET', `/pair?${query({ family })}`);
+
+const PAIR_RETRY_MS = 400;
+function waitForPairRetry(signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const cancel = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', cancel);
+      resolve();
+    }, PAIR_RETRY_MS);
+    signal.addEventListener('abort', cancel, { once: true });
+  });
+}
+
+export async function getPair(family: string, signal: AbortSignal) {
+  const path = `/pair?${query({ family })}`;
+  const read = () => requestPair('GET', path, undefined, signal);
+  try {
+    return await read();
+  } catch (error) {
+    if (signal.aborted || !isTransientTransport(error)) {
+      throw error;
+    }
+  }
+
+  await waitForPairRetry(signal);
+  signal.throwIfAborted();
+  return read();
+}
+
 export const skipPair = (pair: string) => requestPair('POST', '/pair/skip', { pair });
 export const castVote = (body: VoteRequest) => request(z.undefined(), 'POST', '/votes', body);
 export const undoVote = (body: UndoRequest) => request(z.undefined(), 'POST', '/votes/undo', body);

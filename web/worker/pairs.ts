@@ -8,6 +8,7 @@ import { UNDO_MS } from './limits';
 
 interface ActiveRow {
   id: string;
+  vote_cut: number;
   render: 'text' | 'diff' | 'html';
   defects: string;
 }
@@ -71,7 +72,8 @@ interface Drawn {
 export type Rank = (...parts: string[]) => Promise<string>;
 
 const ACTIVE = `
-  SELECT publications.id, publications.render, publications.defects
+  SELECT publications.id, publications.render, publications.defects,
+    (SELECT coalesce(max(id), 0) FROM votes) AS vote_cut
   FROM active JOIN publications ON publications.id = active.publication_id
   WHERE active.family = ?`;
 const PENDING = `
@@ -85,6 +87,9 @@ const PENDING = `
 const ACTOR_VOTES = `
   SELECT id, pair_id, case_key, a_system, b_system, exclusion IS NULL AS counted, recorded_at
   FROM votes WHERE actor_id = ? AND family = ?`;
+const LATEST_UNDO = `
+  SELECT pair_id FROM votes WHERE id IN (SELECT value FROM json_each(?)) AND exclusion IS NULL
+  ORDER BY id DESC LIMIT 1`;
 const PAIR_CASES = `
   SELECT low_system, high_system, case_keys FROM publication_pair_cases
   WHERE publication_id = (SELECT publication_id FROM active WHERE family = ?)`;
@@ -94,11 +99,15 @@ const SAMPLES = `
 const COVERAGE = `
   SELECT low_system AS low, high_system AS high, votes
   FROM pair_vote_counts WHERE family = ?`;
-/** Keeps a pair that another request issued on the same publication meanwhile. */
+/** Issues from the actor's snapshot while its publication, pending ID and vote history still agree. */
 const ISSUE = `
   INSERT INTO pairs (id, actor_id, family, publication_id, case_key, a_output, b_output, issued_at)
-  SELECT ?, ?, ?, ?, ?, ?, ?, ?
-  WHERE EXISTS (SELECT 1 FROM active WHERE family = ? AND publication_id = ?)
+  SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8
+  WHERE EXISTS (SELECT 1 FROM active WHERE family = ?3 AND publication_id = ?4)
+    AND (SELECT id FROM pairs WHERE actor_id = ?2 AND family = ?3) IS ?9
+    AND NOT EXISTS (
+      SELECT 1 FROM votes INDEXED BY votes_family WHERE family = ?3 AND id > ?10 AND actor_id = ?2
+    )
   ON CONFLICT (actor_id, family) DO UPDATE SET
     id = excluded.id, publication_id = excluded.publication_id, case_key = excluded.case_key,
     a_output = excluded.a_output, b_output = excluded.b_output, issued_at = excluded.issued_at
@@ -226,6 +235,7 @@ interface Standing {
   active: ActiveRow;
   /** The pending pair, while it belongs to the active publication. */
   pending: PendingRow | undefined;
+  storedPair: string | null;
   voted: VoteRow[];
   groups: ReadonlyMap<string, CandidateGroup>;
 }
@@ -248,6 +258,7 @@ async function read(db: D1Database, actor: string, family: string): Promise<Stan
   return {
     active,
     pending: pending?.publication_id === active.id ? pending : undefined,
+    storedPair: pending?.id ?? null,
     voted,
     groups: candidates(pairRows.results as PairCases[], voted),
   };
@@ -258,11 +269,7 @@ export interface PairSnapshot {
   undoPair: string | null;
 }
 
-function view(
-  { active, voted, groups }: Standing,
-  pending: PendingRow | undefined,
-  now: number,
-): PairSnapshot {
+function latestUndoPair(voted: VoteRow[], now: number): string | null {
   let latest: VoteRow | undefined;
   for (const vote of voted) {
     if (
@@ -273,7 +280,15 @@ function view(
       latest = vote;
     }
   }
+  return latest?.pair_id ?? null;
+}
 
+function view(
+  { active, voted, groups }: Standing,
+  pending: PendingRow | undefined,
+  now: number,
+  undoPair = latestUndoPair(voted, now),
+): PairSnapshot {
   const state: PairState = {
     pair:
       pending === undefined
@@ -290,9 +305,9 @@ function view(
           },
     votes: voted.length,
     remaining: [...groups.values()].reduce((sum, group) => sum + group.caseKeys.length, 0),
-    undo: latest !== undefined,
+    undo: undoPair !== null,
   };
-  return { state, undoPair: latest?.pair_id ?? null };
+  return { state, undoPair };
 }
 
 /** The actor's pending pair in a family, drawn afresh when it belongs to no active publication. */
@@ -303,11 +318,26 @@ export async function pairState(
   family: string,
   now: number,
 ): Promise<PairSnapshot> {
-  const standing = await read(db, actor, family);
-  const pending =
-    standing.pending ??
-    (await issue(db, actorKey, actor, family, standing.active.id, standing.groups, now));
-  return view(standing, pending, now);
+  const first = await read(db, actor, family);
+  const publication = first.active.id;
+  let standing = first;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (standing.pending !== undefined || standing.groups.size === 0) {
+      return view(standing, standing.pending, now);
+    }
+    const issued = await issue(db, actorKey, actor, family, standing, now);
+    if (issued !== undefined) {
+      return issued;
+    }
+
+    if (attempt === 0) {
+      standing = await read(db, actor, family);
+      if (standing.active.id !== publication) {
+        break;
+      }
+    }
+  }
+  throw new ApiError(409, 'stale_pair');
 }
 
 async function issue(
@@ -315,14 +345,11 @@ async function issue(
   actorKey: string,
   actor: string,
   family: string,
-  publication: string,
-  groups: ReadonlyMap<string, CandidateGroup>,
+  standing: Standing,
   now: number,
-): Promise<PendingRow | undefined> {
-  if (groups.size === 0) {
-    return undefined;
-  }
-
+): Promise<PairSnapshot | undefined> {
+  const { active, groups, storedPair, voted } = standing;
+  const publication = active.id;
   const coverage = await db
     .prepare(COVERAGE)
     .bind(family)
@@ -334,11 +361,16 @@ async function issue(
     new Map(coverage.results.map(({ low, high, votes }) => [key(...sorted(low, high)), votes])),
   );
   const drawn = await place(db, publication, rank, comparison);
-  const [, pending] = await db.batch([
+  const id = crypto.randomUUID();
+
+  const undoCandidates = voted
+    .filter((vote) => vote.recorded_at > now - UNDO_MS)
+    .map(({ id }) => id);
+  const [, pending, undo] = await db.batch([
     db
       .prepare(ISSUE)
       .bind(
-        crypto.randomUUID(),
+        id,
         actor,
         family,
         publication,
@@ -346,16 +378,18 @@ async function issue(
         drawn.a,
         drawn.b,
         now,
-        family,
-        publication,
+        storedPair,
+        active.vote_cut,
       ),
     db.prepare(PENDING).bind(actor, family),
+    db.prepare(LATEST_UNDO).bind(JSON.stringify(undoCandidates)),
   ]);
   const current = (pending.results as PendingRow[]).at(0);
-  if (current?.publication_id !== publication) {
+  if (current !== undefined && current.publication_id !== publication) {
     throw new ApiError(409, 'stale_pair');
   }
-  return current;
+  const undoPair = (undo.results as Pick<VoteRow, 'pair_id'>[]).at(0)?.pair_id ?? null;
+  return current?.id === id ? view(standing, current, now, undoPair) : undefined;
 }
 
 /**
