@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { describe, expect, test, vi } from 'vitest';
 
-import { pairState, UNDO_HEADER } from '@/lib/arena';
+import { pairState, UNDO_HEADER, UNDO_NONE } from '@/lib/arena';
 
 import { candidates, draw, next, ranker, type Rank } from './pairs';
 import {
@@ -35,6 +35,32 @@ function threeWay(count: number) {
 
 const systemsOf = (row: { a_system: string; b_system: string } | null) =>
   row === null ? null : [row.a_system, row.b_system].sort();
+
+/** Runs another request while the first pair draw is still placing its samples. */
+function duringPlacement(action: () => Promise<void>) {
+  const prepare = env.DB.prepare.bind(env.DB);
+  let interrupted = false;
+  vi.spyOn(env.DB, 'prepare').mockImplementation((query) => {
+    const statement = prepare(query);
+    if (query.includes('system IN (?, ?)')) {
+      const bind = statement.bind.bind(statement);
+      vi.spyOn(statement, 'bind').mockImplementation((...values) => {
+        const bound = bind(...values);
+        const all = bound.all.bind(bound);
+        vi.spyOn(bound, 'all').mockImplementation(async <T>() => {
+          const result = await all<T>();
+          if (!interrupted) {
+            interrupted = true;
+            await action();
+          }
+          return result;
+        });
+        return bound;
+      });
+    }
+    return statement;
+  });
+}
 
 describe('candidates', () => {
   test('groups remaining cases by system pair regardless of vote side order', () => {
@@ -298,29 +324,10 @@ describe('GET /api/pair', () => {
   test('rejects a draw superseded during sample loading and preserves the newer pending pair', async () => {
     await publish(SYNTHETIC, threeWay(2));
     const from = await admitted();
-    const prepare = env.DB.prepare.bind(env.DB);
     let replacement: string | undefined;
-    let switched = false;
-    vi.spyOn(env.DB, 'prepare').mockImplementation((query) => {
-      const statement = prepare(query);
-      if (query.includes('system IN (?, ?)')) {
-        const bind = statement.bind.bind(statement);
-        vi.spyOn(statement, 'bind').mockImplementation((...values) => {
-          const bound = bind(...values);
-          const all = bound.all.bind(bound);
-          vi.spyOn(bound, 'all').mockImplementation(async <T>() => {
-            const result = await all<T>();
-            if (!switched) {
-              switched = true;
-              await publish(SYNTHETIC, threeWay(2), 'replacement');
-              replacement = (await pairOf(from, SYNTHETIC)).pair?.id;
-            }
-            return result;
-          });
-          return bound;
-        });
-      }
-      return statement;
+    duringPlacement(async () => {
+      await publish(SYNTHETIC, threeWay(2), 'replacement');
+      replacement = (await pairOf(from, SYNTHETIC)).pair?.id;
     });
 
     const response = await call(from, 'GET', `/pair?family=${SYNTHETIC}`);
@@ -335,6 +342,105 @@ describe('GET /api/pair', () => {
     ).toMatchObject({ results: [{ id: replacement, publication_id: 'replacement' }] });
     expect((await pairOf(from, SYNTHETIC)).pair?.id).toBe(replacement);
   });
+
+  test('returns the same pending pair to concurrent reads', async () => {
+    const from = await admitted();
+    let second: string | undefined;
+    duringPlacement(async () => {
+      second = (await pairOf(from, CODING)).pair?.id;
+    });
+
+    const first = await pairOf(from, CODING);
+
+    expect(second).toEqual(expect.any(String));
+    expect(first.pair?.id).toBe(second);
+  });
+
+  test.each([
+    ['exhausted', CODING, 0, false],
+    ['with another draw available', WRITING, 2, false],
+    ['with a new pending pair', WRITING, 2, true],
+  ] as const)(
+    'reads current state when another tab votes on its draw and is %s',
+    async (_, family, remaining, issuedNext) => {
+      const from = await admitted();
+      let voted: string | undefined;
+      let following: string | undefined;
+      duringPlacement(async () => {
+        const second = await pairOf(from, family);
+        voted = second.pair?.id;
+        expect((await vote(from, voted ?? '')).status).toBe(204);
+        if (issuedNext) {
+          following = (await pairOf(from, family)).pair?.id;
+        }
+      });
+
+      const late = await pairOf(from, family);
+
+      expect(voted).toEqual(expect.any(String));
+      expect(late).toMatchObject({ votes: 1, remaining, undo: true });
+      if (remaining === 0) {
+        expect(late.pair).toBeNull();
+      } else {
+        expect(late.pair?.id).toEqual(expect.any(String));
+        expect(late.pair?.id).not.toBe(voted);
+      }
+      if (issuedNext) {
+        expect(late.pair?.id).toBe(following);
+      }
+      expect(await pairOf(from, family)).toEqual(late);
+    },
+  );
+
+  test('includes a vote cast on a different comparison during allocation', async () => {
+    await publish(SYNTHETIC, {
+      first: { 'acme-large': ['first large'], 'acme-small': ['first small'] },
+      second: { 'acme-large': ['second large'], 'acme-small': ['second small'] },
+    });
+    const from = await admitted();
+    let recorded: string | undefined;
+    duringPlacement(async () => {
+      const { pair } = await pairOf(from, SYNTHETIC);
+      const response = await call(from, 'POST', '/pair/skip', { pair: pair?.id });
+      expect(response.status).toBe(200);
+      const skipped = await pairOf(from, SYNTHETIC);
+      recorded = skipped.pair?.id;
+      expect(recorded).not.toBe(pair?.id);
+      expect((await vote(from, recorded ?? '')).status).toBe(204);
+    });
+
+    const response = await call(from, 'GET', `/pair?family=${SYNTHETIC}`);
+    const late = pairState.parse(await response.json());
+
+    expect(response.headers.get(UNDO_HEADER)).toBe(recorded);
+    expect(late).toMatchObject({ votes: 1, remaining: 1, undo: true });
+    expect(late.pair?.id).toEqual(expect.any(String));
+    expect(await pairOf(from, SYNTHETIC)).toEqual(late);
+  });
+
+  test.each([
+    ['excludes', null, 'trash', false],
+    ['restores', 'trash', null, true],
+  ] as const)(
+    'refreshes Undo when moderation %s a vote during allocation',
+    async (_, before, after, undo) => {
+      const from = await admitted();
+      const { pair } = await pairOf(from, WRITING);
+      expect((await vote(from, pair?.id ?? '')).status).toBe(204);
+      const mark = env.DB.prepare('UPDATE votes SET exclusion = ? WHERE pair_id = ?');
+      await mark.bind(before, pair?.id).run();
+      duringPlacement(async () => {
+        await mark.bind(after, pair?.id).run();
+      });
+
+      const response = await call(from, 'GET', `/pair?family=${WRITING}`);
+      const late = pairState.parse(await response.json());
+
+      expect(response.headers.get(UNDO_HEADER)).toBe(undo ? pair?.id : UNDO_NONE);
+      expect(late).toMatchObject({ votes: 1, remaining: 2, undo });
+      expect(await pairOf(from, WRITING)).toEqual(late);
+    },
+  );
 
   test('answers null once the actor has voted on every comparison', async () => {
     const from = await admitted();

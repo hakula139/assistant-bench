@@ -54,6 +54,7 @@ export function useVoteSession() {
   const [busy, setBusy] = useState(false);
   // A browser that keeps no cookie asks for admission again right after passing it.
   const admitted = useRef(false);
+  const pairRead = useRef<AbortController | null>(null);
 
   const pair = state?.pair ?? null;
   const locked = busy || sitekey !== null || failedVote !== null;
@@ -112,30 +113,48 @@ export function useVoteSession() {
     setError({ message: errorMessage(reason), reload: false });
   };
 
-  const load = async (
+  const load = (
     name: string,
     options: { restore?: boolean; notice?: string; afterVote?: boolean } = {},
   ) => {
-    try {
-      show(name, await getPair(name), options);
-      if (options.notice !== undefined) {
-        setSaved(false);
-        setNotice(options.notice);
-      }
-    } catch (reason) {
-      if (!options.afterVote) {
-        loadFailed(reason);
-        return;
-      }
-      setState(null);
-      setDraft(null);
-      setNextPairFailure(isCode(reason, 'no_round') ? 'no_round' : 'retry');
-      if (reason instanceof ApiError && reason.code !== 'unavailable') {
-        failed(reason);
-      } else {
-        setError({ message: 'Could not load the next pair.', reload: false });
-      }
-    }
+    pairRead.current?.abort();
+    const controller = new AbortController();
+    pairRead.current = controller;
+    const { signal } = controller;
+
+    return getPair(name, signal)
+      .then((next) => {
+        if (signal.aborted) {
+          return;
+        }
+        show(name, next, options);
+        if (options.notice !== undefined) {
+          setSaved(false);
+          setNotice(options.notice);
+        }
+      })
+      .catch((reason: unknown) => {
+        if (signal.aborted) {
+          return;
+        }
+        if (!options.afterVote) {
+          loadFailed(reason);
+          return;
+        }
+        setState(null);
+        setDraft(null);
+        setNextPairFailure(isCode(reason, 'no_round') ? 'no_round' : 'retry');
+        if (reason instanceof ApiError && reason.code !== 'unavailable') {
+          failed(reason);
+        } else {
+          setError({ message: 'Could not load the next pair.', reload: false });
+        }
+      })
+      .finally(() => {
+        if (pairRead.current === controller) {
+          pairRead.current = null;
+        }
+      });
   };
 
   const act = async (action: () => Promise<void>) => {
@@ -188,14 +207,15 @@ export function useVoteSession() {
       },
     );
     if (family !== undefined) {
-      getPair(family).then((next) => {
-        show(family, next, { restore: true });
-      }, loadFailed);
+      void load(family, { restore: true });
     }
   });
 
   useEffect(() => {
     initialize();
+    return () => {
+      pairRead.current?.abort();
+    };
   }, []);
 
   useEffect(() => {

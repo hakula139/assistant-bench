@@ -733,7 +733,7 @@ describe('VoteApp', () => {
     const familyUrl = location.search;
     let misses = 0;
     override(api, '/api/pair', () =>
-      ++misses <= 2 ? Promise.reject(new TypeError('Failed to fetch')) : undefined,
+      ++misses <= 4 ? Promise.reject(new TypeError('Failed to fetch')) : undefined,
     );
 
     await user.keyboard('a1{Enter}');
@@ -760,6 +760,7 @@ describe('VoteApp', () => {
     await user.click(screen.getByRole('button', { name: 'Retry next pair' }));
     await screen.findByText('Output A2');
 
+    expect(misses).toBe(5);
     expect(api.fetch.mock.calls.filter(([path]) => path === '/api/votes')).toHaveLength(1);
     expect(api.casts).toEqual([{ pair: pairId(1), choice: 'a', defects: { a: ['scope'], b: [] } }]);
   });
