@@ -9,7 +9,11 @@ import {
   pairId,
   pairState,
   taggedDefects,
+  UNDO_HEADER,
+  UNDO_NONE,
   type ErrorCode,
+  type PairState,
+  type UndoRequest,
   type VoteRequest,
 } from '@/lib/arena';
 import type { Cutoffs } from '@/lib/report';
@@ -24,7 +28,7 @@ export const errorMessages: Record<ErrorCode, string> = {
   challenge_failed: 'Verification failed. Try again.',
   no_round: 'This family has no outputs available to vote on.',
   stale_pair: 'This pair changed. Review the current outputs and choose again.',
-  nothing_to_undo: 'No vote from the last 10 minutes is left to undo.',
+  nothing_to_undo: 'That vote is no longer available to undo.',
   rate_limited: 'Too many requests. Wait a moment, then retry.',
   daily_limit: 'This network has reached its daily limit. Try again tomorrow.',
   unavailable: 'The voting service is unavailable. Try again.',
@@ -53,13 +57,12 @@ export function errorMessage(error: unknown, fallback = errorMessages.unavailabl
   return error instanceof ApiError || error instanceof NetworkError ? error.message : fallback;
 }
 
-async function request<T>(
-  schema: z.ZodMiniType<T>,
+async function send(
   method: 'GET' | 'POST',
   path: string,
   body?: unknown,
   signal?: AbortSignal,
-): Promise<T> {
+): Promise<Response> {
   let response: Response;
   try {
     response = await fetch(`/api${path}`, {
@@ -78,6 +81,10 @@ async function request<T>(
     }
     throw new ApiError(response.status, parsed.data.error, parsed.data.sitekey);
   }
+  return response;
+}
+
+async function decode<T>(schema: z.ZodMiniType<T>, response: Response): Promise<T> {
   const parsed = schema.safeParse(
     response.status === 204 ? undefined : await response.json().catch(() => null),
   );
@@ -87,15 +94,41 @@ async function request<T>(
   return parsed.data;
 }
 
+async function request<T>(
+  schema: z.ZodMiniType<T>,
+  method: 'GET' | 'POST',
+  path: string,
+  body?: unknown,
+  signal?: AbortSignal,
+): Promise<T> {
+  return decode(schema, await send(method, path, body, signal));
+}
+
+/** The displayed pair state and the latest eligible vote, when the Worker supports targeted Undo. */
+export interface PairSnapshot extends PairState {
+  undoPair: string | null | undefined;
+}
+
+async function requestPair(
+  method: 'GET' | 'POST',
+  path: string,
+  body?: unknown,
+): Promise<PairSnapshot> {
+  const response = await send(method, path, body);
+  const state = await decode(pairState, response);
+  const token = response.headers.get(UNDO_HEADER);
+  const undoPair = token === UNDO_NONE ? null : pairId.safeParse(token).data;
+  return { ...state, undoPair };
+}
+
 const query = (values: Record<string, string>) => new URLSearchParams(values).toString();
 
 export const listFamilies = () => request(familiesView, 'GET', '/families');
 export const admit = (token: string) => request(z.undefined(), 'POST', '/actors', { token });
-export const getPair = (family: string) => request(pairState, 'GET', `/pair?${query({ family })}`);
-export const skipPair = (pair: string) => request(pairState, 'POST', '/pair/skip', { pair });
+export const getPair = (family: string) => requestPair('GET', `/pair?${query({ family })}`);
+export const skipPair = (pair: string) => requestPair('POST', '/pair/skip', { pair });
 export const castVote = (body: VoteRequest) => request(z.undefined(), 'POST', '/votes', body);
-export const undoVote = (family: string) =>
-  request(z.undefined(), 'POST', '/votes/undo', { family });
+export const undoVote = (body: UndoRequest) => request(z.undefined(), 'POST', '/votes/undo', body);
 
 /**
  * Asks whether this store's counted votes still match the round's cut.

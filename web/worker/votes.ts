@@ -1,4 +1,10 @@
-import type { Freshness, FreshnessQuery, TaggedDefects, VoteRequest } from '@/lib/arena';
+import type {
+  Freshness,
+  FreshnessQuery,
+  TaggedDefects,
+  UndoRequest,
+  VoteRequest,
+} from '@/lib/arena';
 import type { Defect } from '@/lib/defects';
 
 import { ApiError, type Bindings } from './api';
@@ -34,18 +40,21 @@ const RELEASE = `
   DELETE FROM pairs WHERE id = ?1 AND EXISTS (SELECT 1 FROM votes WHERE pair_id = ?1)`;
 const RESTORE = `
   INSERT INTO pairs (id, actor_id, family, publication_id, case_key, a_output, b_output, issued_at)
-  SELECT pair_id, actor_id, family, publication_id, case_key, a_output, b_output,
+  SELECT ?5, actor_id, family, publication_id, case_key, a_output, b_output,
     recorded_at - elapsed_ms
-  FROM votes WHERE actor_id = ?1 AND family = ?2 AND recorded_at > ?3 AND exclusion IS NULL
-  ORDER BY id DESC LIMIT 1
+  FROM (
+    SELECT * FROM votes
+    WHERE actor_id = ?1 AND family = ?2 AND recorded_at > ?3 AND exclusion IS NULL
+    ORDER BY id DESC LIMIT 1
+  )
+  WHERE pair_id = ?4
   ON CONFLICT (actor_id, family) DO UPDATE SET
     id = excluded.id, publication_id = excluded.publication_id, case_key = excluded.case_key,
     a_output = excluded.a_output, b_output = excluded.b_output, issued_at = excluded.issued_at`;
-/** Deletes the vote whose pair `RESTORE` just reinstated, which it chose undoable and counted. */
 const WITHDRAW = `
   DELETE FROM votes
-  WHERE actor_id = ?1 AND family = ?2
-    AND pair_id = (SELECT id FROM pairs WHERE actor_id = ?1 AND family = ?2)
+  WHERE actor_id = ?1 AND family = ?2 AND pair_id = ?3
+    AND EXISTS (SELECT 1 FROM pairs WHERE id = ?4 AND actor_id = ?1 AND family = ?2)
   RETURNING id`;
 const FRESHNESS = `
   SELECT EXISTS (SELECT 1 FROM votes WHERE family = ?1 AND exclusion IS NULL AND id > ?2)
@@ -137,15 +146,15 @@ export async function record(
 }
 
 /**
- * Withdraws the actor's latest vote in the family while it is undoable, restoring its pair, with
- * the same ID and issue time, in place of the pending one. Each call walks one vote further back,
- * passing over votes the owner excluded, which stay recorded.
+ * Withdraws the specified vote while it is the latest undoable vote in the family. The restored
+ * pair keeps its issue time and gets a fresh ID so the withdrawn vote cannot be replayed.
  */
-export async function undo(db: D1Database, actor: string, family: string, now: number) {
-  const since = now - UNDO_MS;
+export async function undo(db: D1Database, actor: string, request: UndoRequest, now: number) {
+  const { family, pair } = request;
+  const restored = crypto.randomUUID();
   const [, withdrawn] = await db.batch([
-    db.prepare(RESTORE).bind(actor, family, since),
-    db.prepare(WITHDRAW).bind(actor, family),
+    db.prepare(RESTORE).bind(actor, family, now - UNDO_MS, pair, restored),
+    db.prepare(WITHDRAW).bind(actor, family, pair, restored),
   ]);
   if (withdrawn.results.length === 0) {
     throw new ApiError(409, 'nothing_to_undo');

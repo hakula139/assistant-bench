@@ -10,6 +10,8 @@ import {
   freshnessQuery,
   previewRequest,
   skipRequest,
+  UNDO_HEADER,
+  UNDO_NONE,
   undoRequest,
   voteRequest,
   type ErrorView,
@@ -28,7 +30,7 @@ import {
 } from './actors';
 import { ApiError, type Api, type Bindings } from './api';
 import { BODY_LIMIT_BYTES } from './limits';
-import { pairState, skip } from './pairs';
+import { pairState, skip, type PairSnapshot } from './pairs';
 import { preview, previewHeaders, previewUnavailable } from './previews';
 import { retain } from './retention';
 import { cachedFreshness, freshness, record, undo } from './votes';
@@ -47,6 +49,11 @@ function address(request: Request): string {
     throw new Error('The request has no CF-Connecting-IP header.');
   }
   return value;
+}
+
+function pairResponse(c: Context<Api>, { state, undoPair }: PairSnapshot) {
+  c.header(UNDO_HEADER, undoPair ?? UNDO_NONE);
+  return c.json(state);
 }
 
 function respondError(error: Error, c: Context<Api>) {
@@ -135,7 +142,8 @@ const api = new Hono<Api>()
   .get('/pair', sValidator('query', familyQuery, rejectInvalid), async (c) => {
     const now = Date.now();
     const actor = await requireActor(c, now);
-    return c.json(
+    return pairResponse(
+      c,
       await pairState(c.env.DB, c.env.ACTOR_KEY, actor, c.req.valid('query').family, now),
     );
   })
@@ -147,7 +155,10 @@ const api = new Hono<Api>()
   .post('/pair/skip', sValidator('json', skipRequest, rejectInvalid), async (c) => {
     const now = Date.now();
     const actor = await requireActor(c, now);
-    return c.json(await skip(c.env.DB, c.env.ACTOR_KEY, actor, c.req.valid('json').pair, now));
+    return pairResponse(
+      c,
+      await skip(c.env.DB, c.env.ACTOR_KEY, actor, c.req.valid('json').pair, now),
+    );
   })
   .post('/votes', sValidator('json', voteRequest, rejectInvalid), async (c) => {
     const now = Date.now();
@@ -158,7 +169,7 @@ const api = new Hono<Api>()
   .post('/votes/undo', sValidator('json', undoRequest, rejectInvalid), async (c) => {
     const now = Date.now();
     const actor = await requireActor(c, now);
-    await undo(c.env.DB, actor, c.req.valid('json').family, now);
+    await undo(c.env.DB, actor, c.req.valid('json'), now);
     return c.body(null, 204);
   })
   .get('/freshness', sValidator('query', freshnessQuery, rejectInvalid), async (c) => {

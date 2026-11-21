@@ -4,7 +4,7 @@ import { setSignedCookie } from 'hono/cookie';
 import { exportJWK, generateKeyPair, SignJWT, UnsecuredJWT, type JWK } from 'jose';
 import { assert, beforeAll, describe, expect, test, vi } from 'vitest';
 
-import type { PairState } from '@/lib/arena';
+import { UNDO_HEADER, type PairState } from '@/lib/arena';
 
 import { verifyOwner } from './access';
 import { app } from './index';
@@ -486,16 +486,19 @@ describe('private request admission', () => {
       cookie: cookies[0],
     });
     expect((await progress.json<PairState>()).votes).toBe(1);
+    expect(progress.headers.get(UNDO_HEADER)).toBe(pairs[0].pair?.id);
     const undo = await fixture.send('/api/votes/undo', assertions[0], {
       method: 'POST',
       cookie: cookies[0],
-      body: { family: WRITING },
+      body: { family: WRITING, pair: progress.headers.get(UNDO_HEADER) },
     });
     expect(undo.status).toBe(204);
     const restored = await fixture.send(`/api/pair?family=${WRITING}`, assertions[1], {
       cookie: cookies[1],
     });
-    expect((await restored.json<PairState>()).pair?.id).toBe(pairs[0].pair?.id);
+    const restoredPair = (await restored.json<PairState>()).pair;
+    expect(restoredPair?.id).not.toBe(pairs[0].pair?.id);
+    expect(restoredPair).toEqual({ ...pairs[0].pair, id: restoredPair?.id });
   });
 
   test('preserves isolated HTML previews through private access success and refusals', async () => {

@@ -163,11 +163,14 @@ describe('GET /api/previews/:pair/:side', () => {
       expectIsolation(response);
       expect(await response.text()).toBe(unavailable);
       if (operation === 'vote') {
-        const undone = await call(from, 'POST', '/votes/undo', { family: HTML });
+        const undone = await call(from, 'POST', '/votes/undo', { family: HTML, pair: first.id });
         expect(undone.status).toBe(204);
-        expect((await htmlPair(from)).id).toBe(first.id);
-        const restored = await call(from, 'GET', url);
+        const fresh = await htmlPair(from);
+        expect(fresh.id).not.toBe(first.id);
+        expect((await call(from, 'GET', url)).status).toBe(404);
+        const restored = await call(from, 'GET', `/previews/${fresh.id}/a`);
         expect(restored.status).toBe(200);
+        expectIsolation(restored);
         expect(await restored.text()).toBe(original);
       }
     },

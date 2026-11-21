@@ -9,6 +9,8 @@ import { VoteApp } from '@/components/vote/VoteApp';
 import {
   admissionRequest,
   skipRequest,
+  UNDO_HEADER,
+  UNDO_NONE,
   undoRequest,
   voteRequest,
   type FamilyView,
@@ -55,6 +57,7 @@ interface StubOptions {
   defects?: Defect[];
   /** Answers a skip with the same pair, as for a system pair with one case. */
   alone?: boolean;
+  targetedUndo?: boolean;
 }
 
 /** A vote API that keeps one pending pair per actor, as the Worker does. */
@@ -66,6 +69,7 @@ function stubApi({
   render = 'text',
   defects = WRITING_DEFECTS,
   alone = false,
+  targetedUndo = true,
 }: StubOptions = {}) {
   const casts: VoteRequest[] = [];
   const undone: VoteRequest[] = [];
@@ -73,12 +77,14 @@ function stubApi({
   const pairRequests: string[] = [];
   // Votes recorded in the last 10 minutes, latest last, which undo walks back through.
   const undoable: VoteRequest[] = [];
+  const restoredCases = new Map<string, number>();
   let served = 0;
   let open: string | null = null;
 
   const votes = () => prior + casts.length - undone.length;
+  const caseOf = (id: string) => restoredCases.get(id) ?? Number(id.slice(-12));
   const pairOf = (id: string): PairView => {
-    const index = Number(id.slice(-12));
+    const index = caseOf(id);
     const base = {
       id,
       instruction: `Instruction ${index}`,
@@ -111,6 +117,12 @@ function stubApi({
     );
   const refuse = (error: string, status: number) =>
     respond(error === 'admission_required' ? { error, sitekey: SITEKEY } : { error }, status);
+  const showPair = () =>
+    Promise.resolve(
+      Response.json(view(), {
+        headers: targetedUndo ? { [UNDO_HEADER]: undoable.at(-1)?.pair ?? UNDO_NONE } : {},
+      }),
+    );
 
   const fetch = vi.fn((path: string, init?: RequestInit) => {
     const url = new URL(path, 'https://site.example');
@@ -129,7 +141,7 @@ function stubApi({
     if (route === 'GET /api/pair') {
       const family = url.searchParams.get('family') ?? '';
       pairRequests.push(family);
-      return family === FAMILY.family ? respond(view()) : refuse('no_round', 404);
+      return family === FAMILY.family ? showPair() : refuse('no_round', 404);
     }
     if (route === 'POST /api/pair/skip') {
       const { pair } = skipRequest.parse(requestBody(init));
@@ -139,7 +151,7 @@ function stubApi({
       if (!alone) {
         open = pairId(++served);
       }
-      return respond(view());
+      return showPair();
     }
     if (route === 'POST /api/votes') {
       const request = voteRequest.parse(requestBody(init));
@@ -152,13 +164,15 @@ function stubApi({
       return respond(null, 204);
     }
     if (route === 'POST /api/votes/undo') {
-      undoRequest.parse(requestBody(init));
-      const last = undoable.pop();
-      if (last === undefined) {
+      const { pair } = undoRequest.parse(requestBody(init));
+      const last = undoable.at(-1);
+      if (last?.pair !== pair) {
         return refuse('nothing_to_undo', 409);
       }
+      undoable.pop();
       undone.push(last);
-      open = last.pair;
+      open = pairId(100 + undone.length);
+      restoredCases.set(open, caseOf(last.pair));
       return respond(null, 204);
     }
     throw new Error(`Unexpected API route: ${route}`);
@@ -879,6 +893,48 @@ describe('VoteApp', () => {
     expect(screen.getByRole('button', { name: /Undo/ })).toHaveProperty('disabled', true);
   });
 
+  test('keeps voting available without sending Undo to an older Worker', async () => {
+    const api = stubApi({ cases: 1, targetedUndo: false });
+    const user = await startVoting();
+
+    await user.keyboard('a{Enter}');
+    await screen.findByText('No pairs left');
+    await user.keyboard('u');
+
+    expect(screen.getByRole('button', { name: 'Undo last vote' })).toHaveProperty('disabled', true);
+    expect(api.casts).toHaveLength(1);
+    expect(api.fetch.mock.calls.map(([url]) => url)).not.toContain('/api/votes/undo');
+  });
+
+  test('refreshes the withdrawn pair after a lost Undo response and preserves the earlier vote', async () => {
+    const api = stubApi();
+    const user = await startVoting();
+    await user.keyboard('a{Enter}');
+    await screen.findByText('Output A2');
+    await user.keyboard('b{Enter}');
+    await screen.findByText('Output A3');
+    const fetch = api.fetch.getMockImplementation();
+    api.fetch.mockImplementationOnce(async (url, init) => {
+      await fetch?.(url, init);
+      throw new Error('Connection closed');
+    });
+
+    await user.keyboard('u');
+    await screen.findByText('The voting service is unavailable. Try again.');
+    await user.keyboard('u');
+    await screen.findByText('Output A2');
+
+    const requests = api.fetch.mock.calls
+      .filter(([url]) => url === '/api/votes/undo')
+      .map(([, init]) => undoRequest.parse(requestBody(init)));
+    expect(requests).toEqual([
+      { family: FAMILY.family, pair: pairId(2) },
+      { family: FAMILY.family, pair: pairId(2) },
+    ]);
+    expect(api.undone.map(({ pair }) => pair)).toEqual([pairId(2)]);
+    expect(screen.getByRole('button', { name: /Undo/ })).toHaveProperty('disabled', false);
+  });
+
   test('uses pair-specific preview URLs through voting and undo without a Markdown control', async () => {
     const api = stubApi({ render: 'html' });
     const user = userEvent.setup();
@@ -904,7 +960,7 @@ describe('VoteApp', () => {
 
     await waitFor(() => {
       expect(screen.getByTitle('Output A preview').getAttribute('src')).toBe(
-        `/api/previews/${pairId(1)}/a`,
+        `/api/previews/${pairId(101)}/a`,
       );
     });
     expect(api.undone.map(({ pair }) => pair)).toEqual([pairId(1)]);
@@ -919,9 +975,7 @@ describe('VoteApp', () => {
 
     await user.keyboard('u');
 
-    expect(
-      await screen.findByText('No vote from the last 10 minutes is left to undo.'),
-    ).toBeDefined();
+    expect(await screen.findByText('That vote is no longer available to undo.')).toBeDefined();
     expect(screen.getByText('Output A2')).toBeDefined();
     expect(screen.getByRole('button', { name: /Undo/ })).toHaveProperty('disabled', true);
   });
