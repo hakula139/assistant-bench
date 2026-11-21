@@ -28,6 +28,18 @@ from support import (
 )
 
 
+TESTS_SETTINGS: dict[str, object] = {
+    'scorer': 'tests',
+    'display_name': 'Family F',
+    'samples': 1,
+}
+VOTES_SETTINGS: dict[str, object] = TESTS_SETTINGS | {
+    'scorer': 'votes',
+    'systems': ['large'],
+    'reference': 'large',
+}
+
+
 class TaskOptions(TypedDict, total=False):
     name: str
     category: str | None
@@ -38,11 +50,22 @@ class TaskOptions(TypedDict, total=False):
 
 
 def write_family(
-    root: Path, name: str, settings: str, *, cases: bool, tasks: bool
+    root: Path,
+    name: str,
+    settings: str | dict[str, object],
+    *,
+    cases: bool,
+    tasks: bool,
 ) -> None:
     directory = root / name
     directory.mkdir(parents=True)
-    (directory / 'family.toml').write_text(textwrap.dedent(settings))
+    content = (
+        textwrap.dedent(settings)
+        if isinstance(settings, str)
+        else tomli_w.dumps(settings)
+    )
+    (directory / 'family.toml').write_text(content)
+
     if cases:
         (directory / 'cases.toml').write_text('cases = []\n')
     if tasks:
@@ -252,43 +275,7 @@ class TestLoadFamily:
         [
             pytest.param(
                 'f',
-                """\
-                scorer = "votes"
-                display_name = "Family F"
-                systems = ["large"]
-                samples = 1
-                reference = "large"
-                public = true
-                """,
-                True,
-                False,
-                'Family `f`: a public family needs an `aspect`.',
-                id='public-without-an-aspect',
-            ),
-            pytest.param(
-                'writingf',
-                """\
-                scorer = "votes"
-                aspect = "writing"
-                display_name = "Family F"
-                systems = ["large"]
-                samples = 1
-                reference = "large"
-                public = true
-                """,
-                True,
-                False,
-                'Family `writingf`: a public family ID starts with its aspect, '
-                'as in `writing-<name>`.',
-                id='public-id-outside-its-aspect',
-            ),
-            pytest.param(
-                'f',
-                """\
-                scorer = "tests"
-                display_name = "Family F"
-                samples = 1
-                """,
+                TESTS_SETTINGS,
                 True,
                 True,
                 'Family `f`: expected exactly one of `cases.toml` and `tasks/`.',
@@ -296,11 +283,7 @@ class TestLoadFamily:
             ),
             pytest.param(
                 'f',
-                """\
-                scorer = "tests"
-                display_name = "Family F"
-                samples = 1
-                """,
+                TESTS_SETTINGS,
                 False,
                 False,
                 'Family `f`: expected exactly one of `cases.toml` and `tasks/`.',
@@ -308,275 +291,15 @@ class TestLoadFamily:
             ),
             pytest.param(
                 'f',
-                """\
-                scorer = "votes"
-                display_name = "Family F"
-                systems = ["large"]
-                samples = 1
-                reference = "large"
-                max_output_tokens = 300
-                """,
-                True,
+                'scorer = "tests',
                 False,
-                'Family `f`: `family.toml`: `max_output_tokens`: Extra inputs '
-                'are not permitted.',
-                id='case-output-budget',
+                True,
+                'Family `f`: `family.toml` is not valid TOML:',
+                id='malformed-toml',
             ),
             pytest.param(
                 'f',
-                """\
-                scorer = "tests"
-                display_name = "Family F"
-                samples = 1
-                """,
-                True,
-                False,
-                'Family `f`: score a `cases.toml` family by `votes`, since only a '
-                '`tasks/` family has tests.',
-                id='cases-scored-by-tests',
-            ),
-            pytest.param(
-                'f',
-                """\
-                scorer = "votes"
-                display_name = "Family F"
-                systems = ["large"]
-                samples = 1
-                reference = "large"
-                harness = "terminus-2"
-                """,
-                True,
-                False,
-                'Family `f`: a `cases.toml` family runs every system as `generate`, '
-                'so remove `harness`.',
-                id='cases-with-an-agent-harness',
-            ),
-            pytest.param(
-                'f',
-                """\
-                scorer = "votes"
-                display_name = "Family F"
-                systems = ["large"]
-                samples = 1
-                reference = "large"
-                harness = "terminus-2"
-                render = "diff"
-                language = "en"
-
-                [gates]
-                """,
-                False,
-                True,
-                "Family `f`: a `tasks/` family's tests are its only gate, so remove "
-                '`language`, `gates`.',
-                id='tasks-with-case-gates',
-            ),
-            pytest.param(
-                'f',
-                """\
-                scorer = "votes"
-                display_name = "Family F"
-                systems = ["large"]
-                samples = 1
-                reference = "large"
-                harness = "terminus-2"
-                """,
-                False,
-                True,
-                'Family `f`: a `tasks/` family scored by `votes` yields diffs, so set '
-                '`render = "diff"`.',
-                id='tasks-without-diffs',
-            ),
-            pytest.param(
-                'f',
-                """\
-                scorer = "votes"
-                display_name = "Family F"
-                systems = ["large"]
-                samples = 1
-                reference = "large"
-                render = "diff"
-                """,
-                True,
-                False,
-                'Family `f`: a `cases.toml` family yields replies, so set `render` '
-                'to `"text"` or `"html"`.',
-                id='cases-with-diffs',
-            ),
-            pytest.param(
-                'f',
-                """\
-                scorer = "votes"
-                display_name = "Family F"
-                systems = ["large", "small", "large"]
-                samples = 1
-                reference = "large"
-                """,
-                True,
-                False,
-                'Family `f`: `family.toml`: `systems`: repeats `large`.',
-                id='repeated-voted-systems',
-            ),
-            pytest.param(
-                'f',
-                """\
-                scorer = "tests"
-                display_name = "Family F"
-                systems = ["large", "small", "large"]
-                samples = 1
-                harness = "terminus-2"
-                """,
-                False,
-                True,
-                'Family `f`: `family.toml`: `systems`: repeats `large`.',
-                id='repeated-tested-systems',
-            ),
-            pytest.param(
-                'f',
-                """\
-                scorer = "votes"
-                display_name = "Family F"
-                systems = ["large"]
-                samples = 1
-                reference = "large"
-                defects = ["tone", "scope", "tone"]
-                """,
-                True,
-                False,
-                'Family `f`: `family.toml`: `defects`: repeats `tone`.',
-                id='repeated-defects',
-            ),
-            pytest.param(
-                'f',
-                """\
-                scorer = "votes"
-                display_name = "Family F"
-                systems = ["large"]
-                samples = 1
-                reference = "large"
-                defects = ["punctuation"]
-                """,
-                True,
-                False,
-                'Family `f`: `family.toml`: `defects.0`: Input should be',
-                id='retired-defect',
-            ),
-            pytest.param(
-                'f',
-                """\
-                scorer = "votes"
-                display_name = "Family F"
-                systems = ["large"]
-                samples = 1
-                reference = "large"
-                categories = ["message", "reply", "message"]
-                """,
-                True,
-                False,
-                'Family `f`: `family.toml`: `categories`: repeats `message`.',
-                id='repeated-categories',
-            ),
-            pytest.param(
-                'f',
-                """\
-                scorer = "votes"
-                display_name = "Family F"
-                systems = ["large"]
-                samples = 1
-                reference = "large"
-                categories = ["punctuation"]
-                """,
-                True,
-                False,
-                'Family `f`: `family.toml`: `categories.0`: Input should be',
-                id='retired-category',
-            ),
-            pytest.param(
-                'f',
-                """\
-                scorer = "votes"
-                display_name = "Family F"
-                systems = ["large"]
-                samples = 1
-                reference = "large"
-                defects = ["typos"]
-                """,
-                True,
-                False,
-                'Family `f`: `family.toml`: `defects.0`: Input should be',
-                id='unknown-defect',
-            ),
-            pytest.param(
-                'f',
-                """\
-                scorer = "votes"
-                display_name = "Family F"
-                systems = ["large"]
-                samples = 1
-                reference = "large"
-                render = "diff"
-                harness = "terminus-2"
-                max_turns = 10
-                """,
-                False,
-                True,
-                'Family `f`: `family.toml`: `max_turns`: Extra inputs are not '
-                'permitted.',
-                id='task-turn-budget',
-            ),
-            pytest.param(
-                'f',
-                """\
-                scorer = "tests"
-                display_name = "Family F"
-                systems = ["large"]
-                samples = 1
-                """,
-                False,
-                True,
-                'Family `f`: a `tasks/` family that lists systems needs `harness`.',
-                id='tests-without-a-harness',
-            ),
-            pytest.param(
-                'f',
-                """\
-                scorer = "votes"
-                display_name = "Family F"
-                systems = ["large", "small"]
-                samples = 1
-                reference = "medium"
-                """,
-                True,
-                False,
-                'Family `f`: `family.toml`: reference `medium` is not in `systems`.',
-                id='reference-outside-the-systems',
-            ),
-            pytest.param(
-                'f',
-                """\
-                scorer = "votes"
-                display_name = "Family F"
-                systems = ["large"]
-                samples = 1
-                reference = "large"
-
-                [gates]
-                min_chars = 500
-                max_chars = 400
-                """,
-                True,
-                False,
-                'Family `f`: `family.toml`: `gates`: `min_chars` 500 exceeds '
-                '`max_chars` 400.',
-                id='inverted-length-bounds',
-            ),
-            pytest.param(
-                'f',
-                """\
-                scorer = "judges"
-                display_name = "Family F"
-                samples = 1
-                """,
+                TESTS_SETTINGS | {'scorer': 'judges'},
                 False,
                 True,
                 "Family `f`: `family.toml`: Input tag 'judges' found using 'scorer' "
@@ -599,11 +322,172 @@ class TestLoadFamily:
             ),
             pytest.param(
                 'f',
-                'scorer = "tests',
+                VOTES_SETTINGS | {'max_output_tokens': 300},
+                True,
+                False,
+                'Family `f`: `family.toml`: `max_output_tokens`: Extra inputs '
+                'are not permitted.',
+                id='case-output-budget',
+            ),
+            pytest.param(
+                'f',
+                VOTES_SETTINGS
+                | {'render': 'diff', 'harness': 'terminus-2', 'max_turns': 10},
                 False,
                 True,
-                'Family `f`: `family.toml` is not valid TOML:',
-                id='malformed-toml',
+                'Family `f`: `family.toml`: `max_turns`: Extra inputs are not '
+                'permitted.',
+                id='task-turn-budget',
+            ),
+            pytest.param(
+                'f',
+                VOTES_SETTINGS | {'systems': ['large', 'small', 'large']},
+                True,
+                False,
+                'Family `f`: `family.toml`: `systems`: repeats `large`.',
+                id='repeated-voted-systems',
+            ),
+            pytest.param(
+                'f',
+                TESTS_SETTINGS
+                | {'systems': ['large', 'small', 'large'], 'harness': 'terminus-2'},
+                False,
+                True,
+                'Family `f`: `family.toml`: `systems`: repeats `large`.',
+                id='repeated-tested-systems',
+            ),
+            pytest.param(
+                'f',
+                VOTES_SETTINGS | {'defects': ['tone', 'scope', 'tone']},
+                True,
+                False,
+                'Family `f`: `family.toml`: `defects`: repeats `tone`.',
+                id='repeated-defects',
+            ),
+            pytest.param(
+                'f',
+                VOTES_SETTINGS | {'defects': ['punctuation']},
+                True,
+                False,
+                'Family `f`: `family.toml`: `defects.0`: Input should be',
+                id='retired-defect',
+            ),
+            pytest.param(
+                'f',
+                VOTES_SETTINGS | {'defects': ['typos']},
+                True,
+                False,
+                'Family `f`: `family.toml`: `defects.0`: Input should be',
+                id='unknown-defect',
+            ),
+            pytest.param(
+                'f',
+                VOTES_SETTINGS | {'categories': ['message', 'reply', 'message']},
+                True,
+                False,
+                'Family `f`: `family.toml`: `categories`: repeats `message`.',
+                id='repeated-categories',
+            ),
+            pytest.param(
+                'f',
+                VOTES_SETTINGS | {'categories': ['punctuation']},
+                True,
+                False,
+                'Family `f`: `family.toml`: `categories.0`: Input should be',
+                id='retired-category',
+            ),
+            pytest.param(
+                'f',
+                VOTES_SETTINGS | {'systems': ['large', 'small'], 'reference': 'medium'},
+                True,
+                False,
+                'Family `f`: `family.toml`: reference `medium` is not in `systems`.',
+                id='reference-outside-the-systems',
+            ),
+            pytest.param(
+                'f',
+                VOTES_SETTINGS | {'gates': {'min_chars': 500, 'max_chars': 400}},
+                True,
+                False,
+                'Family `f`: `family.toml`: `gates`: `min_chars` 500 exceeds '
+                '`max_chars` 400.',
+                id='inverted-length-bounds',
+            ),
+            pytest.param(
+                'f',
+                VOTES_SETTINGS | {'public': True},
+                True,
+                False,
+                'Family `f`: a public family needs an `aspect`.',
+                id='public-without-an-aspect',
+            ),
+            pytest.param(
+                'writingf',
+                VOTES_SETTINGS | {'aspect': 'writing', 'public': True},
+                True,
+                False,
+                'Family `writingf`: a public family ID starts with its aspect, '
+                'as in `writing-<name>`.',
+                id='public-id-outside-its-aspect',
+            ),
+            pytest.param(
+                'f',
+                TESTS_SETTINGS,
+                True,
+                False,
+                'Family `f`: score a `cases.toml` family by `votes`, since only a '
+                '`tasks/` family has tests.',
+                id='cases-scored-by-tests',
+            ),
+            pytest.param(
+                'f',
+                VOTES_SETTINGS | {'harness': 'terminus-2'},
+                True,
+                False,
+                'Family `f`: a `cases.toml` family runs every system as `generate`, '
+                'so remove `harness`.',
+                id='cases-with-an-agent-harness',
+            ),
+            pytest.param(
+                'f',
+                VOTES_SETTINGS | {'render': 'diff'},
+                True,
+                False,
+                'Family `f`: a `cases.toml` family yields replies, so set `render` '
+                'to `"text"` or `"html"`.',
+                id='cases-with-diffs',
+            ),
+            pytest.param(
+                'f',
+                VOTES_SETTINGS
+                | {
+                    'harness': 'terminus-2',
+                    'render': 'diff',
+                    'language': 'en',
+                    'gates': dict[str, object](),
+                },
+                False,
+                True,
+                "Family `f`: a `tasks/` family's tests are its only gate, so remove "
+                '`language`, `gates`.',
+                id='tasks-with-case-gates',
+            ),
+            pytest.param(
+                'f',
+                VOTES_SETTINGS | {'harness': 'terminus-2'},
+                False,
+                True,
+                'Family `f`: a `tasks/` family scored by `votes` yields diffs, so set '
+                '`render = "diff"`.',
+                id='tasks-without-diffs',
+            ),
+            pytest.param(
+                'f',
+                TESTS_SETTINGS | {'systems': ['large']},
+                False,
+                True,
+                'Family `f`: a `tasks/` family that lists systems needs `harness`.',
+                id='tests-without-a-harness',
             ),
         ],
     )
@@ -611,7 +495,7 @@ class TestLoadFamily:
         self,
         families_dir: Path,
         name: str,
-        settings: str,
+        settings: str | dict[str, object],
         cases: bool,
         tasks: bool,
         message: str,
