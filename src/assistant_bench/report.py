@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import Annotated, Literal, assert_never
 
 import numpy as np
-from numpy.typing import NDArray
 from pydantic import (
     AwareDatetime,
     BaseModel,
@@ -729,13 +728,12 @@ def prompt_effect(
     baseline = np.array([shares[bare][case] for case in cases])
     instructed = np.array([shares[prompted][case] for case in cases])
     differences = instructed - baseline
+
     interval = None
     if len(cases) > 1 and np.ptp(differences) > 0:
         result = bootstrap(
-            (baseline, instructed),
-            _paired_difference,
-            paired=True,
-            vectorized=False,
+            (differences,),
+            np.mean,
             method='percentile',
             confidence_level=0.95,
             rng=np.random.default_rng(0),
@@ -744,6 +742,7 @@ def prompt_effect(
             lower=float(result.confidence_interval.low),
             upper=float(result.confidence_interval.high),
         )
+
     return PromptEffect(
         bare=bare,
         prompted=prompted,
@@ -751,10 +750,6 @@ def prompt_effect(
         delta=float(np.mean(differences)),
         interval=interval,
     )
-
-
-def _paired_difference(a: NDArray[np.float64], b: NDArray[np.float64]) -> float:
-    return float(np.mean(b - a))
 
 
 def close_votes(
