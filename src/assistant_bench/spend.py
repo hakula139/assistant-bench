@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict
 
 from assistant_bench.catalog import Price, System
 from assistant_bench.families import Family
-from assistant_bench.harnesses.accounting import RequestReceipt
+from assistant_bench.harnesses.accounting import parse_receipt, response_usage
 from assistant_bench.harnesses.usage import Attempt, MeasuredUsage
 from assistant_bench.state import State
 
@@ -58,7 +58,7 @@ class Accounting(BaseModel):
 
 @dataclass(frozen=True)
 class PendingAttempt:
-    """Admitted responses without a final Entry, including unknown usage."""
+    """An attempt with uncovered admissions, including possible responses."""
 
     job: str
     trial: str
@@ -92,12 +92,8 @@ def read_ledger(scope: str, state: State) -> list[AccountedAttempt]:
                 ceiling_usd=accounting.ceiling_usd,
                 responses=[],
             )
-        receipt = row['receipt_json']
-        pending[attempt_id].responses.append(
-            RequestReceipt.model_validate_json(cast(str, receipt)).usage
-            if receipt is not None
-            else None
-        )
+        receipt = parse_receipt(cast(str | None, row['receipt_json']))
+        pending[attempt_id].responses.extend(response_usage((receipt,)))
     return entries + list(pending.values())
 
 

@@ -110,7 +110,7 @@ uv run bench spend
 uv run bench spend coding-repo --system <name>
 ```
 
-Private D1 records request admissions before dispatch and receipts after responses. Collection reconciles receipts with the family's ledger, which outlives local jobs. An interrupted request can leave its final usage unknown and block another paid attempt until inspected.
+Private D1 records admissions before dispatch and receipts for terminal outcomes. Collection reconciles receipts with the family's ledger, which outlives local jobs. An interrupted request can leave its final usage unknown and block another paid attempt until inspected.
 
 ### Recorded Spend
 

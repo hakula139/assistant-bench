@@ -71,7 +71,7 @@ class MeasuredUsage:
 
 
 def combined_usage(responses: Sequence[MeasuredUsage | None]) -> MeasuredUsage | None:
-    """Sum measured requests only when every admitted request reports valid usage."""
+    """Sum usage only when every possible response has measured usage."""
     if not responses or any(usage is None for usage in responses):
         return None
     measured = [usage for usage in responses if usage is not None]

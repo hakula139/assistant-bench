@@ -3,7 +3,7 @@
 import json
 import os
 import ssl
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Coroutine, Mapping
 from typing import Any, Literal, override
 
 import h11
@@ -27,6 +27,8 @@ from assistant_bench.catalog import EXPORT_VAR, Api
 from assistant_bench.generation import load_generation
 from assistant_bench.harnesses.accounting import (
     REQUEST_ID,
+    AccountingError,
+    NotDispatched,
     RequestReceipt,
     TrialAccounting,
     current_trial,
@@ -215,6 +217,46 @@ class Endpoint(HeaderSettings):
         )
 
 
+type _TraceCallback = Callable[
+    [str, dict[str, object]], Coroutine[object, object, None]
+]
+
+
+class _DispatchTrace:
+    def __init__(self, previous: _TraceCallback | None) -> None:
+        self.previous = previous
+        self._headers_started = False
+        self._connect_failure: object = None
+
+    async def __call__(self, name: str, info: dict[str, object]) -> None:
+        if name in {
+            'http11.send_request_headers.started',
+            'http2.send_request_headers.started',
+        }:
+            # A proxy CONNECT only opens a tunnel for the model POST.
+            if getattr(info.get('request'), 'method', None) != b'CONNECT':
+                self._headers_started = True
+        elif name in {
+            'connection.connect_tcp.failed',
+            'connection.start_tls.failed',
+            'proxy.start_tls.failed',
+            'socks.connect_tcp.failed',
+            'socks.start_tls.failed',
+        }:
+            self._connect_failure = info.get('exception')
+        if self.previous is not None:
+            await self.previous(name, info)
+
+    def proves_no_dispatch(self, error: BaseException) -> bool:
+        # HTTPX chains the original HTTPcore exception when it maps the timeout.
+        return (
+            isinstance(error, httpx2.ConnectTimeout)
+            and self._connect_failure is not None
+            and error.__cause__ is self._connect_failure
+            and not self._headers_started
+        )
+
+
 class _Client(httpx2.AsyncClient):
     def __init__(
         self,
@@ -250,6 +292,10 @@ class _Client(httpx2.AsyncClient):
         if request.method != 'POST' or request.url.path.endswith('/count_tokens'):
             return
         request.extensions[REQUEST_ID] = await recorder.admit(self._api)
+        previous = request.extensions.get('trace')
+        request.extensions['trace'] = _DispatchTrace(
+            previous.previous if isinstance(previous, _DispatchTrace) else previous
+        )
 
     async def _confirm(self, response: httpx2.Response) -> None:
         request_id = response.request.extensions.get(REQUEST_ID)
@@ -283,9 +329,23 @@ class _Client(httpx2.AsyncClient):
     async def send(self, request: httpx2.Request, **kwargs: Any) -> httpx2.Response:
         try:
             return await super().send(request, **kwargs)
-        except BaseException:
-            if REQUEST_ID in request.extensions:
-                await self._accounting().uncertain()
+        except BaseException as error:
+            request_id = request.extensions.get(REQUEST_ID)
+            if isinstance(request_id, str):
+                recorder = self._accounting()
+                trace = request.extensions.get('trace')
+                if isinstance(trace, _DispatchTrace) and trace.proves_no_dispatch(
+                    error
+                ):
+                    try:
+                        await recorder.confirm(
+                            request_id,
+                            NotDispatched(api=self._api, reason='connect_timeout'),
+                        )
+                    except AccountingError as accounting_error:
+                        raise error from accounting_error
+                else:
+                    await recorder.uncertain()
             raise
 
 

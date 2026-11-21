@@ -8,7 +8,7 @@ import pytest
 
 from assistant_bench.catalog import Price, System
 from assistant_bench.database import Param, Result, SQLiteDatabase
-from assistant_bench.harnesses.accounting import RequestReceipt
+from assistant_bench.harnesses.accounting import NotDispatched, RequestReceipt
 from assistant_bench.harnesses.usage import Attempt, MeasuredUsage
 from assistant_bench.spend import (
     Accounting,
@@ -205,6 +205,15 @@ class TestReadLedger:
         admitted(private_state, start, 'known', USAGE)
         admitted(private_state, start, 'unknown', None)
         admitted(private_state, start, 'unfinished', None, terminal=False)
+        assert private_state.admit_request(
+            RequestAdmission('before-dispatch', start.id, start.started_at)
+        )
+        private_state.record_receipt(
+            'before-dispatch',
+            NotDispatched(
+                api='openai-chat-completions', reason='connect_timeout'
+            ).model_dump_json(),
+        )
 
         (pending,) = read_ledger(scope, private_state)
         spend = spend_of(pending)
@@ -214,6 +223,7 @@ class TestReadLedger:
         assert pending.price == actual.price
         assert pending.ceiling_usd == pytest.approx(0.27048)
         assert spend.known_usd == pytest.approx(3)
+        assert spend.responses == 3
         assert spend.unknown == 2
         assert private_state.entries(scope) == []
 
