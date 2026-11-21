@@ -5,7 +5,7 @@ const DAY_MS = 24 * 60 * MINUTE_MS;
 export const ACTORS_PER_TAG = 5;
 
 /** Votes one IP tag may record within `WINDOW_MS`, across families. */
-export const VOTES_PER_TAG = 200;
+export const VOTES_PER_TAG = 2_000;
 
 /** The sliding window of both per-tag caps. */
 export const WINDOW_MS = DAY_MS;

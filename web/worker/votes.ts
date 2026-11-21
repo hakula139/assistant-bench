@@ -4,30 +4,31 @@ import type { Defect } from '@/lib/defects';
 import { ApiError, type Bindings } from './api';
 import { FRESHNESS_CACHE_SECONDS, UNDO_MS, VOTES_PER_TAG, WINDOW_MS } from './limits';
 
-/**
- * Every row present counts toward the tag's cap, so excluding a vote refunds nothing, while an
- * undone vote is gone and no longer counts.
- */
-const TAG_VOTES = 'SELECT count(*) AS votes FROM votes WHERE ip_tag = ? AND recorded_at > ?';
-const PRIOR = 'SELECT choice, defects FROM votes WHERE pair_id = ? AND actor_id = ?';
-const PAIR_DEFECTS = `
-  SELECT publications.defects FROM pairs
-  JOIN active ON active.family = pairs.family AND active.publication_id = pairs.publication_id
-  JOIN publications ON publications.id = pairs.publication_id
-  WHERE pairs.id = ? AND pairs.actor_id = ?`;
+const STATE_FIELDS = 'prior.choice, prior.defects AS saved, publications.defects AS allowed';
+const STATE_JOINS = `
+  LEFT JOIN votes AS prior ON prior.pair_id = ?1 AND prior.actor_id = ?2
+  LEFT JOIN pairs ON pairs.id = ?1 AND pairs.actor_id = ?2
+  LEFT JOIN active ON active.family = pairs.family AND active.publication_id = pairs.publication_id
+  LEFT JOIN publications ON publications.id = active.publication_id`;
+const FIND = `SELECT ${STATE_FIELDS}, 0 AS capped FROM (SELECT 1) ${STATE_JOINS}`;
+const HAS_ROOM = '(SELECT count(*) FROM votes WHERE ip_tag = ?3 AND recorded_at > ?4) < ?5';
+/** Classifies a miss in the insert's snapshot before another vote or undo can change the result. */
+const CHECK_MISS = `
+  SELECT ${STATE_FIELDS}, NOT (${HAS_ROOM}) AS capped
+  FROM (SELECT 1 WHERE changes() = 0)
+  ${STATE_JOINS}`;
 const RECORD = `
   INSERT INTO votes (
     pair_id, actor_id, family, publication_id, case_key, a_output, b_output, a_system, b_system,
     choice, defects, elapsed_ms, recorded_at, ip_tag
   )
   SELECT pairs.id, pairs.actor_id, pairs.family, pairs.publication_id, pairs.case_key,
-    pairs.a_output, pairs.b_output, a.system, b.system, ?1, ?2, max(0, ?3 - pairs.issued_at), ?3, ?4
+    pairs.a_output, pairs.b_output, a.system, b.system, ?6, ?7, max(0, ?8 - pairs.issued_at), ?8, ?3
   FROM pairs
   JOIN active ON active.family = pairs.family AND active.publication_id = pairs.publication_id
   JOIN outputs AS a ON a.publication_id = pairs.publication_id AND a.output_key = pairs.a_output
   JOIN outputs AS b ON b.publication_id = pairs.publication_id AND b.output_key = pairs.b_output
-  WHERE pairs.id = ?5 AND pairs.actor_id = ?6
-    AND (SELECT count(*) FROM votes WHERE ip_tag = ?4 AND recorded_at > ?7) < ?8
+  WHERE pairs.id = ?1 AND pairs.actor_id = ?2 AND ${HAS_ROOM}
   ON CONFLICT DO NOTHING RETURNING id`;
 const RELEASE = `
   DELETE FROM pairs WHERE id = ?1 AND EXISTS (SELECT 1 FROM votes WHERE pair_id = ?1)`;
@@ -51,70 +52,48 @@ const FRESHNESS = `
     OR (SELECT coalesce(sum(votes), 0) FROM pair_vote_counts WHERE family = ?1) <> ?3
     AS stale`;
 
-interface Prior {
-  choice: string;
-  defects: string;
+interface Found {
+  choice: string | null;
+  saved: string | null;
+  allowed: string | null;
+  capped: 0 | 1;
 }
 
 /** Whether a stored vote holds the same choice and the same tags on each side. */
-function same(prior: Prior, request: VoteRequest): boolean {
-  const tags = JSON.parse(prior.defects) as TaggedDefects;
+function same(choice: string, saved: string, request: VoteRequest): boolean {
+  const tags = JSON.parse(saved) as TaggedDefects;
   const set = (items: readonly string[]) => JSON.stringify([...new Set(items)].sort());
   return (
-    prior.choice === request.choice &&
+    choice === request.choice &&
     set(tags.a) === set(request.defects.a) &&
     set(tags.b) === set(request.defects.b)
   );
-}
-
-/** A vote's stored copy, its pair's defects while pending, and its tag's votes in the window. */
-interface Found {
-  prior: Prior | undefined;
-  defects: string | undefined;
-  votes: number;
-}
-
-async function find(
-  db: D1Database,
-  actor: string,
-  tag: string,
-  request: VoteRequest,
-  now: number,
-): Promise<Found> {
-  const [priorRows, pairRows, tagRows] = await db.batch([
-    db.prepare(PRIOR).bind(request.pair, actor),
-    db.prepare(PAIR_DEFECTS).bind(request.pair, actor),
-    db.prepare(TAG_VOTES).bind(tag, now - WINDOW_MS),
-  ]);
-  const [{ votes }] = tagRows.results as { votes: number }[];
-  return {
-    prior: (priorRows.results as Prior[]).at(0),
-    defects: (pairRows.results as { defects: string }[]).at(0)?.defects,
-    votes,
-  };
 }
 
 /**
  * Decides a vote from what it finds: `null` when it repeats the stored vote, the tags to store in
  * the family's order when it may be recorded, and an `ApiError` otherwise.
  */
-function decide(request: VoteRequest, { prior, defects, votes }: Found): TaggedDefects | null {
-  if (prior !== undefined) {
-    if (!same(prior, request)) {
+function decide(request: VoteRequest, found: Found | null): TaggedDefects | null {
+  if (found === null) {
+    throw new ApiError(409, 'stale_pair');
+  }
+  if (found.choice !== null && found.saved !== null) {
+    if (!same(found.choice, found.saved, request)) {
       throw new ApiError(409, 'stale_pair');
     }
     return null;
   }
-  if (defects === undefined) {
+  if (found.allowed === null) {
     throw new ApiError(409, 'stale_pair');
   }
 
-  const allowed = JSON.parse(defects) as Defect[];
+  const allowed = JSON.parse(found.allowed) as Defect[];
   const tagged = Object.values(request.defects).flat();
   if (tagged.some((defect) => !allowed.includes(defect))) {
     throw new ApiError(400, 'invalid_request');
   }
-  if (votes >= VOTES_PER_TAG) {
+  if (found.capped) {
     throw new ApiError(429, 'daily_limit');
   }
   return {
@@ -135,32 +114,24 @@ export async function record(
   request: VoteRequest,
   now: number,
 ): Promise<void> {
-  const defects = decide(request, await find(db, actor, tag, request, now));
+  const found = await db.prepare(FIND).bind(request.pair, actor).first<Found>();
+  const defects = decide(request, found);
   if (defects === null) {
     return;
   }
 
-  const [inserted] = await db.batch([
-    db
-      .prepare(RECORD)
-      .bind(
-        request.choice,
-        JSON.stringify(defects),
-        now,
-        tag,
-        request.pair,
-        actor,
-        now - WINDOW_MS,
-        VOTES_PER_TAG,
-      ),
+  const scope = [request.pair, actor, tag, now - WINDOW_MS, VOTES_PER_TAG] as const;
+  const [inserted, missed] = await db.batch([
+    db.prepare(RECORD).bind(...scope, request.choice, JSON.stringify(defects), now),
+    db.prepare(CHECK_MISS).bind(...scope),
     db.prepare(RELEASE).bind(request.pair),
   ]);
   if (inserted.results.length === 1) {
     return;
   }
 
-  // A miss that still looks recordable met the actor's earlier vote on the same comparison.
-  if (decide(request, await find(db, actor, tag, request, now)) !== null) {
+  if (decide(request, (missed.results as Found[]).at(0) ?? null) !== null) {
+    // A miss that still looks recordable met the actor's earlier vote on the same comparison.
     throw new ApiError(409, 'stale_pair');
   }
 }
