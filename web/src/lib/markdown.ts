@@ -88,8 +88,6 @@ markdown.renderer.rules.tail_close = () => '</span>';
 
 for (const type of ['code_block', 'fence'] as const) {
   const render = markdown.renderer.rules[type];
-  if (render) {
-    markdown.renderer.rules[type] = (...args) =>
-      render(...args).replace(/^<pre\b/, '<pre tabindex="0"');
-  }
+  markdown.renderer.rules[type] = (...args) =>
+    render(...args).replace(/^<pre\b/, '<pre tabindex="0"');
 }
