@@ -26,7 +26,7 @@ from assistant_bench.messages import InputError
 from assistant_bench.paths import REPO_ROOT
 from assistant_bench.runtime import RunContext
 from assistant_bench.spend import Accounting
-from assistant_bench.state import State
+from assistant_bench.state import Run, State
 from assistant_bench.tasks import render_task_config
 
 
@@ -181,30 +181,25 @@ def run(probes: list[Probe], context: RunContext) -> list[Record]:
         except subprocess.CalledProcessError as error:
             run_error = type(error).__name__
         finally:
-            context.state.run(run_id)
-            outcomes = _outcomes(probe, run_error, context, run_id)
-            if len(outcomes) != 1:
-                raise InputError('A canary execution produced more than one outcome.')
-            context.state.append_canary(run_id, outcomes[0].model_dump_json())
+            record = _record(probe, run_error, context, context.state.run(run_id))
+            context.state.append_canary(run_id, record.model_dump_json())
 
-        records.extend(outcomes)
-        probe_problems = [
-            problem
-            for record in outcomes
-            if (problem := _problem(record, [])) is not None
-        ]
-        if not probe_problems:
-            context.state.establish_baseline(probe.original.name, key, run_id)
-            winner = context.state.baseline(probe.original.name, key)
-            if winner is None:
-                raise InputError('The accepted canary baseline could not be confirmed.')
-            baseline = Record.model_validate_json(winner)
-            probe_problems.extend(
-                problem
-                for record in outcomes
-                if (problem := _problem(record, [baseline])) is not None
+        records.append(record)
+        if not record.success:
+            problems.append(
+                f'System `{record.system}`: canary probe failed. '
+                'The run was refused. Inspect its canary records.'
             )
-        problems.extend(probe_problems)
+            continue
+
+        context.state.establish_baseline(probe.original.name, key, run_id)
+        winner = context.state.baseline(probe.original.name, key)
+        if winner is None:
+            raise InputError('The accepted canary baseline could not be confirmed.')
+        baseline = Record.model_validate_json(winner)
+        if (problem := _baseline_problem(record, baseline)) is not None:
+            problems.append(problem)
+
     if problems:
         raise InputError('\n'.join(problems))
     return records
@@ -221,35 +216,23 @@ def read_records(system: str, state: State) -> list[Record]:
     return [Record.model_validate_json(value) for value in state.records(system)]
 
 
-def _outcomes(
-    probe: Probe, run_error: str | None, context: RunContext, run_id: str
-) -> list[Record]:
-    directory = jobs.job_path(probe.config)
-    results = [
-        TrialResult.model_validate_json(path.read_text())
-        for path in sorted(directory.glob('*/result.json'))
-    ]
-    return (
-        [_record(probe, result, run_error, context, run_id) for result in results]
-        if results
-        else [_record(probe, None, run_error or 'MissingTrialResult', context, run_id)]
-    )
-
-
 def _record(
-    probe: Probe,
-    result: TrialResult | None,
-    run_error: str | None,
-    context: RunContext,
-    run_id: str,
+    probe: Probe, run_error: str | None, context: RunContext, run: Run
 ) -> Record:
     directory = jobs.job_path(probe.config)
+    result_paths = list(directory.glob('*/result.json'))
+    if len(result_paths) > 1:
+        raise InputError('A canary execution produced more than one outcome.')
+    result = None
+    if result_paths:
+        result = TrialResult.model_validate_json(result_paths[0].read_text())
+
     state = context.state
     trial = result.trial_name if result else None
     pending = next(
         (
             row
-            for row in state.pending_artifacts(run_id)
+            for row in state.pending_artifacts(run.id)
             if result is not None
             and row.canonical_commit_sha is None
             and row.trial_id == result.trial_name
@@ -258,25 +241,21 @@ def _record(
         None,
     )
     audited = result is not None and state.trial_registered(
-        run_id, result.trial_name, str(result.id)
+        run.id, result.trial_name, str(result.id)
     )
     if pending is not None and result is not None:
-        snapshot = (
-            context.root
-            / 'snapshots'
-            / pending.path.split('/')[-1]
-            / state.run(run_id).job
-        )
+        artifact_id = pending.path.split('/')[-1]
+        snapshot = context.root / 'snapshots' / artifact_id / run.job
         manifest = build_manifest(
             snapshot,
-            scope=state.run(run_id).scope,
-            run_id=run_id,
-            artifact_id=pending.path.split('/')[-1],
+            scope=run.scope,
+            run_id=run.id,
+            artifact_id=artifact_id,
             trial_id=str(result.id),
-            job_name=state.run(run_id).job,
+            job_name=run.job,
             trial_name=result.trial_name,
-            code_revision=state.run(run_id).code_revision,
-            case_revision=state.run(run_id).case_revision,
+            code_revision=run.code_revision,
+            case_revision=run.case_revision,
         )
         if hashlib.sha256(manifest.content()).hexdigest() != pending.manifest_digest:
             raise InputError(
@@ -291,17 +270,17 @@ def _record(
         directory = snapshot
         audited = True
     elif audited and result is not None:
-        row = state.trial_artifact(run_id, result.trial_name)
+        row = state.trial_artifact(run.id, result.trial_name)
         archive = context.artifacts.materialize(
             ArtifactRef(
                 commit_sha=cast(str, row['commit_sha']),
                 path=cast(str, row['path']),
                 manifest_digest=cast(str, row['manifest_digest']),
             ),
-            context.root / 'canary-records' / run_id / str(result.id),
+            context.root / 'canary-records' / run.id / str(result.id),
         )
         if (
-            archive.manifest.run_id != run_id
+            archive.manifest.run_id != run.id
             or archive.manifest.trial_name != result.trial_name
             or archive.manifest.trial_id != str(result.id)
         ):
@@ -320,7 +299,7 @@ def _record(
             RequestReceipt.model_validate_json(cast(str, row['receipt_json']))
             if row['receipt_json'] is not None
             else None
-            for row in state.trial_requests(run_id, trial)
+            for row in state.trial_requests(run.id, trial)
         ]
         if trial is not None
         else []
@@ -361,25 +340,14 @@ def _record(
     )
 
 
-def _problem(record: Record, previous: list[Record]) -> str | None:
-    if not record.success:
-        return (
-            f'System `{record.system}`: canary probe failed. '
-            'The run was refused. Inspect its canary records.'
-        )
-
-    baseline = next(
-        (
-            old
-            for old in previous
-            if old.success
-            and old.source_generate_fingerprint == record.source_generate_fingerprint
-            and old.probe_protocol_digest == record.probe_protocol_digest
-        ),
-        None,
-    )
-    if baseline is None:
+def _baseline_problem(record: Record, baseline: Record) -> str | None:
+    if (
+        not baseline.success
+        or baseline.source_generate_fingerprint != record.source_generate_fingerprint
+        or baseline.probe_protocol_digest != record.probe_protocol_digest
+    ):
         return None
+
     assert baseline.usage is not None and record.usage is not None
     old_tokens, new_tokens = baseline.usage.input_tokens, record.usage.input_tokens
     models_changed = set(baseline.response_models) != set(record.response_models)
