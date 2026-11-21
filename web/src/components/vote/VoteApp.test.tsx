@@ -186,11 +186,18 @@ function stubApi({
   };
 }
 
-/** Answers one route with `answer` while the stub serves every other request. */
-function override(api: ReturnType<typeof stubApi>, path: string, answer: () => Promise<Response>) {
+/** Lets `answer` handle matching requests and falls back to the stub. */
+function override(
+  api: ReturnType<typeof stubApi>,
+  path: string,
+  answer: () => Promise<Response> | undefined,
+) {
   const fetch = api.fetch.getMockImplementation();
-  api.fetch.mockImplementation((url, init) =>
-    url.startsWith(path) ? answer() : (fetch?.(url, init) ?? Promise.reject(new Error('No stub'))),
+  api.fetch.mockImplementation(
+    (url, init) =>
+      (url.startsWith(path) ? answer() : undefined) ??
+      fetch?.(url, init) ??
+      Promise.reject(new Error('No stub')),
   );
 }
 
@@ -706,29 +713,76 @@ describe('VoteApp', () => {
     );
   });
 
-  test('forgets a sent choice even when the next pair fails to load', async () => {
+  test('keeps the family after a saved vote and retries only the next pair', async () => {
     const api = stubApi();
     const user = await startVoting();
-    await user.keyboard('a');
-    override(api, '/api/pair', () => Promise.reject(new TypeError('Failed to fetch')));
+    const familyUrl = location.search;
+    let misses = 0;
+    override(api, '/api/pair', () =>
+      ++misses <= 2 ? Promise.reject(new TypeError('Failed to fetch')) : undefined,
+    );
 
-    await user.keyboard('{Enter}');
-    await screen.findByRole('heading', { name: 'Choose a family to vote on' });
+    await user.keyboard('a1{Enter}');
 
-    expect(api.casts.map((cast) => cast.choice)).toEqual(['a']);
+    expect(await screen.findByRole('heading', { name: 'Vote saved' })).toBeDefined();
+    expect(screen.getByRole('alert').textContent).toBe('Could not load the next pair.');
+    expect(location.search).toBe(familyUrl);
+    expect(screen.queryByRole('button', { name: /Submit vote|Retry vote/ })).toBeNull();
+    expect(screen.queryByText('Output A1')).toBeNull();
     expect(JSON.parse(sessionStorage.getItem('bench-vote') ?? '')).toMatchObject({
       choice: null,
+      defects: { a: [], b: [] },
     });
+
+    await user.click(screen.getByRole('button', { name: 'Retry next pair' }));
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Retry next pair' })).toHaveProperty(
+        'disabled',
+        false,
+      );
+    });
+    expect(location.search).toBe(familyUrl);
+
+    await user.click(screen.getByRole('button', { name: 'Retry next pair' }));
+    await screen.findByText('Output A2');
+
+    expect(api.fetch.mock.calls.filter(([path]) => path === '/api/votes')).toHaveLength(1);
+    expect(api.casts).toEqual([{ pair: pairId(1), choice: 'a', defects: { a: ['scope'], b: [] } }]);
+  });
+
+  test.each([
+    ['rate_limited', 429, 'Too many requests. Wait a moment, then retry.'],
+    ['no_round', 404, 'This family has no outputs available to vote on.'],
+  ] as const)('retains the %s reason after saving a vote', async (code, status, message) => {
+    const api = stubApi();
+    const user = await startVoting();
+    const familyUrl = location.search;
+    override(api, '/api/pair', () => Promise.resolve(Response.json({ error: code }, { status })));
+
+    await user.keyboard('b{Enter}');
+
+    expect(await screen.findByRole('heading', { name: 'Vote saved' })).toBeDefined();
+    expect(screen.getByRole('alert').textContent).toBe(message);
+    expect(location.search).toBe(familyUrl);
+    expect(api.fetch.mock.calls.filter(([path]) => path === '/api/votes')).toHaveLength(1);
+    if (code === 'no_round') {
+      expect(screen.getByRole('link', { name: 'Choose another family' }).getAttribute('href')).toBe(
+        location.pathname,
+      );
+      expect(screen.queryByRole('button', { name: 'Retry next pair' })).toBeNull();
+    } else {
+      expect(screen.getByRole('button', { name: 'Retry next pair' })).toBeDefined();
+    }
   });
 
   test.each([
     [
       'a lost response',
       () => Promise.reject(new TypeError('Failed to fetch')),
-      'The voting service is unavailable. Try again.',
+      'Could not confirm whether your vote was saved.',
       true,
     ],
-    ['unavailable', 500, 'The voting service is unavailable. Try again.', true],
+    ['unavailable', 500, 'Could not confirm whether your vote was saved.', true],
     ['daily_limit', 429, 'This network has reached its daily limit. Try again tomorrow.', false],
     ['invalid_request', 400, 'The request could not be processed. Reload and try again.', false],
     ['forbidden', 403, 'The request could not be processed. Reload and try again.', false],
