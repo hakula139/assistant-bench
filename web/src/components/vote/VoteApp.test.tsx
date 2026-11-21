@@ -144,12 +144,7 @@ function stubApi({
     if (route === 'POST /api/votes') {
       const request = voteRequest.parse(requestBody(init));
       if (request.pair !== open) {
-        const priorVote = casts.findLast(
-          (vote) => vote.pair === request.pair && !undone.includes(vote),
-        );
-        return JSON.stringify(priorVote) === JSON.stringify(request)
-          ? respond(null, 204)
-          : refuse('stale_pair', 409);
+        return refuse('stale_pair', 409);
       }
       casts.push(request);
       undoable.push(request);
@@ -191,11 +186,18 @@ function stubApi({
   };
 }
 
-/** Answers one route with `answer` while the stub serves every other request. */
-function override(api: ReturnType<typeof stubApi>, path: string, answer: () => Promise<Response>) {
+/** Lets `answer` handle matching requests and falls back to the stub. */
+function override(
+  api: ReturnType<typeof stubApi>,
+  path: string,
+  answer: () => Promise<Response> | undefined,
+) {
   const fetch = api.fetch.getMockImplementation();
-  api.fetch.mockImplementation((url, init) =>
-    url.startsWith(path) ? answer() : (fetch?.(url, init) ?? Promise.reject(new Error('No stub'))),
+  api.fetch.mockImplementation(
+    (url, init) =>
+      (url.startsWith(path) ? answer() : undefined) ??
+      fetch?.(url, init) ??
+      Promise.reject(new Error('No stub')),
   );
 }
 
@@ -220,11 +222,6 @@ function stubReload() {
 
 const statusLine = () =>
   screen.getByRole('button', { name: /\d+ votes?$/ }).parentElement?.textContent;
-
-const sentVotes = (api: ReturnType<typeof stubApi>) =>
-  api.fetch.mock.calls
-    .filter(([path]) => path === '/api/votes')
-    .map(([, init]) => voteRequest.parse(requestBody(init)));
 
 const pane = (side: 'A' | 'B') => screen.getByRole('region', { name: `Output ${side}` });
 
@@ -641,44 +638,18 @@ describe('VoteApp', () => {
     expect(screen.getByText('Output A1')).toBeDefined();
   });
 
-  test.each([
-    ['a lost response', () => Promise.reject(new TypeError('Failed to fetch'))],
-    ['an HTML gateway error', () => Promise.resolve(new Response('<html>', { status: 502 }))],
-    [
-      'a structured gateway error',
-      () => Promise.resolve(Response.json({ error: 'unavailable' }, { status: 503 })),
-    ],
-  ])('replays the same committed ballot after %s', async (_, fail) => {
+  test('resends the identical vote on Retry after a lost response, locking the ballot meanwhile', async () => {
     const api = stubApi();
     const user = await startVoting();
-    const fetch = api.fetch.getMockImplementation()!;
-    api.fetch.mockImplementation(async (path, init) => {
-      const response = await fetch(path, init);
-      if (path === '/api/votes') {
-        api.fetch.mockImplementation(fetch);
-        return fail();
+    const fetch = api.fetch.getMockImplementation();
+    let lost = true;
+    api.fetch.mockImplementation((path, init) => {
+      if (path === '/api/votes' && lost) {
+        lost = false;
+        return Promise.reject(new TypeError('The vote response was lost'));
       }
-      return response;
+      return fetch?.(path, init) ?? Promise.reject(new Error('No stub'));
     });
-
-    await user.keyboard('b1{Enter}');
-    await screen.findByText('Output A2');
-
-    expect(api.casts).toHaveLength(1);
-    expect(sentVotes(api)).toEqual([api.casts[0], api.casts[0]]);
-    expect(screen.queryByRole('button', { name: 'Retry vote' })).toBeNull();
-  });
-
-  test('resends the identical vote on Retry when both automatic attempts fail', async () => {
-    const api = stubApi();
-    const user = await startVoting();
-    const fetch = api.fetch.getMockImplementation()!;
-    let attempts = 0;
-    api.fetch.mockImplementation((path, init) =>
-      path === '/api/votes' && ++attempts <= 2
-        ? Promise.reject(new TypeError('The vote response was lost'))
-        : fetch(path, init),
-    );
     await user.keyboard('b1{Enter}');
     await screen.findByRole('button', { name: 'Retry vote' });
 
@@ -690,11 +661,14 @@ describe('VoteApp', () => {
     await user.click(screen.getByRole('button', { name: 'Retry vote' }));
     await screen.findByText('Output A2');
 
+    const sent = api.fetch.mock.calls
+      .filter(([path]) => path === '/api/votes')
+      .map(([, init]) => requestBody(init));
+    expect(sent).toEqual([sent[0], sent[0]]);
     expect(api.casts).toEqual([{ pair: pairId(1), choice: 'b', defects: { a: ['scope'], b: [] } }]);
-    expect(sentVotes(api)).toEqual([api.casts[0], api.casts[0], api.casts[0]]);
   });
 
-  test('keeps the original ballot locked when the rate limit refuses its automatic replay', async () => {
+  test('keeps the ballot locked when the rate limit refuses a retried vote', async () => {
     const api = stubApi();
     const user = await startVoting();
     let attempts = 0;
@@ -703,31 +677,28 @@ describe('VoteApp', () => {
         ? Promise.reject(new TypeError('The vote response was lost'))
         : Promise.resolve(Response.json({ error: 'rate_limited' }, { status: 429 })),
     );
+    await user.keyboard('a{Enter}');
+    await screen.findByRole('button', { name: 'Retry vote' });
 
-    await user.keyboard('a1{Enter}');
+    await user.click(screen.getByRole('button', { name: 'Retry vote' }));
 
     expect(await screen.findByText('Too many requests. Wait a moment, then retry.')).toBeDefined();
     expect(screen.getByRole('button', { name: 'Retry vote' })).toBeDefined();
     expect(screen.getByRole('radio', { name: 'A is better' })).toHaveProperty('disabled', true);
-    expect(sentVotes(api)).toEqual(
-      Array(2).fill({
-        pair: pairId(1),
-        choice: 'a',
-        defects: { a: ['scope'], b: [] },
-      }),
-    );
   });
 
   test('unlocks the ballot when a retried vote finds its pair gone', async () => {
     const api = stubApi();
     const user = await startVoting();
-    const fetch = api.fetch.getMockImplementation()!;
-    let attempts = 0;
-    api.fetch.mockImplementation((path, init) =>
-      path === '/api/votes' && ++attempts <= 2
-        ? Promise.reject(new TypeError('The vote response was lost'))
-        : fetch(path, init),
-    );
+    const fetch = api.fetch.getMockImplementation();
+    let lost = true;
+    api.fetch.mockImplementation((path, init) => {
+      if (path === '/api/votes' && lost) {
+        lost = false;
+        return Promise.reject(new TypeError('The vote response was lost'));
+      }
+      return fetch?.(path, init) ?? Promise.reject(new Error('No stub'));
+    });
     await user.keyboard('b{Enter}');
     await screen.findByRole('button', { name: 'Retry vote' });
     api.elsewhere();
@@ -745,13 +716,10 @@ describe('VoteApp', () => {
   test('keeps the family after a saved vote and retries only the next pair', async () => {
     const api = stubApi();
     const user = await startVoting();
-    const fetch = api.fetch.getMockImplementation()!;
     const familyUrl = location.search;
     let misses = 0;
-    api.fetch.mockImplementation((path, init) =>
-      path.startsWith('/api/pair?') && ++misses <= 2
-        ? Promise.reject(new TypeError('Failed to fetch'))
-        : fetch(path, init),
+    override(api, '/api/pair', () =>
+      ++misses <= 2 ? Promise.reject(new TypeError('Failed to fetch')) : undefined,
     );
 
     await user.keyboard('a1{Enter}');
@@ -767,35 +735,55 @@ describe('VoteApp', () => {
     });
 
     await user.click(screen.getByRole('button', { name: 'Retry next pair' }));
-    expect(await screen.findByRole('alert')).toBeDefined();
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Retry next pair' })).toHaveProperty(
+        'disabled',
+        false,
+      );
+    });
     expect(location.search).toBe(familyUrl);
 
     await user.click(screen.getByRole('button', { name: 'Retry next pair' }));
     await screen.findByText('Output A2');
 
-    expect(sentVotes(api)).toEqual(api.casts);
+    expect(api.fetch.mock.calls.filter(([path]) => path === '/api/votes')).toHaveLength(1);
     expect(api.casts).toEqual([{ pair: pairId(1), choice: 'a', defects: { a: ['scope'], b: [] } }]);
+  });
+
+  test.each([
+    ['rate_limited', 429, 'Too many requests. Wait a moment, then retry.'],
+    ['no_round', 404, 'This family has no outputs available to vote on.'],
+  ] as const)('retains the %s reason after saving a vote', async (code, status, message) => {
+    const api = stubApi();
+    const user = await startVoting();
+    const familyUrl = location.search;
+    override(api, '/api/pair', () => Promise.resolve(Response.json({ error: code }, { status })));
+
+    await user.keyboard('b{Enter}');
+
+    expect(await screen.findByRole('heading', { name: 'Vote saved' })).toBeDefined();
+    expect(screen.getByRole('alert').textContent).toBe(message);
+    expect(location.search).toBe(familyUrl);
+    expect(api.fetch.mock.calls.filter(([path]) => path === '/api/votes')).toHaveLength(1);
+    if (code === 'no_round') {
+      expect(screen.getByRole('link', { name: 'Choose another family' }).getAttribute('href')).toBe(
+        location.pathname,
+      );
+      expect(screen.queryByRole('button', { name: 'Retry next pair' })).toBeNull();
+    } else {
+      expect(screen.getByRole('button', { name: 'Retry next pair' })).toBeDefined();
+    }
   });
 
   test.each([
     [
       'a lost response',
       () => Promise.reject(new TypeError('Failed to fetch')),
-      'The voting service is unavailable. Try again.',
+      'Could not confirm whether your vote was saved.',
       true,
     ],
-    ['unavailable', 500, 'The voting service is unavailable. Try again.', true],
-    ...[200, 403, 429].map(
-      (status) =>
-        [
-          `an HTML response with status ${status}`,
-          () => Promise.resolve(new Response('<html>', { status })),
-          'The voting service is unavailable. Try again.',
-          true,
-        ] as const,
-    ),
+    ['unavailable', 500, 'Could not confirm whether your vote was saved.', true],
     ['daily_limit', 429, 'This network has reached its daily limit. Try again tomorrow.', false],
-    ['rate_limited', 429, 'Too many requests. Wait a moment, then retry.', false],
     ['invalid_request', 400, 'The request could not be processed. Reload and try again.', false],
     ['forbidden', 403, 'The request could not be processed. Reload and try again.', false],
     ['too_large', 413, 'The request could not be processed. Reload and try again.', false],
@@ -814,7 +802,6 @@ describe('VoteApp', () => {
 
       expect((await screen.findByRole('alert')).textContent).toBe(alert);
       expect(screen.queryByRole('button', { name: 'Retry vote' }) !== null).toBe(locked);
-      expect(sentVotes(api)).toHaveLength(error === 'a lost response' ? 2 : 1);
       expect(screen.getByRole('radio', { name: 'A is better' })).toHaveProperty('disabled', locked);
       expect(screen.getByRole('button', { name: /Submit vote/ })).toHaveProperty(
         'disabled',

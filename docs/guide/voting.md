@@ -12,7 +12,7 @@ Each pair compares two systems' different, passing outputs on one case, and you 
 
 The server holds your current pair, so a reload or a second tab shows the same one. Reloading preserves your draft without submitting it. If the pair changed meanwhile, the page says when it cleared an unsent choice.
 
-If the connection drops during submission, the page retries once with the same choice and issues. If Retry vote appears, select it to resend the vote. The server counts it once. If the page says Vote saved and the next pair fails to load, select Retry next pair to continue in the same family.
+If the page cannot confirm your vote, select Retry vote to resend the same choice and issues. If the page says Vote saved after a temporary failure to load the next pair, select Retry next pair to continue in the same family.
 
 If another tab already voted on the pair, the page shows the current pair. Skip shows another case for the same two systems, and says so when no other case is left. Undo withdraws your last vote within 10 minutes of casting it and shows its pair again, and each further Undo goes one vote further back.
 

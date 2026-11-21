@@ -438,7 +438,7 @@ export function VoteApp() {
     reloadRequired,
     notice,
     saved,
-    nextPairFailed,
+    nextPairFailure,
     busy,
     locked,
     start,
@@ -594,11 +594,15 @@ export function VoteApp() {
       >
         Reload page
       </Button>
+    ) : nextPairFailure === 'no_round' ? (
+      <Button asChild>
+        <a href={window.location.pathname}>Choose another family</a>
+      </Button>
     ) : (
       error !== null &&
       family !== undefined && (
         <Button disabled={busy} onClick={reconnect}>
-          {nextPairFailed ? 'Retry next pair' : 'Retry connection'}
+          {nextPairFailure === 'retry' ? 'Retry next pair' : 'Retry connection'}
         </Button>
       )
     );
@@ -606,7 +610,7 @@ export function VoteApp() {
   if (state === null) {
     if (family !== undefined) {
       return (
-        <Screen title={nextPairFailed ? 'Vote saved' : 'Connecting to voting'}>
+        <Screen title={nextPairFailure === null ? 'Connecting to voting' : 'Vote saved'}>
           {sitekey === null && error === null && <p role="status">Checking your browser...</p>}
           <ErrorAlert error={error} />
           <div className="flex flex-col items-start gap-2">{recovery}</div>
