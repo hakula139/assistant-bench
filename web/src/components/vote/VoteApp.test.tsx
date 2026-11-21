@@ -163,6 +163,18 @@ function stubApi({
       open = null;
       return respond(null, 204);
     }
+    if (route === 'POST /api/votes/confirm') {
+      const request = voteRequest.parse(requestBody(init));
+      const saved = casts.find(({ pair }) => pair === request.pair);
+      if (
+        saved === undefined ||
+        undone.includes(saved) ||
+        JSON.stringify(saved) !== JSON.stringify(request)
+      ) {
+        return refuse('stale_pair', 409);
+      }
+      return respond(null, 204);
+    }
     if (route === 'POST /api/votes/undo') {
       const { pair } = undoRequest.parse(requestBody(init));
       const last = undoable.at(-1);
@@ -209,7 +221,7 @@ function override(
   const fetch = api.fetch.getMockImplementation();
   api.fetch.mockImplementation(
     (url, init) =>
-      (url.startsWith(path) ? answer() : undefined) ??
+      (url === path || url.startsWith(`${path}?`) ? answer() : undefined) ??
       fetch?.(url, init) ??
       Promise.reject(new Error('No stub')),
   );
@@ -369,6 +381,7 @@ describe('VoteApp', () => {
       'Voting needs cookies. Allow cookies for this site, then reload the page.',
     );
     expect(screen.queryByTestId('turnstile')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Reload page' })).toBeDefined();
     expect(api.fetch.mock.calls.filter(([path]) => path === '/api/actors')).toHaveLength(1);
   });
 
@@ -416,6 +429,11 @@ describe('VoteApp', () => {
     await user.click(screen.getByRole('button', { name: /Skip/ }));
     await screen.findByRole('alert');
     const requests = api.fetch.mock.calls.length;
+    expect(screen.getByRole('button', { name: /Submit vote/ })).toHaveProperty('disabled', true);
+    expect(screen.getByRole('button', { name: /Skip/ })).toHaveProperty('disabled', true);
+    await user.keyboard('{Enter}su');
+    expect(api.fetch).toHaveBeenCalledTimes(requests);
+
     await user.click(screen.getByRole('button', { name: 'Reload page' }));
 
     expect(reload).toHaveBeenCalledExactlyOnceWith();
@@ -652,7 +670,7 @@ describe('VoteApp', () => {
     expect(screen.getByText('Output A1')).toBeDefined();
   });
 
-  test('resends the identical vote on Retry after a lost response, locking the ballot meanwhile', async () => {
+  test('keeps the original ballot on an unconfirmed pending pair until an explicit retry', async () => {
     const api = stubApi();
     const user = await startVoting();
     const fetch = api.fetch.getMockImplementation();
@@ -679,7 +697,208 @@ describe('VoteApp', () => {
       .filter(([path]) => path === '/api/votes')
       .map(([, init]) => requestBody(init));
     expect(sent).toEqual([sent[0], sent[0]]);
+    const confirmed = api.fetch.mock.calls.filter(([path]) => path === '/api/votes/confirm');
+    expect(confirmed.map(([, init]) => requestBody(init))).toEqual([sent[0]]);
     expect(api.casts).toEqual([{ pair: pairId(1), choice: 'b', defects: { a: ['scope'], b: [] } }]);
+  });
+
+  test.each([
+    ['an interrupted fetch', () => Promise.reject(new TypeError('Connection closed'))],
+    ['an HTML 502', () => Promise.resolve(new Response('Bad Gateway', { status: 502 }))],
+    ['a JSON 503', () => Promise.resolve(Response.json({ error: 'unavailable' }, { status: 503 }))],
+    ['an empty 504', () => Promise.resolve(new Response(null, { status: 504 }))],
+  ])('confirms a saved vote after %s without resending it', async (_, failure) => {
+    const api = stubApi();
+    const user = await startVoting();
+    const fetch = api.fetch.getMockImplementation();
+    api.fetch.mockImplementationOnce(async (path, init) => {
+      await fetch?.(path, init);
+      return failure();
+    });
+
+    await user.keyboard('b1{Enter}');
+    await screen.findByText('Output A2');
+
+    const requests = api.fetch.mock.calls.filter(([path]) => path.startsWith('/api/votes'));
+    expect(requests.map(([path]) => path)).toEqual(['/api/votes', '/api/votes/confirm']);
+    expect(requestBody(requests[1][1])).toEqual(requestBody(requests[0][1]));
+    expect(api.casts).toHaveLength(1);
+    expect(screen.getByText('Saved')).toBeDefined();
+  });
+
+  test.each([2, 1])(
+    'shows an updated family with %i case(s) after a negative confirmation',
+    async (cases) => {
+      const api = stubApi({ cases });
+      const user = await startVoting();
+      api.fetch.mockImplementationOnce(() => {
+        api.elsewhere();
+        return Promise.reject(new TypeError('Connection closed'));
+      });
+
+      await user.keyboard('b1{Enter}');
+      await screen.findByText(cases === 1 ? 'No pairs left' : 'Output A2');
+
+      expect(api.casts.map(({ choice }) => choice)).toEqual(['tie']);
+      expect(screen.queryByText('Saved')).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Retry vote' })).toBeNull();
+      expect(JSON.parse(sessionStorage.getItem('bench-vote') ?? '')).toMatchObject({
+        choice: null,
+        defects: { a: [], b: [] },
+      });
+    },
+  );
+
+  test('returns to the family list if its publication disappears during confirmation', async () => {
+    const api = stubApi();
+    const user = await startVoting();
+    override(api, '/api/pair', () =>
+      Promise.resolve(Response.json({ error: 'no_round' }, { status: 404 })),
+    );
+    api.fetch.mockImplementationOnce(() => Promise.reject(new TypeError('Connection closed')));
+
+    await user.keyboard('a1{Enter}');
+    await screen.findByRole('heading', { name: 'Choose a family to vote on' });
+
+    expect(screen.getByRole('alert').textContent).toBe(
+      'This family has no outputs available to vote on.',
+    );
+    expect(screen.queryByRole('button', { name: 'Retry vote' })).toBeNull();
+    expect(JSON.parse(sessionStorage.getItem('bench-vote') ?? '')).toMatchObject({
+      pair: null,
+      choice: null,
+      defects: { a: [], b: [] },
+    });
+  });
+
+  test.each([
+    ['a legacy Worker', 'not_found', 404, 'Could not confirm whether your vote was saved.'],
+    ['a request limit', 'rate_limited', 429, 'Too many requests. Wait a moment, then retry.'],
+    ['private admission', 'reload_required', 401, 'Reload this page to resume private voting.'],
+  ])('keeps the ballot when confirmation meets %s', async (_, code, status, message) => {
+    const api = stubApi();
+    const user = await startVoting();
+    override(api, '/api/votes/confirm', () =>
+      Promise.resolve(Response.json({ error: code }, { status })),
+    );
+    api.fetch.mockImplementationOnce(() => Promise.reject(new TypeError('Connection closed')));
+
+    await user.keyboard('b1{Enter}');
+    expect(await screen.findByText(message)).toBeDefined();
+
+    expect(api.casts).toHaveLength(0);
+    expect(api.pairRequests).toEqual([FAMILY.family]);
+    expect(screen.getByRole('radio', { name: 'B is better' })).toHaveProperty('disabled', true);
+    if (code === 'reload_required') {
+      expect(screen.getByRole('button', { name: 'Reload page' })).toBeDefined();
+      await user.keyboard('{Enter}');
+      expect(api.fetch.mock.calls.filter(([path]) => path === '/api/votes')).toHaveLength(1);
+    } else {
+      await user.click(screen.getByRole('button', { name: 'Retry vote' }));
+      await screen.findByText('Output A2');
+      expect(api.casts).toEqual([
+        { pair: pairId(1), choice: 'b', defects: { a: ['scope'], b: [] } },
+      ]);
+    }
+    expect(api.fetch.mock.calls.filter(([path]) => path === '/api/votes/confirm')).toHaveLength(1);
+  });
+
+  test('requires verification again without resending the vote on a confirmation challenge', async () => {
+    const api = stubApi({ admitted: false });
+    const user = userEvent.setup();
+    history.replaceState(null, '', `/vote/?family=${FAMILY.family}`);
+    render(<VoteApp />);
+    await screen.findByTestId('turnstile');
+    act(() => {
+      widget().onSuccess?.('first-proof');
+    });
+    await screen.findByText('Output A1');
+
+    override(api, '/api/votes/confirm', () =>
+      Promise.resolve(
+        Response.json({ error: 'admission_required', sitekey: SITEKEY }, { status: 401 }),
+      ),
+    );
+    api.fetch.mockImplementationOnce(() => Promise.reject(new TypeError('Connection closed')));
+
+    await user.keyboard('b1{Enter}');
+    await screen.findByTestId('turnstile');
+    expect(screen.queryByRole('button', { name: 'Retry vote' })).toBeNull();
+
+    act(() => {
+      widget().onSuccess?.('proof');
+    });
+    const retry = await screen.findByRole('button', { name: 'Retry vote' });
+    await waitFor(() => {
+      expect(retry).toHaveProperty('disabled', false);
+    });
+    expect(api.casts).toEqual([]);
+
+    await user.click(retry);
+    await screen.findByText('Output A2');
+    expect(api.casts).toEqual([{ pair: pairId(1), choice: 'b', defects: { a: ['scope'], b: [] } }]);
+    expect(api.fetch.mock.calls.filter(([path]) => path === '/api/votes/confirm')).toHaveLength(1);
+  });
+
+  test('does not reload the pair or replace the tab draft after unmounting during confirmation', async () => {
+    const api = stubApi();
+    const user = userEvent.setup();
+    const page = render(<VoteApp />);
+    await user.click(await screen.findByRole('button', { name: FAMILY.display_name }));
+    await screen.findByText('Output A1');
+    const confirming = Promise.withResolvers<Response>();
+    override(api, '/api/votes/confirm', () => confirming.promise);
+    api.fetch.mockImplementationOnce(() => Promise.reject(new TypeError('Connection closed')));
+
+    await user.keyboard('a{Enter}');
+    await waitFor(() => {
+      expect(api.fetch.mock.calls.filter(([path]) => path === '/api/votes/confirm')).toHaveLength(
+        1,
+      );
+    });
+    page.unmount();
+    sessionStorage.setItem('bench-vote', 'draft from the new session');
+    await act(async () => {
+      confirming.resolve(Response.json({ error: 'stale_pair' }, { status: 409 }));
+    });
+
+    expect(api.pairRequests).toEqual([FAMILY.family]);
+    expect(sessionStorage.getItem('bench-vote')).toBe('draft from the new session');
+  });
+
+  test.each([
+    ['Skip', '/api/pair/skip'],
+    ['Undo', '/api/votes/undo'],
+  ])('discards the response to %s after unmounting', async (action, path) => {
+    const api = stubApi();
+    const user = userEvent.setup();
+    const page = render(<VoteApp />);
+    await user.click(await screen.findByRole('button', { name: FAMILY.display_name }));
+    await screen.findByText('Output A1');
+    await user.keyboard('a{Enter}');
+    await screen.findByText('Output A2');
+    const response = Promise.withResolvers<undefined>();
+    const original = api.fetch.getMockImplementation();
+    api.fetch.mockImplementation(async (url, init) => {
+      if (url === path) {
+        await response.promise;
+      }
+      return original?.(url, init) ?? Promise.reject(new Error('No stub'));
+    });
+
+    await user.click(screen.getByRole('button', { name: new RegExp(action) }));
+    expect(api.fetch.mock.calls.filter(([url]) => url === path)).toHaveLength(1);
+    const pairReads = api.fetch.mock.calls.filter(([url]) => url.startsWith('/api/pair?')).length;
+    page.unmount();
+    sessionStorage.setItem('bench-vote', 'draft from the new session');
+    await act(async () => {
+      response.resolve(undefined);
+    });
+
+    expect(api.fetch.mock.calls.filter(([url]) => url.startsWith('/api/pair?'))).toHaveLength(
+      pairReads,
+    );
+    expect(sessionStorage.getItem('bench-vote')).toBe('draft from the new session');
   });
 
   test('keeps the ballot locked when the rate limit refuses a retried vote', async () => {
@@ -792,8 +1011,8 @@ describe('VoteApp', () => {
 
   test.each([
     [
-      'a lost response',
-      () => Promise.reject(new TypeError('Failed to fetch')),
+      'a malformed success',
+      () => Promise.resolve(new Response('Unexpected reply', { status: 200 })),
       'Could not confirm whether your vote was saved.',
       true,
     ],
@@ -822,6 +1041,7 @@ describe('VoteApp', () => {
         'disabled',
         locked,
       );
+      expect(api.fetch.mock.calls.map(([path]) => path)).not.toContain('/api/votes/confirm');
     },
   );
 

@@ -173,6 +173,8 @@ export async function getPair(family: string, signal: AbortSignal) {
 
 export const skipPair = (pair: string) => requestPair('POST', '/pair/skip', { pair });
 export const castVote = (body: VoteRequest) => request(z.undefined(), 'POST', '/votes', body);
+export const confirmVote = (body: VoteRequest) =>
+  request(z.undefined(), 'POST', '/votes/confirm', body);
 export const undoVote = (body: UndoRequest) => request(z.undefined(), 'POST', '/votes/undo', body);
 
 /**

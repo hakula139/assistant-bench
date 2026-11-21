@@ -144,6 +144,17 @@ export async function record(
   }
 }
 
+/** Confirms an exact stored vote without changing a vote or its pending pair. */
+export async function confirm(db: D1Database, actor: string, request: VoteRequest) {
+  const saved = await db
+    .prepare('SELECT choice, defects FROM votes WHERE pair_id = ? AND actor_id = ?')
+    .bind(request.pair, actor)
+    .first<{ choice: string; defects: string }>();
+  if (saved === null || !same(saved.choice, saved.defects, request)) {
+    throw new ApiError(409, 'stale_pair');
+  }
+}
+
 /**
  * Withdraws the specified vote while it is the latest undoable vote in the family. The restored
  * pair keeps its issue time and gets a fresh ID so the withdrawn vote cannot be replayed.
