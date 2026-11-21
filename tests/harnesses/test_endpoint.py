@@ -5,6 +5,7 @@ import ssl
 import traceback
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import anthropic
 import httpx
@@ -804,6 +805,159 @@ class TestEndpoint:
             assert begun_trial.fatal
             (stored,) = private_state.requests('sample')
             assert stored['receipt_json'] is None
+
+        @pytest.mark.parametrize(
+            'failure',
+            [
+                'tls-timeout',
+                'proxy-tls-timeout',
+                'tls-receipt-error',
+                'post-disconnect',
+            ],
+        )
+        def test_prices_only_transport_failures_that_may_have_reached_the_endpoint(
+            self,
+            endpoint: StubEndpoint,
+            begun_trial: TrialAccounting,
+            private_state: State,
+            monkeypatch: pytest.MonkeyPatch,
+            failure: str,
+        ) -> None:
+            post = failure == 'post-disconnect'
+            proxy = failure == 'proxy-tls-timeout'
+            events: list[str] = []
+
+            if failure == 'tls-receipt-error':
+
+                def unavailable(
+                    self: State, request_id: str, receipt_json: str
+                ) -> None:
+                    raise OSError('Database unavailable.')
+
+                monkeypatch.setattr(State, 'record_receipt', unavailable)
+
+            async def trace(name: str, info: dict[str, object]) -> None:
+                events.append(name)
+
+            async def request() -> bytes:
+                received: asyncio.Future[bytes] = (
+                    asyncio.get_running_loop().create_future()
+                )
+
+                async def peer(
+                    reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+                ) -> None:
+                    try:
+                        if proxy:
+                            headers = await reader.readuntil(b'\r\n\r\n')
+                            assert headers.startswith(b'CONNECT 127.0.0.1:443 ')
+                            writer.write(b'HTTP/1.1 200 Connection Established\r\n\r\n')
+                            await writer.drain()
+                        received.set_result(
+                            await reader.readuntil(b'\r\n\r\n')
+                            if post
+                            else await reader.readexactly(1)
+                        )
+                        if not post:
+                            await reader.read()
+                    finally:
+                        writer.close()
+                        await writer.wait_closed()
+
+                server = await asyncio.start_server(peer, '127.0.0.1', 0)
+                async with server:
+                    host, port = server.sockets[0].getsockname()[:2]
+                    scheme = 'http' if post else 'https'
+                    url = f'{scheme}://{host}:{port}/v1/responses'
+                    env = endpoint.env | {BASE_URL_VAR: url}
+                    if proxy:
+                        monkeypatch.setenv('https_proxy', f'http://{host}:{port}')
+                        monkeypatch.setenv('no_proxy', '')
+                        url = env[BASE_URL_VAR] = 'https://127.0.0.1/v1/responses'
+                    else:
+                        env[LOCAL_ADDRESS_VAR] = '127.0.0.1'
+                    configured = Endpoint.read(env.get, 'openai-responses')
+                    async with configured.http_client('openai-responses') as client:
+                        with pytest.raises(
+                            httpx2.RemoteProtocolError
+                            if post
+                            else httpx2.ConnectTimeout
+                        ):
+                            await client.post(
+                                url,
+                                json={},
+                                timeout=httpx2.Timeout(2.0, connect=0.5),
+                                extensions={'trace': trace},
+                            )
+                    return await asyncio.wait_for(received, timeout=2.0)
+
+            received = asyncio.run(request())
+            begun_trial.finish(START)
+            (stored,) = private_state.requests('sample')
+            attempt = begun_trial.attempt()
+            assert attempt is not None
+
+            if post:
+                assert received.startswith(b'POST /v1/responses HTTP/1.1\r\n')
+                assert 'http11.send_request_headers.started' in events
+            else:
+                assert received == b'\x16'  # TLS handshake record
+                phase = 'proxy' if proxy else 'connection'
+                assert f'{phase}.start_tls.failed' in events
+                assert events.count('http11.send_request_headers.started') == int(proxy)
+            if failure in ('tls-timeout', 'proxy-tls-timeout'):
+                assert isinstance(stored['receipt_json'], str)
+                assert json.loads(stored['receipt_json']) == {
+                    'api': 'openai-responses',
+                    'outcome': 'not_dispatched',
+                    'reason': 'connect_timeout',
+                }
+                assert not begun_trial.fatal
+                assert attempt.responses == []
+            else:
+                assert stored['receipt_json'] is None
+                assert begun_trial.fatal
+                assert attempt.responses == [None]
+
+        @pytest.mark.parametrize('evidence', ['missing', 'after-send', 'unrelated'])
+        def test_connect_timeout_without_proof_of_non_dispatch_stays_uncertain(
+            self,
+            endpoint: StubEndpoint,
+            begun_trial: TrialAccounting,
+            private_state: State,
+            monkeypatch: pytest.MonkeyPatch,
+            evidence: str,
+        ) -> None:
+            async def timeout(
+                self: httpx2.AsyncHTTPTransport, request: httpx2.Request
+            ) -> httpx2.Response:
+                trace = request.extensions['trace']
+                cause = TimeoutError()
+                if evidence == 'after-send':
+                    await trace(
+                        'http2.send_request_headers.started',
+                        {'request': SimpleNamespace(method=b'POST')},
+                    )
+                if evidence != 'missing':
+                    observed = TimeoutError() if evidence == 'unrelated' else cause
+                    await trace('connection.start_tls.failed', {'exception': observed})
+                raise httpx2.ConnectTimeout('Connection timed out.') from cause
+
+            monkeypatch.setattr(
+                httpx2.AsyncHTTPTransport, 'handle_async_request', timeout
+            )
+            configured = Endpoint.read(endpoint.env.get, 'openai-responses')
+
+            async def request() -> None:
+                async with configured.http_client('openai-responses') as client:
+                    with pytest.raises(httpx2.ConnectTimeout):
+                        await client.post(f'{endpoint.url}/v1/responses', json={})
+
+            asyncio.run(request())
+
+            (stored,) = private_state.requests('sample')
+            assert stored['receipt_json'] is None
+            assert begun_trial.fatal
 
 
 class TestPreflight:

@@ -1,12 +1,13 @@
 """Trial-scoped admission and durable usage receipts for model requests."""
 
+from collections.abc import Iterable
 from contextlib import suppress
 from contextvars import ContextVar, Token
 from datetime import UTC, datetime
-from typing import Literal, NoReturn
+from typing import Annotated, Literal, NoReturn
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from assistant_bench.catalog import Api
 from assistant_bench.harnesses.usage import Attempt, MeasuredUsage
@@ -33,6 +34,30 @@ class RequestReceipt(BaseModel):
     provider_request_id: str | None = None
 
 
+class NotDispatched(BaseModel):
+    model_config = ConfigDict(extra='forbid', frozen=True)
+
+    api: Api
+    outcome: Literal['not_dispatched'] = 'not_dispatched'
+    reason: Literal['connect_timeout']
+
+
+type Receipt = Annotated[RequestReceipt | NotDispatched, Field(discriminator='outcome')]
+_receipt = TypeAdapter(Receipt)
+
+
+def parse_receipt(value: str | None) -> Receipt | None:
+    return _receipt.validate_json(value) if value is not None else None
+
+
+def response_usage(receipts: Iterable[Receipt | None]) -> list[MeasuredUsage | None]:
+    return [
+        receipt.usage if receipt is not None else None
+        for receipt in receipts
+        if not isinstance(receipt, NotDispatched)
+    ]
+
+
 class TrialAccounting:
     """Keep a paid claim fenced until all admitted request outcomes are durable.
 
@@ -47,7 +72,7 @@ class TrialAccounting:
         self._started_at: datetime | None = None
         self._finished_at: datetime | None = None
         self._fatal = False
-        self._requests: dict[str, RequestReceipt | None] = {}
+        self._requests: dict[str, Receipt | None] = {}
         self._apis: dict[str, Api] = {}
         self._secrets: set[str] = set()
 
@@ -102,22 +127,23 @@ class TrialAccounting:
             raise AccountingError('The model request admission was not granted.')
         return request_id
 
-    async def confirm(self, request_id: str, receipt: RequestReceipt) -> None:
-        """Confirm terminal usage before returning terminal bytes to a caller."""
+    async def confirm(self, request_id: str, receipt: Receipt) -> None:
+        """Persist the terminal outcome before returning it to the caller."""
         if request_id not in self._requests or self._apis[request_id] != receipt.api:
             self._fail('The model receipt does not match an admitted request.')
-        receipt = receipt.model_copy(
-            update={
-                name: None
-                for name, value in (
-                    ('response_id', receipt.response_id),
-                    ('response_model', receipt.response_model),
-                    ('provider_request_id', receipt.provider_request_id),
-                )
-                if value is not None
-                and any(secret in value for secret in self._secrets)
-            }
-        )
+        if isinstance(receipt, RequestReceipt):
+            receipt = receipt.model_copy(
+                update={
+                    name: None
+                    for name, value in (
+                        ('response_id', receipt.response_id),
+                        ('response_model', receipt.response_model),
+                        ('provider_request_id', receipt.provider_request_id),
+                    )
+                    if value is not None
+                    and any(secret in value for secret in self._secrets)
+                }
+            )
         previous = self._requests[request_id]
         if previous is not None and previous != receipt:
             self._fail('The model request already has a different receipt.')
@@ -147,10 +173,7 @@ class TrialAccounting:
             fingerprint=self._claim.fingerprint,
             started_at=self._started_at,
             finished_at=self._finished_at,
-            responses=[
-                receipt.usage if receipt is not None else None
-                for receipt in self._requests.values()
-            ],
+            responses=response_usage(self._requests.values()),
         )
 
     def remember_secret(self, value: str) -> None:

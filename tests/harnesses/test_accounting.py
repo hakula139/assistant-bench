@@ -5,6 +5,7 @@ import pytest
 
 from assistant_bench.harnesses.accounting import (
     AccountingError,
+    NotDispatched,
     RequestReceipt,
     TrialAccounting,
     current_trial,
@@ -49,6 +50,26 @@ class TestTrialAccounting:
             assert private_state.claim_state(bound_trial.claim_id) == 'uncertain'
 
     class TestAdmit:
+        def test_proven_non_dispatch_still_counts_toward_the_request_cap(
+            self, private_state: State
+        ) -> None:
+            async def try_again(recorder: TrialAccounting) -> None:
+                request_id = await recorder.admit('openai-responses')
+                await recorder.confirm(
+                    request_id,
+                    NotDispatched(api='openai-responses', reason='connect_timeout'),
+                )
+                with pytest.raises(AccountingError, match='was not granted'):
+                    await recorder.admit('openai-responses')
+
+            with accounted_trial(private_state, max_requests=1) as recorder:
+                recorder.begin(START)
+                asyncio.run(try_again(recorder))
+                recorder.finish(START)
+
+            assert len(private_state.requests('sample')) == 1
+            assert not recorder.fatal
+
         def test_refused_admission_cannot_grant_paid_io(
             self,
             begun_trial: TrialAccounting,

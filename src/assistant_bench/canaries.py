@@ -19,7 +19,11 @@ from assistant_bench import execution, jobs
 from assistant_bench.artifacts import ArtifactRef, build_manifest
 from assistant_bench.catalog import System, SystemIdentity
 from assistant_bench.harnesses import fingerprint
-from assistant_bench.harnesses.accounting import RequestReceipt
+from assistant_bench.harnesses.accounting import (
+    RequestReceipt,
+    parse_receipt,
+    response_usage,
+)
 from assistant_bench.harnesses.generate import OUTPUT_FILE
 from assistant_bench.harnesses.usage import MeasuredUsage, combined_usage
 from assistant_bench.messages import InputError
@@ -296,9 +300,7 @@ def _record(
         directory = archive.job
     receipts = (
         [
-            RequestReceipt.model_validate_json(cast(str, row['receipt_json']))
-            if row['receipt_json'] is not None
-            else None
+            parse_receipt(cast(str | None, row['receipt_json']))
             for row in state.trial_requests(run.id, trial)
         ]
         if trial is not None
@@ -321,14 +323,13 @@ def _record(
         source_generate_fingerprint=fingerprint(probe.source_generate),
         actual_probe_fingerprint=fingerprint(probe.actual),
         probe_protocol_digest=probe.protocol_digest,
-        usage=combined_usage(
-            [receipt.usage if receipt else None for receipt in receipts]
-        ),
+        usage=combined_usage(response_usage(receipts)),
         response_models=sorted(
             {
                 receipt.response_model
                 for receipt in receipts
-                if receipt is not None and receipt.response_model is not None
+                if isinstance(receipt, RequestReceipt)
+                and receipt.response_model is not None
             }
         ),
         output=output.read_text() if output and output.exists() else '',
