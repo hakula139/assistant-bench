@@ -1,6 +1,8 @@
 import { env } from 'cloudflare:workers';
 import { describe, expect, test, vi } from 'vitest';
 
+import { pairState, UNDO_HEADER } from '@/lib/arena';
+
 import { candidates, draw, next, ranker, type Rank } from './pairs';
 import {
   actorOf,
@@ -269,10 +271,13 @@ describe('GET /api/pair', () => {
     const { pair } = await pairOf(from, SYNTHETIC);
     await vote(from, pair?.id ?? '');
     const following = await pendingRow((await pairOf(from, SYNTHETIC)).pair?.id ?? '');
-    await call(from, 'POST', '/votes/undo', { family: SYNTHETIC });
+    const undo = await call(from, 'POST', '/votes/undo', { family: SYNTHETIC, pair: pair?.id });
+    expect(undo.status).toBe(204);
 
-    expect((await pairOf(from, SYNTHETIC)).pair?.id).toBe(pair?.id);
-    await vote(from, pair?.id ?? '');
+    const restored = (await pairOf(from, SYNTHETIC)).pair;
+    expect(restored?.id).not.toBe(pair?.id);
+    expect(restored).toEqual({ ...pair, id: restored?.id });
+    await vote(from, restored?.id ?? '');
     const repeated = await pendingRow((await pairOf(from, SYNTHETIC)).pair?.id ?? '');
 
     expect(repeated).toEqual({ ...following, issued_at: expect.any(Number) as number });
@@ -336,9 +341,15 @@ describe('GET /api/pair', () => {
     const { pair } = await pairOf(from, CODING);
     await vote(from, pair?.id ?? '');
 
-    const state = await pairOf(from, CODING);
+    const response = await call(from, 'GET', `/pair?family=${CODING}`);
 
-    expect(state).toEqual({ pair: null, votes: 1, remaining: 0, undo: true });
+    expect(response.headers.get(UNDO_HEADER)).toBe(pair?.id);
+    expect(pairState.parse(await response.json())).toEqual({
+      pair: null,
+      votes: 1,
+      remaining: 0,
+      undo: true,
+    });
   });
 
   test("shows the same pair and totals after the owner excludes the actor's vote", async () => {

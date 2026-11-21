@@ -26,6 +26,8 @@ interface PendingRow {
 }
 
 interface VoteRow {
+  id: number;
+  pair_id: string;
   case_key: string;
   a_system: string;
   b_system: string;
@@ -81,7 +83,7 @@ const PENDING = `
   JOIN outputs AS b ON b.publication_id = pairs.publication_id AND b.output_key = pairs.b_output
   WHERE pairs.actor_id = ? AND pairs.family = ?`;
 const ACTOR_VOTES = `
-  SELECT case_key, a_system, b_system, exclusion IS NULL AS counted, recorded_at
+  SELECT id, pair_id, case_key, a_system, b_system, exclusion IS NULL AS counted, recorded_at
   FROM votes WHERE actor_id = ? AND family = ?`;
 const PAIR_CASES = `
   SELECT low_system, high_system, case_keys FROM publication_pair_cases
@@ -251,12 +253,28 @@ async function read(db: D1Database, actor: string, family: string): Promise<Stan
   };
 }
 
+export interface PairSnapshot {
+  state: PairState;
+  undoPair: string | null;
+}
+
 function view(
   { active, voted, groups }: Standing,
   pending: PendingRow | undefined,
   now: number,
-): PairState {
-  return {
+): PairSnapshot {
+  let latest: VoteRow | undefined;
+  for (const vote of voted) {
+    if (
+      vote.counted &&
+      vote.recorded_at > now - UNDO_MS &&
+      (latest === undefined || vote.id > latest.id)
+    ) {
+      latest = vote;
+    }
+  }
+
+  const state: PairState = {
     pair:
       pending === undefined
         ? null
@@ -272,8 +290,9 @@ function view(
           },
     votes: voted.length,
     remaining: [...groups.values()].reduce((sum, group) => sum + group.caseKeys.length, 0),
-    undo: voted.some((vote) => vote.counted && vote.recorded_at > now - UNDO_MS),
+    undo: latest !== undefined,
   };
+  return { state, undoPair: latest?.pair_id ?? null };
 }
 
 /** The actor's pending pair in a family, drawn afresh when it belongs to no active publication. */
@@ -283,7 +302,7 @@ export async function pairState(
   actor: string,
   family: string,
   now: number,
-): Promise<PairState> {
+): Promise<PairSnapshot> {
   const standing = await read(db, actor, family);
   const pending =
     standing.pending ??
@@ -349,7 +368,7 @@ export async function skip(
   actor: string,
   pair: string,
   now: number,
-): Promise<PairState> {
+): Promise<PairSnapshot> {
   const owner = await db.prepare(PAIR_FAMILY).bind(pair, actor).first<{ family: string }>();
   if (owner === null) {
     throw new ApiError(409, 'stale_pair');

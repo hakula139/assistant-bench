@@ -1,6 +1,6 @@
 import { useEffect, useEffectEvent, useRef, useState } from 'react';
 
-import type { FamilyView, PairState, TaggedDefects, VoteRequest } from '@/lib/arena';
+import type { FamilyView, TaggedDefects, VoteRequest } from '@/lib/arena';
 import type { Defect } from '@/lib/defects';
 import {
   ApiError,
@@ -16,6 +16,7 @@ import {
   undoVote,
   writeDraft,
   type Draft,
+  type PairSnapshot,
 } from '@/lib/vote-flow';
 
 const FAMILY_PARAM = 'family';
@@ -42,7 +43,7 @@ export function useVoteSession() {
     () => new URLSearchParams(window.location.search).get(FAMILY_PARAM) ?? undefined,
   );
   const [families, setFamilies] = useState<FamilyView[] | null>(null);
-  const [state, setState] = useState<PairState | null>(null);
+  const [state, setState] = useState<PairSnapshot | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [sitekey, setSitekey] = useState<string | null>(null);
   const [failedVote, setFailedVote] = useState<VoteRequest | null>(null);
@@ -62,7 +63,7 @@ export function useVoteSession() {
       : null;
 
   /** Shows a pair state, restoring the tab's draft only when it belongs to the same pair. */
-  const show = (name: string, next: PairState, options: { restore?: boolean } = {}) => {
+  const show = (name: string, next: PairSnapshot, options: { restore?: boolean } = {}) => {
     const stored = readDraft();
     const id = next.pair?.id ?? null;
     let shown: Draft;
@@ -272,6 +273,7 @@ export function useVoteSession() {
       async () => {
         const next = await skipPair(pair.id);
         if (next.pair?.id === pair.id) {
+          setState(next);
           setNotice(NO_OTHER_PAIR);
         } else {
           show(family, next);
@@ -283,14 +285,15 @@ export function useVoteSession() {
   };
 
   const undo = () => {
-    if (state?.undo !== true || family === undefined || locked) {
+    const undoPair = state?.undoPair;
+    if (!undoPair || family === undefined || locked) {
       return;
     }
 
     perform(
       family,
       async () => {
-        await undoVote(family);
+        await undoVote({ family, pair: undoPair });
         await load(family, { notice: 'Vote withdrawn.' });
       },
       { stale: 'nothing_to_undo' },

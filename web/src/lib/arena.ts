@@ -8,6 +8,8 @@ export const familyName = z
   .string()
   .check(z.maxLength(FAMILY_NAME_MAX_LENGTH), z.regex(familyNamePattern));
 export const pairId = z.uuid();
+export const UNDO_HEADER = 'Arena-Undo';
+export const UNDO_NONE = 'none';
 export const choiceSchema = z.enum(['a', 'b', 'tie', 'both_bad']);
 const defectSchema = z.enum(defects);
 export const taggedDefects = z.strictObject({
@@ -31,7 +33,7 @@ export const voteRequest = z.strictObject({
   choice: choiceSchema,
   defects: taggedDefects,
 });
-export const undoRequest = familyQuery;
+export const undoRequest = z.strictObject({ family: familyName, pair: pairId });
 /** Each available store's cutoff and counted votes, supplied together. */
 export const freshnessQuery = z
   .strictObject({
@@ -103,6 +105,7 @@ export const errorView = z.strictObject({
 export type Choice = z.infer<typeof choiceSchema>;
 export type TaggedDefects = z.infer<typeof taggedDefects>;
 export type VoteRequest = z.infer<typeof voteRequest>;
+export type UndoRequest = z.infer<typeof undoRequest>;
 export type FreshnessQuery = z.infer<typeof freshnessQuery>;
 export type FamilyView = z.infer<typeof familiesView>['families'][number];
 export type PairView = z.infer<typeof pairView>;

@@ -1,6 +1,8 @@
 import { env } from 'cloudflare:workers';
 import { describe, expect, test, vi } from 'vitest';
 
+import { UNDO_HEADER, UNDO_NONE } from '@/lib/arena';
+
 import { ipTag } from './actors';
 import { UNDO_MS, VOTES_PER_TAG, WINDOW_MS } from './limits';
 import {
@@ -244,7 +246,7 @@ describe('POST /api/votes', () => {
     const batch = env.DB.batch.bind(env.DB);
     vi.spyOn(env.DB, 'batch').mockImplementationOnce(async (statements) => {
       const results = await batch(statements);
-      await undo(env.DB, earlierActor, WRITING, now);
+      await undo(env.DB, earlierActor, { family: WRITING, pair: earlierPair }, now);
       return results;
     });
 
@@ -263,108 +265,150 @@ describe('POST /api/votes', () => {
     const from = await admitted(TAG_IP);
     const first = await pairOf(from);
     expect((await vote(from, first.pair?.id ?? '')).status).toBe(204);
-    expect((await call(from, 'POST', '/votes/undo', { family: WRITING })).status).toBe(204);
+    const undo = await call(from, 'POST', '/votes/undo', { family: WRITING, pair: first.pair?.id });
+    expect(undo.status).toBe(204);
 
-    const response = await vote(from, first.pair?.id ?? '');
+    const restored = await pairOf(from);
+    const response = await vote(from, restored.pair?.id ?? '');
 
     expect(response.status).toBe(204);
   });
 });
 
 describe('POST /api/votes/undo', () => {
-  test('restores the pair with its ID and issue time in place of the pending one', async () => {
+  test('restores the same comparison and issue time and refuses a late vote on its old ID', async () => {
     const from = await admitted();
     const { pair } = await pairOf(from);
     const issued = await pendingRow(pair?.id ?? '');
     await vote(from, pair?.id ?? '');
     const following = await pairOf(from);
+    const request = { family: WRITING, pair: pair?.id };
 
-    const response = await call(from, 'POST', '/votes/undo', { family: WRITING });
+    const response = await call(from, 'POST', '/votes/undo', request);
 
     expect(response.status).toBe(204);
-    expect(await pendingRow(pair?.id ?? '')).toEqual(issued);
+    const restored = await pairOf(from);
+    expect(restored.pair?.id).not.toBe(pair?.id);
+    expect(restored.pair).toEqual({ ...pair, id: restored.pair?.id });
+    expect(await pendingRow(restored.pair?.id ?? '')).toEqual(issued);
+    expect(await pendingRow(pair?.id ?? '')).toBeNull();
     expect(await pendingRow(following.pair?.id ?? '')).toBeNull();
     expect(await storedVotes()).toEqual([]);
-    expect(await pairOf(from)).toEqual({
-      pair,
-      votes: 0,
-      remaining: 3,
-      undo: false,
-    });
+    expect(restored).toMatchObject({ votes: 0, remaining: 3, undo: false });
     expect(await coverage()).toEqual([]);
 
-    const repeated = await call(from, 'POST', '/votes/undo', { family: WRITING });
-    const recorded = await vote(from, pair?.id ?? '');
+    const replay = await vote(from, pair?.id ?? '');
+    expect(replay.status).toBe(409);
+    expect(await replay.json()).toEqual({ error: 'stale_pair' });
+    expect(await storedVotes()).toEqual([]);
 
-    expect(repeated.status).toBe(409);
+    const recorded = await vote(from, restored.pair?.id ?? '', 'b');
     expect(recorded.status).toBe(204);
+    expect(await storedVotes()).toMatchObject([{ pair_id: restored.pair?.id, choice: 'b' }]);
     expect(await coverage()).toMatchObject([{ family: WRITING, votes: 1 }]);
   });
 
-  test("walks back through the actor's votes inside the window", async () => {
+  test('withdraws a target once when two tabs send Undo and refreshes the earlier target', async () => {
     const from = await admitted();
-    const first = (await pairOf(from)).pair?.id ?? '';
-    await vote(from, first);
-    const second = (await pairOf(from)).pair?.id ?? '';
-    await vote(from, second);
+    const first = (await pairOf(from)).pair;
+    await vote(from, first?.id ?? '');
+    const second = (await pairOf(from)).pair;
+    await vote(from, second?.id ?? '');
 
-    await call(from, 'POST', '/votes/undo', { family: WRITING });
-    const afterOne = await pairOf(from);
-    await call(from, 'POST', '/votes/undo', { family: WRITING });
-    const afterTwo = await pairOf(from);
+    const view = await call(from, 'GET', `/pair?family=${WRITING}`);
+    expect(view.headers.get(UNDO_HEADER)).toBe(second?.id);
+    const pending = (await pairOf(from)).pair;
+    const skipped = await call(from, 'POST', '/pair/skip', { pair: pending?.id });
+    expect(skipped.status).toBe(200);
+    expect(skipped.headers.get(UNDO_HEADER)).toBe(second?.id);
+    const older = await call(from, 'POST', '/votes/undo', { family: WRITING, pair: first?.id });
+    expect(older.status).toBe(409);
 
-    expect(afterOne.pair?.id).toBe(second);
-    expect(afterOne.undo).toBe(true);
-    expect(afterTwo.pair?.id).toBe(first);
-    expect(afterTwo.undo).toBe(false);
+    const request = { family: WRITING, pair: second?.id };
+    const repeated = await Promise.all([
+      call(from, 'POST', '/votes/undo', request),
+      call(from, 'POST', '/votes/undo', request),
+    ]);
+    expect(repeated.map(({ status }) => status).sort()).toEqual([204, 409]);
+    expect((await storedVotes()).map((row) => row.pair_id)).toEqual([first?.id]);
+
+    const refreshed = await call(from, 'GET', `/pair?family=${WRITING}`);
+    expect(refreshed.headers.get(UNDO_HEADER)).toBe(first?.id);
+    expect(await refreshed.json()).toMatchObject({ pair: { instruction: second?.instruction } });
+    const earlier = await call(from, 'POST', '/votes/undo', { family: WRITING, pair: first?.id });
+    expect(earlier.status).toBe(204);
+    const empty = await call(from, 'GET', `/pair?family=${WRITING}`);
+    expect(empty.headers.get(UNDO_HEADER)).toBe(UNDO_NONE);
+    expect(await empty.json()).toMatchObject({ pair: { instruction: first?.instruction } });
   });
 
   test('passes over a vote the owner excluded, which stays recorded', async () => {
     const from = await admitted();
-    const first = (await pairOf(from)).pair?.id ?? '';
-    await vote(from, first);
+    const first = (await pairOf(from)).pair;
+    await vote(from, first?.id ?? '');
     const second = (await pairOf(from)).pair?.id ?? '';
     await vote(from, second);
     await env.DB.prepare("UPDATE votes SET exclusion = 'trash' WHERE pair_id = ?")
       .bind(second)
       .run();
 
-    const response = await call(from, 'POST', '/votes/undo', { family: WRITING });
+    const visible = await call(from, 'GET', `/pair?family=${WRITING}`);
+    expect(visible.headers.get(UNDO_HEADER)).toBe(first?.id);
+    const response = await call(from, 'POST', '/votes/undo', { family: WRITING, pair: first?.id });
 
     expect(response.status).toBe(204);
     expect((await storedVotes()).map((row) => row.pair_id)).toEqual([second]);
-    expect(await pairOf(from)).toMatchObject({ pair: { id: first }, votes: 1, undo: false });
+    expect(await pairOf(from)).toMatchObject({
+      pair: { instruction: first?.instruction },
+      votes: 1,
+      undo: false,
+    });
   });
 
   test.each([
-    ['no vote', () => Promise.resolve()],
+    ['no vote', () => Promise.resolve(crypto.randomUUID())],
     [
       'a vote older than the window',
       async (from: Awaited<ReturnType<typeof admitted>>) => {
-        await vote(from, (await pairOf(from)).pair?.id ?? '');
+        const pair = (await pairOf(from)).pair?.id ?? '';
+        await vote(from, pair);
         await env.DB.prepare('UPDATE votes SET recorded_at = ?')
           .bind(Date.now() - UNDO_MS - 1)
           .run();
+        return pair;
       },
     ],
     [
       'a vote the owner excluded',
       async (from: Awaited<ReturnType<typeof admitted>>) => {
-        await vote(from, (await pairOf(from)).pair?.id ?? '');
+        const pair = (await pairOf(from)).pair?.id ?? '';
+        await vote(from, pair);
         await env.DB.prepare("UPDATE votes SET exclusion = 'trash'").run();
+        return pair;
       },
     ],
     [
       'a vote in another family',
       async (from: Awaited<ReturnType<typeof admitted>>) => {
-        await vote(from, (await pairOf(from, CODING)).pair?.id ?? '');
+        const pair = (await pairOf(from, CODING)).pair?.id ?? '';
+        await vote(from, pair);
+        return pair;
+      },
+    ],
+    [
+      'a vote by another actor',
+      async () => {
+        const other = await admitted('192.0.2.25');
+        const pair = (await pairOf(other)).pair?.id ?? '';
+        await vote(other, pair);
+        return pair;
       },
     ],
   ])('answers nothing_to_undo after %s', async (_, arrange) => {
     const from = await admitted();
-    await arrange(from);
+    const pair = await arrange(from);
 
-    const response = await call(from, 'POST', '/votes/undo', { family: WRITING });
+    const response = await call(from, 'POST', '/votes/undo', { family: WRITING, pair });
 
     expect(response.status).toBe(409);
     expect(await response.json()).toEqual({ error: 'nothing_to_undo' });
@@ -373,13 +417,24 @@ describe('POST /api/votes/undo', () => {
   test('restores a pair from a replaced publication, which the next request redraws', async () => {
     const from = await admitted();
     const { pair } = await pairOf(from);
+    const pending = env.DB.prepare('SELECT id, publication_id FROM pairs WHERE family = ?').bind(
+      WRITING,
+    );
+    const original = await pending.first('publication_id');
     await vote(from, pair?.id ?? '');
     await publish(WRITING, { only: { 'acme-large': ['x'], 'acme-small': ['y'] } }, 'next');
 
-    await call(from, 'POST', '/votes/undo', { family: WRITING });
+    const withdrawn = await call(from, 'POST', '/votes/undo', { family: WRITING, pair: pair?.id });
+
+    expect(withdrawn.status).toBe(204);
+    expect(await storedVotes()).toEqual([]);
+    const restored = await pending.first();
+    expect(restored?.id).not.toBe(pair?.id);
+    expect(restored?.publication_id).toBe(original);
+
     const state = await pairOf(from);
 
-    expect(state.pair?.id).not.toBe(pair?.id);
+    expect(state.pair?.id).not.toBe(restored?.id);
     expect(state.pair?.instruction).toBe('Instruction only');
   });
 });

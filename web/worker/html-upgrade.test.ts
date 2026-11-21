@@ -147,12 +147,23 @@ describe('0005_html_outputs', () => {
     expect((await env.DB.prepare('PRAGMA foreign_key_check').all()).results).toEqual([]);
     expect(await env.DB.prepare('PRAGMA quick_check').first('quick_check')).toBe('ok');
     expect(await pairOf(diffActor, CODING)).toEqual(diff);
-    expect((await call(textActor, 'POST', '/votes/undo', { family: WRITING })).status).toBe(204);
-    expect((await pairOf(textActor, WRITING)).pair).toEqual(text.pair);
-    expect((await vote(textActor, text.pair?.id ?? '')).status).toBe(204);
+    const undoText = await call(textActor, 'POST', '/votes/undo', {
+      family: WRITING,
+      pair: text.pair?.id,
+    });
+    expect(undoText.status).toBe(204);
+    const restoredText = (await pairOf(textActor, WRITING)).pair;
+    expect(restoredText).toEqual({ ...text.pair, id: restoredText?.id });
+    expect((await vote(textActor, restoredText?.id ?? '')).status).toBe(204);
+
     expect((await vote(diffActor, diff.pair?.id ?? '')).status).toBe(204);
-    expect((await call(diffActor, 'POST', '/votes/undo', { family: CODING })).status).toBe(204);
-    expect((await pairOf(diffActor, CODING)).pair).toEqual(diff.pair);
+    const undoDiff = await call(diffActor, 'POST', '/votes/undo', {
+      family: CODING,
+      pair: diff.pair?.id,
+    });
+    expect(undoDiff.status).toBe(204);
+    const restoredDiff = (await pairOf(diffActor, CODING)).pair;
+    expect(restoredDiff).toEqual({ ...diff.pair, id: restoredDiff?.id });
     await expectCountedVotes();
 
     for (const exclusion of ['spam', null]) {

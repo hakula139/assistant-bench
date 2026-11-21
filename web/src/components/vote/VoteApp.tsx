@@ -648,7 +648,7 @@ export function VoteApp() {
             <Button variant="outline" className="text-foreground" asChild>
               <a href={window.location.pathname}>Choose another family</a>
             </Button>
-            <Button variant="outline" onClick={undo} disabled={!state.undo || locked}>
+            <Button variant="outline" onClick={undo} disabled={!state.undoPair || locked}>
               Undo last vote
             </Button>
           </div>
@@ -740,7 +740,7 @@ export function VoteApp() {
 
       <Ballot
         choice={draft.choice}
-        undoable={state.undo}
+        undoable={Boolean(state.undoPair)}
         locked={locked}
         error={error}
         recovery={sitekey !== null || voteFailed || reloadRequired ? recovery : null}

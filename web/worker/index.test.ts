@@ -66,8 +66,9 @@ describe('blinding', () => {
     for (const pair of [drawn, skipped, skipped]) {
       await send(from, 'POST', '/votes', { pair, choice: 'a', defects: { a: [], b: [] } });
     }
-    await send(from, 'POST', '/votes/undo', { family: BLIND });
-    await send(from, 'POST', '/votes/undo', { family: BLIND });
+    await send(from, 'GET', `/pair?family=${BLIND}`);
+    await send(from, 'POST', '/votes/undo', { family: BLIND, pair: skipped });
+    await send(from, 'POST', '/votes/undo', { family: BLIND, pair: skipped });
     await send(from, 'GET', `/freshness?family=${BLIND}&production=0&production_votes=0`);
 
     for (const response of responses) {
@@ -114,8 +115,17 @@ describe('requests', () => {
 
   test.each([
     ['a malformed body', '/votes', '{'],
-    ['an unknown field', '/votes/undo', JSON.stringify({ family: WRITING, extra: 1 })],
-    ['an invalid family', '/votes/undo', JSON.stringify({ family: '../x' })],
+    [
+      'an unknown field',
+      '/votes/undo',
+      JSON.stringify({ family: WRITING, pair: crypto.randomUUID(), extra: 1 }),
+    ],
+    [
+      'an invalid family',
+      '/votes/undo',
+      JSON.stringify({ family: '../x', pair: crypto.randomUUID() }),
+    ],
+    ['a legacy Undo request', '/votes/undo', JSON.stringify({ family: WRITING })],
   ])('answer %s with invalid_request', async (_, path, body) => {
     const from = await admitted();
 
