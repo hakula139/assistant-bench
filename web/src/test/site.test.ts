@@ -202,10 +202,18 @@ describe('built vote document', () => {
 
 describe('built pages', () => {
   const vote = '/vote/index.html';
+  const voteState = makeState();
+  assert(voteState.pair);
+  voteState.pair.instruction = [
+    voteState.pair.instruction,
+    '```text',
+    'A long line in a fictional transcript. '.repeat(12).trimEnd(),
+    '```',
+  ].join('\n');
   const api = new Map<string, unknown>([
     ['GET /api/families', { families: [VOTE_FAMILY] }],
     ['GET /api/freshness', { status: 'current' }],
-    ['GET /api/pair', makeState()],
+    ['GET /api/pair', voteState],
   ]);
   let pages: string[];
 
@@ -269,6 +277,21 @@ describe('built pages', () => {
             });
         }
         await page.waitForLoadState('networkidle');
+
+        if (path === vote) {
+          const codeBlock = page.getByRole('region', { name: 'Prompt contents' }).locator('pre');
+          const { clientWidth, scrollWidth } = await codeBlock.evaluate((element) => ({
+            clientWidth: element.clientWidth,
+            scrollWidth: element.scrollWidth,
+          }));
+          expect(scrollWidth, 'the long line scrolls within its code block').toBeGreaterThan(
+            clientWidth,
+          );
+          expect(
+            await page.evaluate(() => document.documentElement.scrollWidth),
+            'the page stays within the viewport',
+          ).toBe(1280);
+        }
 
         expect(await page.evaluate(() => document.documentElement.dataset.theme), path).toBe(theme);
         for (const state of path === vote ? ['reading', 'issues'] : ['page']) {
