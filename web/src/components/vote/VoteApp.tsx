@@ -438,6 +438,7 @@ export function VoteApp() {
     reloadRequired,
     notice,
     saved,
+    nextPairFailed,
     busy,
     locked,
     start,
@@ -597,7 +598,7 @@ export function VoteApp() {
       error !== null &&
       family !== undefined && (
         <Button disabled={busy} onClick={reconnect}>
-          Retry connection
+          {nextPairFailed ? 'Retry next pair' : 'Retry connection'}
         </Button>
       )
     );
@@ -605,7 +606,7 @@ export function VoteApp() {
   if (state === null) {
     if (family !== undefined) {
       return (
-        <Screen title="Connecting to voting">
+        <Screen title={nextPairFailed ? 'Vote saved' : 'Connecting to voting'}>
           {sitekey === null && error === null && <p role="status">Checking your browser...</p>}
           <ErrorAlert error={error} />
           <div className="flex flex-col items-start gap-2">{recovery}</div>

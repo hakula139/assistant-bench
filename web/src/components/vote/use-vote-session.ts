@@ -49,6 +49,7 @@ export function useVoteSession() {
   const [error, setError] = useState<{ message: string; reload: boolean } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [nextPairFailed, setNextPairFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   // A browser that keeps no cookie asks for admission again right after passing it.
   const admitted = useRef(false);
@@ -81,6 +82,7 @@ export function useVoteSession() {
     writeDraft(shown);
     setDraft(shown);
     setState(next);
+    setNextPairFailed(false);
     setError(null);
   };
 
@@ -109,7 +111,10 @@ export function useVoteSession() {
     setError({ message: errorMessage(reason), reload: false });
   };
 
-  const load = async (name: string, options: { restore?: boolean; notice?: string } = {}) => {
+  const load = async (
+    name: string,
+    options: { restore?: boolean; notice?: string; afterVote?: boolean } = {},
+  ) => {
     try {
       show(name, await getPair(name), options);
       if (options.notice !== undefined) {
@@ -117,7 +122,18 @@ export function useVoteSession() {
         setNotice(options.notice);
       }
     } catch (reason) {
-      loadFailed(reason);
+      if (!options.afterVote) {
+        loadFailed(reason);
+        return;
+      }
+      setState(null);
+      setDraft(null);
+      setNextPairFailed(true);
+      if (isCode(reason, 'admission_required') || isCode(reason, 'reload_required')) {
+        failed(reason);
+      } else {
+        setError({ message: 'Could not load the next pair.', reload: false });
+      }
     }
   };
 
@@ -213,7 +229,7 @@ export function useVoteSession() {
   /** Reloads the family's pair with the tab's draft, as after a failure or an admission. */
   const reconnect = () => {
     if (family !== undefined) {
-      void act(() => load(family, { restore: true }));
+      void act(() => load(family, { restore: true, afterVote: nextPairFailed }));
     }
   };
 
@@ -233,12 +249,12 @@ export function useVoteSession() {
     perform(
       family,
       async () => {
-        await castVote(body);
-        update({ choice: null });
+        await castVote(body, failedVote === null);
+        update({ pair: null, choice: null, defects: { a: [], b: [] } });
         setFailedVote(null);
         setSaved(true);
         setNotice(null);
-        await load(family);
+        await load(family, { afterVote: true });
       },
       { stale: 'stale_pair', vote: body },
     );
@@ -305,6 +321,7 @@ export function useVoteSession() {
     reloadRequired: error?.reload ?? false,
     notice,
     saved,
+    nextPairFailed,
     busy,
     locked,
     start,

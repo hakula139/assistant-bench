@@ -43,8 +43,11 @@ export class ApiError extends Error {
 
 /** The request may or may not have arrived, so retrying it is the way to find out. */
 export class NetworkError extends Error {
-  constructor() {
-    super(errorMessages.unavailable);
+  constructor(
+    readonly status?: number,
+    message = errorMessages.unavailable,
+  ) {
+    super(message);
   }
 }
 
@@ -74,7 +77,7 @@ async function request<T>(
   if (!response.ok) {
     const parsed = errorView.safeParse(await response.json().catch(() => null));
     if (!parsed.success) {
-      throw new NetworkError();
+      throw new NetworkError(response.status);
     }
     throw new ApiError(response.status, parsed.data.error, parsed.data.sitekey);
   }
@@ -82,7 +85,7 @@ async function request<T>(
     response.status === 204 ? undefined : await response.json().catch(() => null),
   );
   if (!parsed.success) {
-    throw new NetworkError();
+    throw new NetworkError(response.status);
   }
   return parsed.data;
 }
@@ -93,9 +96,48 @@ export const listFamilies = () => request(familiesView, 'GET', '/families');
 export const admit = (token: string) => request(z.undefined(), 'POST', '/actors', { token });
 export const getPair = (family: string) => request(pairState, 'GET', `/pair?${query({ family })}`);
 export const skipPair = (pair: string) => request(pairState, 'POST', '/pair/skip', { pair });
-export const castVote = (body: VoteRequest) => request(z.undefined(), 'POST', '/votes', body);
 export const undoVote = (family: string) =>
   request(z.undefined(), 'POST', '/votes/undo', { family });
+
+const transientVoteError = (error: unknown) => {
+  if (error instanceof NetworkError && error.status === undefined) {
+    return true;
+  }
+  return (
+    (error instanceof NetworkError ||
+      (error instanceof ApiError && error.code === 'unavailable')) &&
+    [502, 503, 504].some((status) => status === error.status)
+  );
+};
+
+/** Replays the original ballot once when a new submission has a transient failure. */
+export async function castVote(body: VoteRequest, replay: boolean): Promise<void> {
+  const send = () => request(z.undefined(), 'POST', '/votes', body);
+  try {
+    await send();
+  } catch (first) {
+    if (!replay || !transientVoteError(first)) {
+      throw first;
+    }
+    try {
+      await send();
+    } catch (retry) {
+      if (retry instanceof ApiError && retry.code === 'rate_limited') {
+        throw new NetworkError(retry.status, retry.message);
+      }
+      // Refusals before recording the replay cannot settle whether the first request committed.
+      if (
+        retry instanceof ApiError &&
+        retry.code !== 'stale_pair' &&
+        retry.code !== 'daily_limit' &&
+        retry.code !== 'unavailable'
+      ) {
+        throw first;
+      }
+      throw retry;
+    }
+  }
+}
 
 /**
  * Asks whether this store's counted votes still match the round's cut.
