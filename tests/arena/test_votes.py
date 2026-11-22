@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from assistant_bench import report
 from assistant_bench.arena import publication, votes
 from assistant_bench.arena.publication import CaseFacts, Inventory, OutputFacts
 from assistant_bench.arena.votes import (
@@ -20,7 +21,7 @@ from assistant_bench.arena.votes import (
     Vote,
 )
 from assistant_bench.database import Param, Result, SQLiteDatabase
-from assistant_bench.families import Choice
+from assistant_bench.families import Choice, Gate
 from assistant_bench.messages import InputError
 from assistant_bench.outputs import read_outputs, write_outputs
 from assistant_bench.paths import REPO_ROOT
@@ -212,10 +213,18 @@ class TestReadCut:
         first = record_vote(
             database, published, NOW, actor='first', age=timedelta(hours=1)
         )
+        record_vote(database, published, NOW, actor='recent', age=timedelta(minutes=9))
+        record_vote(
+            database,
+            published,
+            NOW,
+            actor='recent-excluded',
+            age=timedelta(minutes=9),
+            exclusion='spam',
+        )
         second = record_vote(
             database, published, NOW, actor='second', age=timedelta(minutes=11)
         )
-        record_vote(database, published, NOW, actor='recent', age=timedelta(minutes=9))
 
         cut = votes.read_cut(database, FAMILY.name, NOW)
 
@@ -223,6 +232,7 @@ class TestReadCut:
         assert cut.cutoff == second
         assert [row.id for row in cut.votes] == [first, second]
         assert cut.votes[0].defects == TaggedDefects(b=('facts',))
+        assert cut.excluded == 0
 
     def test_cuts_at_the_worker_undo_window(self) -> None:
         limits = (REPO_ROOT / 'web' / 'worker' / 'limits.ts').read_text()
@@ -810,6 +820,19 @@ class TestSnapshots:
         assert 'Private candidate marker' not in restored.model_dump_json()
         assert len(votes.voting_input(restored, {}).ordinary) == 1
 
+    def test_preserves_the_sealed_identity_of_legacy_facts(
+        self, private_store: SQLiteDatabase
+    ) -> None:
+        a, b = fact('a', 'c', 'acme-large'), fact('b', 'c', 'acme-small')
+        saved = snapshot((a, b), (vote(1, a, b),))
+
+        identity = votes.save_snapshot(private_store, saved)
+
+        assert identity == (
+            '02c23ad6f7cae8ae600875ed22d61b68c1a60d68585e12759e2b61bee828cad6'
+        )
+        assert votes.read_snapshot(private_store, identity) == saved
+
     def test_batches_facts_within_the_d1_parameter_limit(
         self, private_store: SQLiteDatabase, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -925,6 +948,91 @@ class TestSnapshots:
         assert analysis.declared_categories == ('reply', 'docs')
         assert len(analysis.ordinary) == 1
         assert {output.cost_usd for output in analysis.outputs} == {0.25}
+
+    def test_replays_old_ballots_with_their_original_category_and_outputs(
+        self,
+        published_store: tuple[SQLiteDatabase, publication.Publication],
+        private_store: SQLiteDatabase,
+    ) -> None:
+        database, published = published_store
+        cases = [make_case('first'), make_case('second')]
+        first, second = (publication.case_key(case) for case in cases)
+        for index in range(2):
+            record_vote(
+                database,
+                published,
+                NOW,
+                actor=f'old-{index}',
+                age=timedelta(hours=1),
+                case=index,
+            )
+        changed_cases = [
+            cases[0].model_copy(update={'checklist': ['A changed condition']}),
+            cases[1].model_copy(update={'category': 'reply'}),
+        ]
+        outputs = [
+            make_trial(
+                case.id,
+                system,
+                [Gate.LENGTH] if case.id == 'first' and system == 'acme-large' else [],
+            )
+            for case in cases
+            for system in ('acme-large', 'acme-small')
+        ]
+        replacement = publication.prepare(
+            FAMILY, changed_cases, outputs, ARENA_NAMES, target='production'
+        )
+        assert stage_and_activate(database, replacement, NOW)
+        record_vote(
+            database,
+            replacement,
+            NOW,
+            actor='new',
+            age=timedelta(hours=1),
+            case=next(
+                i for i, case in enumerate(replacement.cases) if case.key == second
+            ),
+        )
+        cut = votes.read_cut(database, FAMILY.name, NOW)
+        assert cut is not None
+        frozen = Snapshot(
+            family=FAMILY.name,
+            taken_at=NOW,
+            closed_at=NOW,
+            category_order=('docs', 'reply'),
+            closing_revision=None,
+            production=cut,
+            private=None,
+        )
+
+        identity = votes.save_snapshot(private_store, frozen)
+        restored = votes.read_snapshot(private_store, identity)
+        analysis = votes.voting_input(restored, {})
+        results = report.votes_results(analysis)
+
+        assert restored == frozen
+        assert results.votes == 3
+        assert results.dropped_votes == 0
+        assert [(board.category, board.votes) for board in results.categories] == [
+            ('docs', 2),
+            ('reply', 1),
+        ]
+        by_actor = {row.actor: row for row in analysis.ordinary}
+        assert by_actor['production:new'].comparison.case == second
+        assert by_actor['production:new'].category is None
+        assert {row.comparison.case for row in by_actor.values()} == {first, second}
+        historical = [row for row in cut.votes if row.publication is not None]
+        assert len(historical) == 2
+        for row in historical:
+            assert row.publication is not None
+            assert row.publication.id == published.id
+            assert row.publication.a.verdict == row.publication.b.verdict == 'pass'
+        assert all(row.case != first for row in analysis.outputs)
+        assert {row.case for row in analysis.settlements} == {
+            publication.case_key(changed_cases[0])
+        }
+        assert votes.system_names(restored)['acme-pro'] == ARENA_NAMES['acme-pro']
+        assert votes.fingerprints(restored)['acme-pro'] == 'fp-acme-pro'
 
     def test_keeps_interrupted_rows_unreadable_until_complete_resumption(
         self, private_store: SQLiteDatabase, monkeypatch: pytest.MonkeyPatch

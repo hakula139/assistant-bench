@@ -3,16 +3,17 @@
 import hashlib
 import json
 from collections import defaultdict
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from datetime import datetime
 from itertools import combinations, product
 from statistics import median
-from typing import Literal, get_args
+from typing import Literal, NamedTuple, get_args
 
 from pydantic import (
     AwareDatetime,
     BaseModel,
     ConfigDict,
+    Field,
     Json,
     ValidationError,
     model_validator,
@@ -57,6 +58,17 @@ class TaggedDefects(_Model):
     b: tuple[Defect, ...] = ()
 
 
+class BallotPublication(_Model):
+    """Original facts of a ballot outside the active publication."""
+
+    id: str
+    case: CaseFacts
+    a: OutputFacts
+    b: OutputFacts
+    a_name: str
+    b_name: str
+
+
 class Vote(_Model):
     id: int
     actor: str
@@ -68,6 +80,10 @@ class Vote(_Model):
     choice: Choice
     defects: TaggedDefects
     elapsed_ms: int
+    publication: BallotPublication | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    """Omitted for active ballots so existing sealed snapshot digests still verify."""
 
 
 class Cut(_Model):
@@ -78,10 +94,10 @@ class Cut(_Model):
 
     inventory: Inventory
     votes: tuple[Vote, ...]
-    """Counted votes with IDs up to the cutoff, in ID order."""
+    """Counted votes older than the undo window, in ID order."""
 
     excluded: int
-    """Excluded votes with IDs up to the cutoff."""
+    """Excluded votes older than the undo window."""
 
     output_generation: str | None = None
     """The immutable collection prepared for this publication, when known."""
@@ -106,21 +122,24 @@ class Snapshot(_Model):
         cases: set[str] = set()
         outputs: set[str] = set()
         fingerprints: dict[str, str] = {}
-        first = cuts[0][1].inventory
+        first = self.policy
         names: dict[str, str] = {}
         for _, cut in cuts:
             inventory = cut.inventory
             if inventory.family != self.family:
                 raise ValueError('Every cut must belong to the snapshot family.')
-            if (
+            if inventory.cases and (
                 inventory.reference != first.reference
                 or inventory.defects != first.defects
             ):
                 raise ValueError('Store cuts disagree on their frozen family settings.')
-            for system, name in inventory.systems.items():
-                if system in names and names[system] != name:
-                    raise ValueError('Store cuts disagree on a system display name.')
-                names[system] = name
+            if inventory.cases:
+                for system, name in inventory.systems.items():
+                    if system in names and names[system] != name:
+                        raise ValueError(
+                            'Store cuts disagree on a system display name.'
+                        )
+                    names[system] = name
             if inventory.reference not in inventory.systems:
                 raise ValueError('A cut must name its reference system.')
             case_keys = {case.key for case in inventory.cases}
@@ -139,6 +158,7 @@ class Snapshot(_Model):
                     raise ValueError(
                         'A cut output must belong to its case and system inventory.'
                     )
+            for output in _output_evidence(cut):
                 if (
                     output.system in fingerprints
                     and fingerprints[output.system] != output.fingerprint
@@ -150,6 +170,15 @@ class Snapshot(_Model):
             cases.update(case_keys)
             outputs.update(output_keys)
         return self
+
+    @property
+    def policy(self) -> Inventory:
+        """Use active family settings when they are available."""
+        inventories = [cut.inventory for _, cut in self.cuts()]
+        return next(
+            (inventory for inventory in inventories if inventory.cases),
+            inventories[0],
+        )
 
     def cuts(self) -> tuple[tuple[Literal['production', 'private'], Cut], ...]:
         cuts: list[tuple[Literal['production', 'private'], Cut]] = []
@@ -173,51 +202,91 @@ class _CutHeader(BaseModel):
     excluded: int
 
 
-def read_cut(database: Database, family: str, now: datetime) -> Cut | None:
-    """Read one SQL snapshot, or None when the family has no active publication.
+def read_cut(
+    database: Database, family: str, now: datetime, *, include_active: bool = True
+) -> Cut | None:
+    """Read active inventory and eligible ballots in a single SQL read view.
 
-    The undo cutoff, exclusions and inventory share the statement's read view.
     Each result value holds one fact, keeping it below D1's value size limit.
     A result exceeding the REST response limit fails through the database API.
     """
     rows = database.execute(
         """WITH active_publication AS (
-            SELECT p.* FROM active AS a JOIN publications AS p
-            ON p.id = a.publication_id WHERE a.family = ?
-        ), bounds AS (
-            SELECT coalesce(max(id), 0) AS cutoff FROM votes
-            WHERE family = ? AND recorded_at <= ?
+            SELECT publication_id AS id FROM active WHERE family = ? AND ?
         ), selected_votes AS (
-            SELECT v.* FROM votes AS v JOIN active_publication AS p
-            ON v.family = p.family CROSS JOIN bounds AS b WHERE v.id <= b.cutoff
+            SELECT * FROM votes WHERE family = ? AND recorded_at <= ?
+        ), policy AS (
+            SELECT * FROM publications WHERE id = coalesce(
+                (SELECT id FROM active_publication),
+                (SELECT publication_id FROM selected_votes ORDER BY id DESC LIMIT 1)
+            )
+        ), output_keys AS (
+            SELECT o.publication_id, o.output_key FROM outputs AS o
+            JOIN active_publication AS p ON p.id = o.publication_id
+            UNION
+            SELECT publication_id, a_output FROM selected_votes WHERE exclusion IS NULL
+            UNION
+            SELECT publication_id, b_output FROM selected_votes WHERE exclusion IS NULL
+        ), output_facts AS (
+            SELECT o.publication_id, o.output_key, o.case_key, json_object(
+                'key', o.output_key, 'case_key', o.case_key, 'system', o.system,
+                'fingerprint', o.fingerprint, 'verdict', o.verdict,
+                'errored', json(CASE WHEN o.errored THEN 'true' ELSE 'false' END),
+                'length', o.length, 'content_digest', o.content_digest
+            ) AS facts FROM outputs AS o JOIN output_keys USING (
+                publication_id, output_key
+            )
+        ), case_keys AS (
+            SELECT c.publication_id, c.case_key FROM cases AS c
+            JOIN active_publication AS p ON p.id = c.publication_id
+            UNION
+            SELECT publication_id, case_key FROM output_facts
+        ), case_facts AS (
+            SELECT c.publication_id, c.case_key, json_object(
+                'key', c.case_key, 'category', c.category, 'split', c.split
+            ) AS facts FROM cases AS c JOIN case_keys USING (publication_id, case_key)
         )
         SELECT 'header' AS record_kind, 0 AS sort_rank, '' AS sort_key,
             0 AS sort_id, json_object(
                 'id', p.id, 'family', p.family, 'reference', p.reference,
                 'systems', json(p.systems), 'defects', json(p.defects),
-                'cutoff', b.cutoff, 'excluded',
-                (SELECT count(*) FROM selected_votes WHERE exclusion IS NOT NULL)
-            ) AS payload_json FROM active_publication AS p CROSS JOIN bounds AS b
+                'cutoff', (SELECT coalesce(max(id), 0) FROM selected_votes),
+                'excluded', (
+                    SELECT count(*) FROM selected_votes WHERE exclusion IS NOT NULL
+                )
+            ) AS payload_json FROM policy AS p
         UNION ALL
-        SELECT 'case', 1, c.case_key, 0, json_object(
-            'key', c.case_key, 'category', c.category, 'split', c.split
-        ) FROM cases AS c JOIN active_publication AS p ON p.id = c.publication_id
+        SELECT 'case', 1, c.case_key, 0, c.facts
+        FROM case_facts AS c JOIN active_publication AS p ON p.id = c.publication_id
         UNION ALL
-        SELECT 'output', 2, o.output_key, 0, json_object(
-            'key', o.output_key, 'case_key', o.case_key, 'system', o.system,
-            'fingerprint', o.fingerprint, 'verdict', o.verdict,
-            'errored', json(CASE WHEN o.errored THEN 'true' ELSE 'false' END),
-            'length', o.length, 'content_digest', o.content_digest
-        ) FROM outputs AS o JOIN active_publication AS p ON p.id = o.publication_id
+        SELECT 'output', 2, o.output_key, 0, o.facts
+        FROM output_facts AS o JOIN active_publication AS p ON p.id = o.publication_id
         UNION ALL
-        SELECT 'vote', 3, '', id, json_object(
-            'id', id, 'actor', actor_id, 'case_key', case_key,
-            'a_output', a_output, 'b_output', b_output,
-            'a_system', a_system, 'b_system', b_system, 'choice', choice,
-            'defects', json(defects), 'elapsed_ms', elapsed_ms
-        ) FROM selected_votes WHERE exclusion IS NULL
+        SELECT 'vote', 3, '', v.id, json_object(
+            'id', v.id, 'actor', v.actor_id, 'case_key', v.case_key,
+            'a_output', v.a_output, 'b_output', v.b_output,
+            'a_system', v.a_system, 'b_system', v.b_system, 'choice', v.choice,
+            'defects', json(v.defects), 'elapsed_ms', v.elapsed_ms,
+            'publication', CASE
+                WHEN v.publication_id IS NOT (SELECT id FROM active_publication)
+                THEN json_object(
+                    'id', p.id, 'case', json(c.facts),
+                    'a', json(a.facts), 'b', json(b.facts),
+                    'a_name', (
+                        SELECT value FROM json_each(p.systems) WHERE key = v.a_system
+                    ),
+                    'b_name', (
+                        SELECT value FROM json_each(p.systems) WHERE key = v.b_system
+                    )
+                ) END
+        ) FROM selected_votes AS v
+        JOIN publications AS p ON p.id = v.publication_id
+        JOIN output_facts AS a ON a.publication_id = p.id AND a.output_key = v.a_output
+        JOIN output_facts AS b ON b.publication_id = p.id AND b.output_key = v.b_output
+        JOIN case_facts AS c ON c.publication_id = p.id AND c.case_key = a.case_key
+        WHERE v.exclusion IS NULL
         ORDER BY sort_rank, sort_key, sort_id""",
-        [family, family, int(now.timestamp() * 1000) - UNDO_WINDOW_MS],
+        [family, include_active, family, int(now.timestamp() * 1000) - UNDO_WINDOW_MS],
     ).rows
     if not rows:
         return None
@@ -683,45 +752,41 @@ def _read_snapshot(database: Database, identity: str, *, sealed: bool) -> Snapsh
 # ── Closing ──
 
 
+class _CountedVote(NamedTuple):
+    vote: Vote
+    actor: str
+    a: OutputFacts
+    b: OutputFacts
+
+
 def voting_input(
     snapshot: Snapshot,
     outputs_by_cut: Mapping[Literal['production', 'private'], Sequence[Output]],
 ) -> AnalysisInput:
-    """Build the round's input from frozen cuts and their pinned output metrics.
-
-    A vote counts when both its outputs passed in the cut's publication, on the
-    vote's case, with different content. Latency, tokens and cost come from
-    `outputs_by_cut`, matched by output key. Missing collection pins or outputs
-    measure as null.
-    """
+    """Use original ballot facts and measure outputs from pinned active collections."""
     cuts = snapshot.cuts()
-    inventory = cuts[0][1].inventory.model_copy(
-        update={
-            'cases': tuple(case for _, cut in cuts for case in cut.inventory.cases),
-            'outputs': tuple(
-                output for _, cut in cuts for output in cut.inventory.outputs
-            ),
-            'systems': system_names(snapshot),
-        }
-    )
-    published = {output.key: output for output in inventory.outputs}
-    counted: list[Vote] = []
+    cases = [case for _, cut in cuts for case in cut.inventory.cases]
+    outputs = [output for _, cut in cuts for output in cut.inventory.outputs]
+    counted: list[_CountedVote] = []
     for store, cut in cuts:
-        eligible = {output.key: output for output in cut.inventory.outputs}
-        counted.extend(
-            vote.model_copy(update={'actor': f'{store}:{vote.actor}'})
-            for vote in cut.votes
-            if _counts(vote, eligible)
-        )
-    actors = [vote.actor for vote in counted]
+        published = {output.key: output for output in cut.inventory.outputs}
+        for vote in cut.votes:
+            if vote.publication is None:
+                a, b = published.get(vote.a_output), published.get(vote.b_output)
+            else:
+                a, b = vote.publication.a, vote.publication.b
+            if a is not None and b is not None and _counts(vote, a, b):
+                counted.append(_CountedVote(vote, f'{store}:{vote.actor}', a, b))
+
+    actors = [row.actor for row in counted]
     ordinary = tuple(
         HumanEvidence(
-            actor=vote.actor,
+            actor=actor,
             choice=vote.choice,
             defects_a=tuple(sorted(vote.defects.a)),
             defects_b=tuple(sorted(vote.defects.b)),
-            length_a=published[vote.a_output].length,
-            length_b=published[vote.b_output].length,
+            length_a=a.length,
+            length_b=b.length,
             comparison=ranking.Comparison(
                 vote.a_system,
                 vote.b_system,
@@ -729,8 +794,14 @@ def voting_input(
                 vote.case_key,
                 weight,
             ),
+            category=None
+            if vote.publication is None
+            else vote.publication.case.category,
+            split=None if vote.publication is None else vote.publication.case.split,
         )
-        for vote, weight in zip(counted, actor_weights(actors), strict=True)
+        for (vote, actor, a, b), weight in zip(
+            counted, actor_weights(actors), strict=True
+        )
     )
 
     measured: dict[str, Output] = {}
@@ -748,9 +819,21 @@ def voting_input(
         )
     return AnalysisInput(
         family=snapshot.family,
-        reference=inventory.reference,
-        systems=tuple(inventory.systems),
-        defects=inventory.defects,
+        reference=snapshot.policy.reference,
+        systems=tuple(system_names(snapshot)),
+        defects=tuple(
+            dict.fromkeys(
+                (
+                    *snapshot.policy.defects,
+                    *(
+                        defect
+                        for row in ordinary
+                        if row.category is not None
+                        for defect in (*row.defects_a, *row.defects_b)
+                    ),
+                )
+            )
+        ),
         cutoffs=Cutoffs(
             production=None
             if snapshot.production is None
@@ -761,15 +844,20 @@ def voting_input(
             if snapshot.private is None
             else Cutoff(id=snapshot.private.cutoff, votes=len(snapshot.private.votes)),
         ),
-        declared_categories=snapshot.category_order,
-        categories=tuple((case.key, case.category) for case in inventory.cases),
-        ordinary=ordinary,
-        settlements=_settlements(inventory.outputs),
-        outputs=tuple(
-            _measurement(row, measured.get(row.key)) for row in inventory.outputs
+        declared_categories=tuple(
+            dict.fromkeys(
+                (
+                    *snapshot.category_order,
+                    *(row.category for row in ordinary if row.category is not None),
+                )
+            )
         ),
+        categories=tuple((case.key, case.category) for case in cases),
+        ordinary=ordinary,
+        settlements=_settlements(outputs),
+        outputs=tuple(_measurement(row, measured.get(row.key)) for row in outputs),
         dropped=sum(len(cut.votes) + cut.excluded for _, cut in cuts) - len(counted),
-        splits=tuple((case.key, case.split) for case in inventory.cases),
+        splits=tuple((case.key, case.split) for case in cases),
     )
 
 
@@ -777,23 +865,43 @@ def fingerprints(snapshot: Snapshot) -> dict[str, str]:
     return {
         output.system: output.fingerprint
         for _, cut in snapshot.cuts()
-        for output in cut.inventory.outputs
+        for output in _output_evidence(cut)
     }
+
+
+def _output_evidence(cut: Cut) -> Iterator[OutputFacts]:
+    yield from cut.inventory.outputs
+    for vote in cut.votes:
+        original = vote.publication
+        if original is not None and _counts(vote, original.a, original.b):
+            yield original.a
+            yield original.b
 
 
 def system_names(snapshot: Snapshot) -> dict[str, str]:
-    return {
+    cuts = snapshot.cuts()
+    names = {
         system: name
-        for _, cut in snapshot.cuts()
+        for _, cut in cuts
+        if cut.inventory.cases
         for system, name in cut.inventory.systems.items()
     }
+    for _, cut in cuts:
+        for vote in reversed(cut.votes):
+            original = vote.publication
+            if original is not None and _counts(vote, original.a, original.b):
+                names.setdefault(vote.a_system, original.a_name)
+                names.setdefault(vote.b_system, original.b_name)
+        for system, name in cut.inventory.systems.items():
+            names.setdefault(system, name)
+    return names
 
 
-def _counts(vote: Vote, published: dict[str, OutputFacts]) -> bool:
-    a, b = published.get(vote.a_output), published.get(vote.b_output)
+def _counts(vote: Vote, a: OutputFacts, b: OutputFacts) -> bool:
     return (
-        a is not None
-        and b is not None
+        a.key == vote.a_output
+        and b.key == vote.b_output
+        and (vote.publication is None or vote.publication.case.key == vote.case_key)
         and a.case_key == b.case_key == vote.case_key
         and a.system == vote.a_system
         and b.system == vote.b_system

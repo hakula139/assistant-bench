@@ -45,7 +45,7 @@ The tree lists only the top-level entries whose names leave their purpose unclea
 - Only `bench close` writes under `reports/`, and a report holds aggregates under public system names alone.
 - Never run paid model calls in CI, as tests reach models only through the stub endpoint in `tests/support.py`.
 - `bench` takes only arguments that select what a command acts on and reads its settings from `systems.toml` and `family.toml`, as [Development](docs/conventions/development.md#where-settings-live) lists.
-- Keep no compatibility layers: no data migrations, ID aliases, redirects, case lineage, or readers for old formats. A case, family, or schema change that would orphan votes drops them. Guards that refuse mismatched data may stay. Once a replacement is verified, delete the superseded state, code, and docs with no archive. The arena's D1 schema is the one exception, as [Arena](docs/design/arena.md#schema-changes) describes.
+- Keep no general compatibility layers, data migrations, ID aliases, redirects or case lineage. Keep guards that refuse mismatched data and delete superseded state once its replacement is verified. The arena's [ballot retention and D1 schema rules](docs/design/arena.md) are exceptions.
 - In committed files, state each convention on its own terms and never name the repositories that conventions, layout, or design were drawn from. nixos-config appears only where the bench uses it: the flake input, its export, and `nixos-config:<client>` prompts. Research notes and design pages may cite the external benchmarks, papers, and tools whose methods the bench uses.
 
 ## Verification

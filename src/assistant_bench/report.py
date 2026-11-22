@@ -861,6 +861,9 @@ class HumanEvidence:
     comparison: ranking.Comparison
     """Weight assigned once over the complete eligible family evaluation."""
 
+    category: Category | None = None
+    split: Literal['public', 'held-out', 'private'] | None = None
+
     @property
     def systems(self) -> tuple[str, str]:
         return self.comparison.left, self.comparison.right
@@ -970,7 +973,13 @@ def votes_results(analysis: AnalysisInput) -> VotesResults:
         dropped_votes=analysis.dropped,
         voters=len({row.actor for row in votes}),
         standings=standings,
-        unranked=sorted({output.system for output in outputs} - ranked),
+        unranked=sorted(
+            (
+                {output.system for output in outputs}
+                | {system for row in votes for system in row.systems}
+            )
+            - ranked
+        ),
         decision=(
             None
             if uncertainty is None
@@ -989,26 +998,38 @@ def votes_results(analysis: AnalysisInput) -> VotesResults:
             analysis.declared_categories,
             board.anchor,
             votes,
-            comparisons,
+            analysis.settlements,
             outputs,
         ),
         length=None if length is None else ranking.ELO_PER_LOGIT * length,
         split_half_tau=ranking.split_half_tau(
             [row.comparison for row in votes], board.root
         ),
-        public_held_out=_split_diagnostic(comparisons, dict(analysis.splits)),
+        public_held_out=_split_diagnostic(
+            votes, analysis.settlements, dict(analysis.splits)
+        ),
     )
 
 
 def _split_diagnostic(
-    comparisons: Sequence[ranking.Comparison],
+    votes: Sequence[HumanEvidence],
+    settlements: Sequence[ranking.Comparison],
     splits: Mapping[str, Literal['public', 'held-out', 'private']],
 ) -> SplitDiagnostic:
-    rows = [
-        [row for row in comparisons if splits[row.case] == split and row.weight > 0]
-        for split in ('public', 'held-out')
+    tagged = [
+        (row.comparison, row.split or splits[row.comparison.case]) for row in votes
     ]
-    compared = ranking.split_difference(*rows)
+    tagged.extend((row, splits[row.case]) for row in settlements)
+    public, held_out = (
+        [row for row, kind in tagged if kind == split and row.weight > 0]
+        for split in ('public', 'held-out')
+    )
+    # Scores in the two splits use independent case clusters.
+    shared = {row.case for row in public} & {row.case for row in held_out}
+    compared = ranking.split_difference(
+        [row for row in public if row.case not in shared],
+        [row for row in held_out if row.case not in shared],
+    )
     difference = compared.difference
     return SplitDiagnostic.model_validate(
         {
@@ -1128,19 +1149,22 @@ def _categories(
     declared: tuple[Category, ...],
     anchor: str,
     votes: list[HumanEvidence],
-    comparisons: list[ranking.Comparison],
+    settlements: Sequence[ranking.Comparison],
     outputs: list[OutputMeasurement],
 ) -> list[CategoryBoard]:
-    """Refit each declared category in the anchor's component, anchored there too."""
+    """Refit each category in the anchor's component, anchored there too."""
     category_votes: defaultdict[Category, list[HumanEvidence]] = defaultdict(list)
-    for row in votes:
-        category_votes[categories[row.comparison.case]].append(row)
-
     by_category: defaultdict[Category, list[ranking.Comparison]] = defaultdict(list)
-    for comparison in comparisons:
+    entrants: defaultdict[Category, set[str]] = defaultdict(set)
+    for row in votes:
+        category = row.category or categories[row.comparison.case]
+        category_votes[category].append(row)
+        by_category[category].append(row.comparison)
+        entrants[category].update(row.systems)
+
+    for comparison in settlements:
         by_category[categories[comparison.case]].append(comparison)
 
-    entrants: defaultdict[Category, set[str]] = defaultdict(set)
     for output in outputs:
         entrants[categories[output.case]].add(output.system)
 

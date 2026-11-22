@@ -4,7 +4,7 @@ Votes families rank by point scores from pairwise votes, and tests and checkers 
 
 The checkers scorer gives a case a binary pass only when every applicable rule passes. It uses the case as its sampling unit, with the same exact pass-rate interval and paired leader comparison as task tests. Per-rule rates retain their applicable case and response denominators and provide no partial credit. Each bare / prompted comparison reports the mean paired case-score difference and a descriptive 95% SciPy paired percentile bootstrap interval. A single case or constant paired differences yield no interval because the observed sample cannot estimate variation.
 
-Every vote that [counts](arena.md#publication-and-closing) against the cut's active publication enters the cumulative evaluation. Reports freeze the method, rules and descriptive diagnostics. Excluded and other uncounted votes count as `dropped_votes`. [Systems](systems.md#fingerprints) defines the configuration continuity required for pooling.
+Every vote that [counts](arena.md#publication-and-closing) against its original publication enters the cumulative evaluation. Reports freeze the method, rules and descriptive diagnostics. Excluded and other uncounted votes count as `dropped_votes`. [Systems](systems.md#fingerprints) defines the configuration continuity required for pooling.
 
 ## The Fit
 
@@ -38,7 +38,7 @@ With case effects, widths stop shrinking like 1 / √votes once votes per case g
 
 ## Counts and Diagnostics
 
-`votes` and `decisive_votes` are raw eligible ordinary choice counts. `effective_votes` sums their actor weights and excludes settlements. Overall totals include eligible choices across all components. Each participating system counts a choice, so standing totals can sum to twice the overall count. Category counts use that category's choices with their original weights. Excluded votes and votes on outputs that no longer count stay out of the fit and count in `dropped_votes`.
+`votes` and `decisive_votes` are raw eligible ordinary choice counts. `effective_votes` sums their actor weights and excludes settlements. Overall totals include eligible choices across all components. Each participating system counts a choice, so standing totals can sum to twice the overall count. Category counts use that category's choices with their original weights. Excluded and ineligible votes stay out of the fit and count in `dropped_votes`.
 
 | Field            | Meaning                                                                                                                                                                                                                   |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -47,7 +47,7 @@ With case effects, widths stop shrinking like 1 / √votes once votes per case g
 
 Lengths count each Han character and each other whitespace-separated run as one unit. Length association and split-half agreement describe the observed votes alone.
 
-`public_held_out` compares public-minus-held-out scores on the systems present in both splits, with each split centered on their common field mean. Private cases are excluded. It requires at least 30 independent cases in each split after restricting comparisons to that common field, a connected identifiable fit in each, and non-separated outcomes. Its case counts describe the restricted comparisons. When no common field exists, the counts describe the available cases and no estimate is reported. Otherwise it records why estimates are unavailable. Its intervals add the two independent case-cluster covariance matrices and use the smaller case count minus one as the t degrees of freedom. These differences describe the observed cases and cannot establish training contamination.
+`public_held_out` compares public-minus-held-out scores on the systems present in both splits, with each split centered on their common field mean. Private cases and case keys appearing in both splits are excluded from this diagnostic. It requires at least 30 independent cases in each split after restricting comparisons to that common field, a connected identifiable fit in each, and non-separated outcomes. Its case counts describe the restricted comparisons. When no common field exists, the counts describe the available cases and no estimate is reported. Otherwise it records why estimates are unavailable. Its intervals add the two independent case-cluster covariance matrices and use the smaller case count minus one as the t degrees of freedom. These differences describe the observed cases and cannot establish training contamination.
 
 ## Test Pass Rates
 

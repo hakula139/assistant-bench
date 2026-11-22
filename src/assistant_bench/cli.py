@@ -434,16 +434,21 @@ def _capture_snapshot(family: Family, revision: str) -> str:
     assert isinstance(family.settings, VotesSettings)
     taken_at = datetime.now(UTC)
     with connect('private') as database:
-        production = None
-        if family.settings.public_voting:
-            with connect('production') as public_database:
-                production = _pin_cut(
-                    database, votes.read_cut(public_database, family.name, taken_at)
-                )
+        with connect('production') as public_database:
+            production = _pin_cut(
+                database,
+                votes.read_cut(
+                    public_database,
+                    family.name,
+                    taken_at,
+                    include_active=family.settings.public_voting,
+                ),
+            )
         private = _pin_cut(database, votes.read_cut(database, family.name, taken_at))
         if production is None and private is None:
             raise InputError(
-                f'Family `{family.name}` has no active voting publication. '
+                f'Family `{family.name}` has no active voting publication '
+                'or eligible voting history. '
                 'Prepare and publish a production or private voting round first.'
             )
         identity = votes.save_snapshot(
@@ -463,8 +468,8 @@ def _capture_snapshot(family: Family, revision: str) -> str:
 
 
 def _pin_cut(database: Database, cut: votes.Cut | None) -> votes.Cut | None:
-    if cut is None:
-        return None
+    if cut is None or not cut.inventory.outputs:
+        return cut
     prepared = publication.preparation(database, cut.inventory.id)
     return cut.model_copy(
         update={'output_generation': prepared.collection_id if prepared else None}
