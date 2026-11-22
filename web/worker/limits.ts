@@ -4,10 +4,7 @@ const DAY_MS = 24 * 60 * MINUTE_MS;
 /** New browsers one IP tag may admit within `WINDOW_MS`. */
 export const ACTORS_PER_TAG = 5;
 
-/** Votes one IP tag may record within `WINDOW_MS`, across families. */
-export const VOTES_PER_TAG = 2_000;
-
-/** The sliding window of both per-tag caps. */
+/** The sliding window for admitting browsers from one network. */
 export const WINDOW_MS = DAY_MS;
 
 /** How long a vote stays undoable, equal to `UNDO_WINDOW_MS` in `arena/votes.py` for cuts. */

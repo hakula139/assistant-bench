@@ -30,7 +30,8 @@ export const errorMessages: Record<ErrorCode, string> = {
   stale_pair: 'This pair changed. Review the current outputs and choose again.',
   nothing_to_undo: 'That vote is no longer available to undo.',
   rate_limited: 'Too many requests. Wait a moment, then retry.',
-  daily_limit: 'This network has reached its daily limit. Try again tomorrow.',
+  daily_limit:
+    'This network has added too many new browsers in the past 24 hours. Try again later.',
   unavailable: 'The voting service is unavailable. Try again.',
 };
 

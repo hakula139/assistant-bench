@@ -8,33 +8,30 @@ import type {
 import type { Defect } from '@/lib/defects';
 
 import { ApiError, type Bindings } from './api';
-import { FRESHNESS_CACHE_SECONDS, UNDO_MS, VOTES_PER_TAG, WINDOW_MS } from './limits';
+import { FRESHNESS_CACHE_SECONDS, UNDO_MS } from './limits';
 
-const STATE_FIELDS = 'prior.choice, prior.defects AS saved, publications.defects AS allowed';
-const STATE_JOINS = `
+const FIND = `
+  SELECT prior.choice, prior.defects AS saved, publications.defects AS allowed
+  FROM (SELECT 1)
   LEFT JOIN votes AS prior ON prior.pair_id = ?1 AND prior.actor_id = ?2
   LEFT JOIN pairs ON pairs.id = ?1 AND pairs.actor_id = ?2
   LEFT JOIN active ON active.family = pairs.family AND active.publication_id = pairs.publication_id
   LEFT JOIN publications ON publications.id = active.publication_id`;
-const FIND = `SELECT ${STATE_FIELDS}, 0 AS capped FROM (SELECT 1) ${STATE_JOINS}`;
-const HAS_ROOM = '(SELECT count(*) FROM votes WHERE ip_tag = ?3 AND recorded_at > ?4) < ?5';
-/** Classifies a miss in the insert's snapshot before another vote or undo can change the result. */
-const CHECK_MISS = `
-  SELECT ${STATE_FIELDS}, NOT (${HAS_ROOM}) AS capped
-  FROM (SELECT 1 WHERE changes() = 0)
-  ${STATE_JOINS}`;
+const RECEIPT = 'SELECT choice, defects AS saved FROM votes WHERE pair_id = ?1 AND actor_id = ?2';
+/** Reads the receipt for a missed write before another submission or undo can change it. */
+const CHECK_MISS = `${RECEIPT} AND changes() = 0`;
 const RECORD = `
   INSERT INTO votes (
     pair_id, actor_id, family, publication_id, case_key, a_output, b_output, a_system, b_system,
     choice, defects, elapsed_ms, recorded_at, ip_tag
   )
   SELECT pairs.id, pairs.actor_id, pairs.family, pairs.publication_id, pairs.case_key,
-    pairs.a_output, pairs.b_output, a.system, b.system, ?6, ?7, max(0, ?8 - pairs.issued_at), ?8, ?3
+    pairs.a_output, pairs.b_output, a.system, b.system, ?4, ?5, max(0, ?6 - pairs.issued_at), ?6, ?3
   FROM pairs
   JOIN active ON active.family = pairs.family AND active.publication_id = pairs.publication_id
   JOIN outputs AS a ON a.publication_id = pairs.publication_id AND a.output_key = pairs.a_output
   JOIN outputs AS b ON b.publication_id = pairs.publication_id AND b.output_key = pairs.b_output
-  WHERE pairs.id = ?1 AND pairs.actor_id = ?2 AND ${HAS_ROOM}
+  WHERE pairs.id = ?1 AND pairs.actor_id = ?2
   ON CONFLICT DO NOTHING RETURNING id`;
 const RELEASE = `
   DELETE FROM pairs WHERE id = ?1 AND EXISTS (SELECT 1 FROM votes WHERE pair_id = ?1)`;
@@ -64,7 +61,11 @@ interface Found {
   choice: string | null;
   saved: string | null;
   allowed: string | null;
-  capped: 0 | 1;
+}
+
+interface Receipt {
+  choice: string;
+  saved: string;
 }
 
 /** Whether a stored vote holds the same choice and the same tags on each side. */
@@ -76,6 +77,12 @@ function same(choice: string, saved: string, request: VoteRequest): boolean {
     set(tags.a) === set(request.defects.a) &&
     set(tags.b) === set(request.defects.b)
   );
+}
+
+function requireReceipt(request: VoteRequest, receipt: Receipt | null) {
+  if (receipt === null || !same(receipt.choice, receipt.saved, request)) {
+    throw new ApiError(409, 'stale_pair');
+  }
 }
 
 /**
@@ -101,9 +108,6 @@ function decide(request: VoteRequest, found: Found | null): TaggedDefects | null
   if (tagged.some((defect) => !allowed.includes(defect))) {
     throw new ApiError(400, 'invalid_request');
   }
-  if (found.capped) {
-    throw new ApiError(429, 'daily_limit');
-  }
   return {
     a: allowed.filter((defect) => request.defects.a.includes(defect)),
     b: allowed.filter((defect) => request.defects.b.includes(defect)),
@@ -128,31 +132,20 @@ export async function record(
     return;
   }
 
-  const scope = [request.pair, actor, tag, now - WINDOW_MS, VOTES_PER_TAG] as const;
   const [inserted, missed] = await db.batch([
-    db.prepare(RECORD).bind(...scope, request.choice, JSON.stringify(defects), now),
-    db.prepare(CHECK_MISS).bind(...scope),
+    db.prepare(RECORD).bind(request.pair, actor, tag, request.choice, JSON.stringify(defects), now),
+    db.prepare(CHECK_MISS).bind(request.pair, actor),
     db.prepare(RELEASE).bind(request.pair),
   ]);
-  if (inserted.results.length === 1) {
-    return;
-  }
-
-  if (decide(request, (missed.results as Found[]).at(0) ?? null) !== null) {
-    // A miss that still looks recordable met the actor's earlier vote on the same comparison.
-    throw new ApiError(409, 'stale_pair');
+  if (inserted.results.length === 0) {
+    requireReceipt(request, (missed.results as Receipt[]).at(0) ?? null);
   }
 }
 
 /** Confirms an exact stored vote without changing a vote or its pending pair. */
 export async function confirm(db: D1Database, actor: string, request: VoteRequest) {
-  const saved = await db
-    .prepare('SELECT choice, defects FROM votes WHERE pair_id = ? AND actor_id = ?')
-    .bind(request.pair, actor)
-    .first<{ choice: string; defects: string }>();
-  if (saved === null || !same(saved.choice, saved.defects, request)) {
-    throw new ApiError(409, 'stale_pair');
-  }
+  const receipt = await db.prepare(RECEIPT).bind(request.pair, actor).first<Receipt>();
+  requireReceipt(request, receipt);
 }
 
 /**
