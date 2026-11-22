@@ -48,8 +48,8 @@ const diagnostics = [terms.splitHalf, terms.leftOut, terms.lengthBias];
 
 <Part id={id('gates')} title={votesParts.gates}>
   <p>
-    A failing output loses its pairs and two identical outputs tie, so these pairs settle without a
-    vote.
+    Pairs settle without a vote when either output fails a gate or two passing outputs are
+    identical.
   </p>
   <Glossary heading="Gate" entries={Object.values(gates)} />
 </Part>

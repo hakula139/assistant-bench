@@ -12,6 +12,7 @@ import { reportNames } from '@/lib/systems';
 /** A voted family's home panel rows and axis: its latest round, or its systems before one. */
 export function panelForest(family: VotesFamily): {
   rows: ForestRow[];
+  caption: string;
   domain: [number, number];
   anchorScore?: number;
 } {
@@ -19,11 +20,13 @@ export function panelForest(family: VotesFamily): {
   if (!report) {
     return {
       rows: unmeasuredRows(family.config.systems, family.systemNames),
+      caption: `${family.title} systems, none measured yet`,
       domain: EMPTY_DOMAIN,
     };
   }
 
   const results = displayVoteScores(report.results);
+  const net = 'kind' in results.method;
   return {
     rows: roundRows(
       (system) => systemPath(family, system),
@@ -31,7 +34,10 @@ export function panelForest(family: VotesFamily): {
       reportNames(report.systems),
       results.rules,
     ),
-    domain: 'kind' in results.method ? NET_DOMAIN : forestDomain(results.standings),
+    caption: net
+      ? `${family.title} net points per 100 comparisons`
+      : `${family.title} point scores`,
+    domain: net ? NET_DOMAIN : forestDomain(results.standings),
     anchorScore: fixedAnchor(results.method),
   };
 }

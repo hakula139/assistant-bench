@@ -425,6 +425,24 @@ describe('family panel', () => {
     expect(text(html)).toContain('Acme Pro 1,068');
   });
 
+  test('labels a measured family panel with its net score units', async () => {
+    const arena = await family();
+    const round = arena.rounds.at(-1);
+    if (!round) {
+      throw new Error('Expected a round');
+    }
+    round.results.method = { kind: 'expected_net', l2_penalty: 0.01 };
+    for (const [index, row] of round.results.standings.entries()) {
+      row.score = index === 0 ? 0.42 : 0;
+      row.interval = null;
+    }
+
+    const html = await render(FamilyPanel, { family: arena });
+
+    expect(text(html)).toContain(`${arena.title} net points per 100 comparisons`);
+    expect(islandHints(html, 'Forest')).toContain('42');
+  });
+
   test("gives each row's point score a hint", async () => {
     const html = await render(FamilyPanel, { family: await family() });
 

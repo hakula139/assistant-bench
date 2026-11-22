@@ -278,11 +278,10 @@ class VotesResults(_Model):
     reference: str
     """Configured reference, whether or not comparisons connect it."""
     anchor: str
-    """Ranked system fixed at the recorded anchor score."""
+    """The configured reference, or the substitute anchor in an archived Elo round."""
 
     cases: Annotated[int, Field(ge=0)]
-    """Cases with a weighted comparison in the ranked component, which cluster the
-    intervals."""
+    """Cases in the evaluation, limited to the ranked component for archived Elo."""
 
     votes: Annotated[int, Field(ge=0)]
     """Eligible recorded votes across every component."""
@@ -996,11 +995,9 @@ def votes_results(analysis: AnalysisInput, *, net: bool = False) -> VotesResults
         else ranking.rate_root(comparisons, analysis.systems, analysis.reference)
     )
     if board is None:
-        fitted = expected_net.rate(comparisons, analysis.reference)
-        ratings = ranking.PointRatings(
-            tuple(fitted.points), np.array(list(fitted.points.values()))
-        )
-        cases = fitted.cases
+        points = expected_net.rate(comparisons, analysis.reference)
+        ratings = ranking.PointRatings(tuple(points), np.array(list(points.values())))
+        cases = len({row.case for row in comparisons if row.weight > 0})
         anchor = analysis.reference
     else:
         ratings, cases, anchor = board.ratings, board.cases, board.anchor
@@ -1258,7 +1255,7 @@ def _categories(
             continue
 
         if net:
-            points = expected_net.rate(by_category[name], anchor).points
+            points = expected_net.rate(by_category[name], anchor)
             entrants[name].update(
                 system for row in by_category[name] for system in (row.left, row.right)
             )

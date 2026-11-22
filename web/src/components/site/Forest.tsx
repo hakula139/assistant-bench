@@ -46,7 +46,7 @@ function details(row: ForestRow): Term {
       'estimate' in row
         ? `Point score ${scoreText(row)}.`
         : row.unplaced === 'unranked'
-          ? 'No comparisons connect this system to the ranked component.'
+          ? 'The available comparisons cannot support a standing in this round.'
           : 'No round has measured this system yet.',
   };
 }

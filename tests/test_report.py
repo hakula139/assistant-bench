@@ -1080,7 +1080,24 @@ class TestVotesResults:
 
         assert scored.standings == []
         assert scored.unranked == ['a', 'b']
-        assert scored.votes == 1
+        assert scored.votes == scored.cases == 1
+
+    def test_zero_rejections_still_require_a_supported_matchup(self) -> None:
+        edges = (
+            make_evidence(0, systems=('a', 'b'), choice='tie'),
+            make_evidence(1, systems=('b', 'c'), choice='tie'),
+            make_evidence(2, systems=('a', 'c'), choice='tie'),
+        )
+        path = report.votes_results(make_analysis(edges[:2]), net=True)
+        triangle = report.votes_results(make_analysis(edges), net=True)
+
+        assert [(row.system, row.score) for row in path.standings] == [('b', 0)]
+        assert path.unranked == ['a', 'c']
+        assert {row.system: row.score for row in triangle.standings} == {
+            'a': 0,
+            'b': 0,
+            'c': 0,
+        }
 
     def test_does_not_extrapolate_a_joint_rejection_from_a_bipartite_field(
         self,
@@ -1097,7 +1114,8 @@ class TestVotesResults:
 
         scored = report.votes_results(analysis, net=True)
 
-        assert [(row.system, row.score) for row in scored.standings] == [('b', -0.5)]
+        assert [row.system for row in scored.standings] == ['b']
+        assert -1 < scored.standings[0].score < 0
         assert scored.unranked == ['a', 'c', 'd']
         assert scored.votes == 5
 
