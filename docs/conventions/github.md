@@ -5,7 +5,7 @@ Repository rules for pull requests and issues beyond the general Git workflow.
 ## Pull Requests
 
 - After a batch of related PRs merges, make one simplification pass over the merged changes.
-- Commit a PR's screenshots to one directory per PR on the orphan `docs/pr-screenshots` branch, link them by commit SHA, and show only synthetic data in them.
+- Attach screenshots directly to the PR and show only synthetic data in them.
 
 ## Issues
 
