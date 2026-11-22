@@ -118,7 +118,9 @@ describe('VotesBoard', () => {
     earlier.systems['acme-pro'].display_name = 'Historical Pro';
     current.systems['acme-pro'].display_name = 'Current Pro';
     earlier.results.rules = { preliminary_half_width: 75 };
-    if (!('anchor_score' in earlier.results.method)) throw new Error('Expected an Elo round');
+    if (!('anchor_score' in earlier.results.method)) {
+      throw new Error('Expected an Elo round');
+    }
     earlier.results.method.anchor_score = 1234;
     for (const row of earlier.results.standings) {
       row.score += 234;

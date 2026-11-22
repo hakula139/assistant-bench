@@ -244,7 +244,9 @@ export function fallbackAnchor(
   referenceName: string,
   method: VotesMethod,
 ): Term {
-  if ('kind' in method) return anchorTerm(method);
+  if ('kind' in method) {
+    return anchorTerm(method);
+  }
 
   return {
     ...terms.anchor,

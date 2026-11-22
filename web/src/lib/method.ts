@@ -13,7 +13,9 @@ export function roundMethod(method: VotesMethod, rules?: VotesRules | null): str
   if ('kind' in method) {
     return `Expected net points per 100 comparisons against the recorded reference. Wins earn +1, losses earn −1, ties earn 0, and both-bad outcomes cost each side 1 point. Each vote counts once. The preference and joint rejection fits use an L2 penalty of ${formatPenalty(method.l2_penalty)}.`;
   }
-  if (!rules) throw new Error('Elo rounds require rules');
+  if (!rules) {
+    throw new Error('Elo rounds require rules');
+  }
 
   return `Bradley-Terry, L2 penalty ${formatPenalty(method.l2_penalty)}, ${formatScore(method.points_per_logit)} points per logit, anchor ${formatScore(method.anchor_score)}. Each voter contributes at most ${formatCountOf(method.actor_cap, 'vote')} of weight per family, shared equally across their votes. Settled output pairs share each case's weight. Score intervals cover ${formatPercent(method.interval_level)} with the votes on one case counted as one draw, and a score is preliminary while its interval is wider than ±${formatScore(rules.preliminary_half_width)} points.`;
 }

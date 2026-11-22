@@ -258,7 +258,9 @@ describe('reportSchema', () => {
       row.interval = null;
     }
     for (const board of results.categories) {
-      for (const row of board.standings) row.score = -0.25;
+      for (const row of board.standings) {
+        row.score = -0.25;
+      }
     }
     delete results.rules;
     delete results.cutoffs;

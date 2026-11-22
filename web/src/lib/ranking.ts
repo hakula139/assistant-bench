@@ -18,7 +18,9 @@ export function fixedAnchor(method: VotesMethod): number | undefined {
 
 /** Display expected net points on a per-100-comparisons scale. */
 export function displayVoteScores(results: VotesResults): VotesResults {
-  if (!('kind' in results.method)) return results;
+  if (!('kind' in results.method)) {
+    return results;
+  }
 
   const scale = <T extends { score: number }>(row: T): T => ({ ...row, score: 100 * row.score });
   return {
