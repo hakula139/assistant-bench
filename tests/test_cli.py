@@ -2371,11 +2371,7 @@ class TestClose:
 
         assert result.exit_code == 0, result.output
         target = store.published.target
-        assert store.targets == (
-            ['private', 'production', 'private']
-            if target == 'production'
-            else ['private', 'private']
-        )
+        assert store.targets == ['private', 'production', 'private']
         (header,) = store.private_database.execute(
             'SELECT id FROM vote_snapshots WHERE sealed = 1'
         ).rows
@@ -2451,6 +2447,78 @@ class TestClose:
         assert closed.results.standings[0].mean_cost_usd == 0.5
         assert [board.category for board in closed.results.categories] == ['docs']
 
+    @pytest.mark.parametrize('vote_target', ['private'])
+    @pytest.mark.parametrize('receipt', ['distinct', 'copied', 'choice', 'category'])
+    def test_closes_former_production_votes_with_the_current_private_round(
+        self,
+        store: Store,
+        arena_store: SQLiteDatabase,
+        reports_dir: Path,
+        receipt: str,
+    ) -> None:
+        family = load_family('f')
+        now = datetime.now(UTC)
+        cases = load_cases(family, private_root=None)
+        if receipt == 'category':
+            cases = [case.model_copy(update={'category': 'review'}) for case in cases]
+
+        formerly_public = publication.prepare(
+            family.model_copy(
+                update={
+                    'settings': family.settings.model_copy(
+                        update={'public_voting': True}
+                    ),
+                }
+            ),
+            cases,
+            [
+                make_trial(case, system)
+                for case in CLOSE_CASES
+                for system in ('large', 'small')
+            ],
+            {'large': 'Public Large', 'small': 'Public Small'},
+            target='production',
+        )
+        publication.stage(arena_store, formerly_public, now)
+        publication.activate(arena_store, formerly_public.id, now)
+        record_vote(
+            arena_store, formerly_public, now, actor='reader', age=timedelta(hours=1)
+        )
+        record_vote(
+            store.database,
+            store.published,
+            now,
+            actor='other-reader' if receipt == 'distinct' else 'reader',
+            age=timedelta(hours=1),
+            choice='b' if receipt == 'choice' else 'a',
+        )
+
+        result = invoke('close', 'f')
+
+        if receipt in ('choice', 'category'):
+            assert result.exit_code == 1
+            assert (
+                result.stderr == 'Official vote stores disagree on a ballot receipt.\n'
+            )
+            assert not reports_dir.exists()
+            return
+
+        assert result.exit_code == 0, result.output
+        (path,) = (reports_dir / 'f').iterdir()
+        closed = report.Report.model_validate_json(path.read_text())
+        assert closed.results.scorer == 'votes'
+        assert closed.results.votes == (2 if receipt == 'distinct' else 1)
+        assert closed.results.cutoffs.production == report.Cutoff(id=1, votes=1)
+        assert closed.results.cutoffs.private == report.Cutoff(id=1, votes=1)
+        assert all(row.mean_cost_usd == 0.5 for row in closed.results.standings)
+        (header,) = store.private_database.execute(
+            'SELECT id FROM vote_snapshots WHERE sealed = 1'
+        ).rows
+        saved = votes.read_snapshot(store.private_database, str(header['id']))
+        assert saved.production is not None
+        assert saved.production.inventory.outputs == ()
+        assert saved.production.output_generation is None
+
     def test_names_publication_preparation_when_no_store_is_active(
         self,
         store: Store,
@@ -2461,7 +2529,7 @@ class TestClose:
 
         assert result.exit_code == 1
         assert result.stderr == (
-            'Family `f` has no active voting publication. '
+            'Family `f` has no active voting publication or eligible voting history. '
             'Prepare and publish a production or private voting round first.\n'
         )
 

@@ -69,11 +69,13 @@ Tasks need a semantic version, explicit CPU, memory and agent timeout limits, an
 
 Once a task has run, every edit to it needs a bump of `[task] version`, since Harbor aborts a job whose task changed under a version an earlier trial recorded, and `bench check` and `bench run` name such a task first:
 
-| Change                                                            | Bump  | Earlier trials                                                                                                     |
-| ----------------------------------------------------------------- | ----- | ------------------------------------------------------------------------------------------------------------------ |
-| One no trial depends on, such as `solution/`                      | Patch | Reused                                                                                                             |
-| `tests/` alone                                                    | Minor | Regraded from their recorded `/app` with no model call, keeping the votes on pairs whose solutions both still pass |
-| `instruction.md`, `environment/`, or anything else the agent sees | Major | Rerun on every system, dropping the votes on the old solutions                                                     |
+| Change                                                            | Bump  | Earlier trials                                         |
+| ----------------------------------------------------------------- | ----- | ------------------------------------------------------ |
+| One no trial depends on, such as `solution/`                      | Patch | Reused                                                 |
+| `tests/` alone                                                    | Minor | Regraded from their recorded `/app` with no model call |
+| `instruction.md`, `environment/`, or anything else the agent sees | Major | Rerun on every system                                  |
+
+Arena votes keep counting against the outputs each voter saw. See [Publication and closing](../design/arena.md#publication-and-closing).
 
 Deleting a task's directory retires it, after which collection leaves its trials out.
 

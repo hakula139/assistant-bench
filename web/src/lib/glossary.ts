@@ -72,8 +72,7 @@ export const terms = {
   },
   leftOut: {
     term: 'Left out of the fit',
-    definition:
-      'Votes a moderator excluded, plus votes on an output since removed or now failing a gate, or on a pair the outputs now settle.',
+    definition: 'Votes omitted by a moderator or by the rules for this round.',
   },
   lengthBias: {
     term: 'Length bias',

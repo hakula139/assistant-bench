@@ -291,7 +291,7 @@
           "type": "integer"
         },
         "votes": {
-          "description": "The store's votes with IDs up to `id` that no exclusion removed.",
+          "description": "Votes old enough to count that no exclusion removed, before combining stores.",
           "minimum": 0,
           "title": "Votes",
           "type": "integer"
@@ -1118,7 +1118,7 @@
           "type": "number"
         },
         "dropped_votes": {
-          "description": "Excluded votes plus votes on outputs the publication no longer admits.",
+          "description": "Votes omitted by a moderator or by the rules for this round.",
           "title": "Dropped Votes",
           "type": "integer"
         },
