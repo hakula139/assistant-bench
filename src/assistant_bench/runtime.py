@@ -24,7 +24,7 @@ from assistant_bench.state import State
 
 
 REPOSITORY_VAR = 'BENCH_DATA_REPOSITORY'
-PUBLIC_REPOSITORY = 'https://github.com/hakula139/assistant-bench.git'
+PUBLIC_REPOSITORY = 'https://github.com/hakulab/assistant-bench.git'
 
 
 @dataclass(frozen=True)
