@@ -30,6 +30,7 @@ import RoundPage from '@/pages/[aspect]/[board]/rounds/[round].astro';
 import NotFoundPage from '@/pages/404.astro';
 import HomePage from '@/pages/index.astro';
 import MethodologyPage from '@/pages/methodology.astro';
+import WritingBaselinePage from '@/pages/writing/en/baselines/2026-11-22.astro';
 import { FIXTURE_NAMES, readReport, shownSlugs, visitIslandProps } from '@/test/fixture';
 
 const listed = vi.hoisted(() => ({ families: [] as Family[] }));
@@ -473,6 +474,24 @@ describe('family panel', () => {
     const html = await render(FamilyPanel, { family: loaded });
 
     expect(text(html)).toContain('Zeta 75% 19–99% Alpha 75% 19–99%');
+  });
+});
+
+describe('English writing AI baseline', () => {
+  test('links a dated baseline for one AI rater alongside the closed rounds', async () => {
+    const path = '/writing/en/baselines/2026-11-22/';
+
+    const [home, baseline] = await Promise.all([
+      render(HomePage, {}),
+      render(WritingBaselinePage, {}, path),
+    ]);
+
+    expect(boardLinks(home)).toContain(path);
+    expect(boardLinks(baseline)).toEqual(['/writing/en/']);
+    expect(text(baseline)).toContain('One AI rater evaluated blind pairs in staging');
+    expect(headerStats(baseline)).toEqual(['Votes 876', 'Effective votes 100', 'Public cases 42']);
+    expect(text(baseline)).toContain('Rank System Score 1 GPT-6.1 Sol · High 1,359 1,294–1,424');
+    expect(islandRounds(baseline)).toEqual([]);
   });
 });
 
@@ -1106,6 +1125,7 @@ describe('deployment base', () => {
       render(HomePage, {}),
       render(MethodologyPage, {}),
       render(NotFoundPage, {}),
+      render(WritingBaselinePage, {}),
       render(FamilyPage, board.props),
       render(RoundPage, round.props),
       render(SystemPage, system.props),
