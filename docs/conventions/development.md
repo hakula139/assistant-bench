@@ -10,7 +10,7 @@ The voting Worker's disposable `local` environment uses Cloudflare's always-pass
 
 ## Pre-Commit Hooks
 
-`flake.nix` enables devkit's [pre-commit hooks](https://github.com/hakula139/devkit/blob/v3/docs/hooks.md). [AGENTS.md](../../AGENTS.md#verification) lists the remaining checks. Authored applications, references and hidden tests follow the host's formatting and spelling. Deliberately wrong regression patches remain unformatted and untyped so the real verifier tests their failure.
+`flake.nix` enables devkit's [pre-commit hooks](https://github.com/hakulab/devkit/blob/v3/docs/hooks.md). [AGENTS.md](../../AGENTS.md#verification) lists the remaining checks. Authored applications, references and hidden tests follow the host's formatting and spelling. Deliberately wrong regression patches remain unformatted and untyped so the real verifier tests their failure.
 
 ## Where Settings Live
 
