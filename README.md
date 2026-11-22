@@ -1,7 +1,7 @@
 # assistant-bench
 
-[![CI](https://github.com/hakula139/assistant-bench/actions/workflows/ci.yml/badge.svg)](https://github.com/hakula139/assistant-bench/actions/workflows/ci.yml)
-[![Coverage](https://codecov.io/gh/hakula139/assistant-bench/graph/badge.svg)](https://codecov.io/gh/hakula139/assistant-bench)
+[![CI](https://github.com/hakulab/assistant-bench/actions/workflows/ci.yml/badge.svg)](https://github.com/hakulab/assistant-bench/actions/workflows/ci.yml)
+[![Coverage](https://codecov.io/gh/hakulab/assistant-bench/graph/badge.svg)](https://codecov.io/gh/hakulab/assistant-bench)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 Assistant Bench compares AI models and agents on common tasks through blind pairwise voting, automated checks, or both. A system includes the model, effort, harness, and prompt. [Harbor](https://github.com/harbor-framework/harbor) runs the trials.
