@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 
 import { defineCollection } from 'astro:content';
-import { file, glob } from 'astro/loaders';
+import { file, glob, type LoaderContext } from 'astro/loaders';
 import { z } from 'astro/zod';
 
 import { familyConfigSchema } from '@/lib/family';
@@ -27,26 +27,35 @@ const reports = defineCollection({
   schema: reportSchema,
 });
 
+export const currentReportsSchema = z.strictObject({
+  reports: z.record(z.string(), z.nullable(reportSchema)),
+});
+
+interface CurrentReportsContext {
+  config: Pick<LoaderContext['config'], 'root'>;
+  store: Pick<LoaderContext['store'], 'clear' | 'set'>;
+  parseData: LoaderContext['parseData'];
+}
+
+export async function loadCurrentReports(context: CurrentReportsContext) {
+  const { config, store } = context;
+  store.clear();
+  const path = new URL('.arena/current.json', config.root);
+  const source = await readFile(path, 'utf8').catch((error: unknown) => {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+      return '{}';
+    }
+    throw error;
+  });
+  const id = 'current';
+  const reports: unknown = JSON.parse(source);
+  const data = await context.parseData({ id, data: { reports } });
+  store.set({ id, data });
+}
+
 const currentReports = defineCollection({
-  loader: {
-    name: 'arena-release',
-    async load(context) {
-      const { config, store } = context;
-      store.clear();
-      const path = new URL('.arena/current.json', config.root);
-      const source = await readFile(path, 'utf8').catch((error: unknown) => {
-        if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
-          return '{}';
-        }
-        throw error;
-      });
-      const id = 'current';
-      const reports: unknown = JSON.parse(source);
-      const data = await context.parseData({ id, data: { reports } });
-      store.set({ id, data });
-    },
-  },
-  schema: z.strictObject({ reports: z.record(z.string(), z.nullable(reportSchema)) }),
+  loader: { name: 'arena-release', load: loadCurrentReports },
+  schema: currentReportsSchema,
 });
 
 const systems = defineCollection({
