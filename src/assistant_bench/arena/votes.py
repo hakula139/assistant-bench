@@ -516,6 +516,7 @@ def save_snapshot(database: Database, snapshot: Snapshot) -> str:
             identity,
         ],
     )
+
     for target, cut in cuts:
         inventory = cut.inventory
         database.execute(
@@ -536,32 +537,37 @@ def save_snapshot(database: Database, snapshot: Snapshot) -> str:
                 cut.output_generation,
             ],
         )
+
         insert_missing(
             database,
             'vote_snapshot_cases',
             ('snapshot_id', 'target', 'case_key', 'facts_json'),
-            [
+            (
                 (identity, target, case.key, case.model_dump_json())
                 for case in inventory.cases
-            ],
+            ),
         )
+
         insert_missing(
             database,
             'vote_snapshot_outputs',
             ('snapshot_id', 'target', 'output_key', 'facts_json'),
-            [
+            (
                 (identity, target, output.key, output.model_dump_json())
                 for output in inventory.outputs
-            ],
+            ),
         )
+
         insert_missing(
             database,
             'vote_snapshot_votes',
             ('snapshot_id', 'target', 'vote_id', 'vote_json'),
-            [(identity, target, vote.id, vote.model_dump_json()) for vote in cut.votes],
+            ((identity, target, vote.id, vote.model_dump_json()) for vote in cut.votes),
         )
+
     if _read_snapshot(database, identity, sealed=False) != snapshot:
         raise InputError(f'Snapshot `{identity}` conflicts with its stored facts.')
+
     database.execute(
         'UPDATE vote_snapshots SET sealed = 1 WHERE id = ? AND sealed = 0 '
         'AND expected_store_count = '

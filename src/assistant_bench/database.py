@@ -1,8 +1,9 @@
 """SQL statements through SQLite or Cloudflare's D1 REST API."""
 
 import sqlite3
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from itertools import batched
 from typing import Protocol
 
 import httpx
@@ -43,14 +44,13 @@ def insert_missing(
     database: Database,
     table: str,
     columns: Sequence[str],
-    rows: Sequence[Sequence[Param]],
+    rows: Iterable[Sequence[Param]],
 ) -> None:
     """Insert rows missing from the table in statements within D1's parameter limit."""
     per_statement = _MAX_PARAMS // len(columns)
     placeholders = f'({", ".join("?" * len(columns))})'
 
-    for start in range(0, len(rows), per_statement):
-        chunk = rows[start : start + per_statement]
+    for chunk in batched(rows, per_statement, strict=False):
         database.execute(
             # `table` and `columns` are constants from callers.
             f'INSERT INTO {table} ({", ".join(columns)}) VALUES '  # noqa: S608

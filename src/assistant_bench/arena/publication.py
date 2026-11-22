@@ -436,6 +436,7 @@ def stage(
             publication.target,
         ],
     )
+
     insert_missing(
         database,
         'cases',
@@ -448,7 +449,7 @@ def stage(
             'checklist',
             'source',
         ),
-        [
+        (
             (
                 publication.id,
                 case.key,
@@ -459,8 +460,9 @@ def stage(
                 case.source,
             )
             for case in publication.cases
-        ],
+        ),
     )
+
     insert_missing(
         database,
         'outputs',
@@ -476,7 +478,7 @@ def stage(
             'content_digest',
             'content',
         ),
-        [
+        (
             (
                 publication.id,
                 output.key,
@@ -490,8 +492,9 @@ def stage(
                 output.content,
             )
             for output in publication.outputs
-        ],
+        ),
     )
+
     database.execute(
         'INSERT INTO publication_pair_cases '  # noqa: S608
         '(publication_id, low_system, high_system, case_keys) '
