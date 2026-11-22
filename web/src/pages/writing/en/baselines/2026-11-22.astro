@@ -1,0 +1,90 @@
+---
+import { intro, note, PageHeader, Stat, statList } from '@/components/site/PageParts';
+import {
+  Table,
+  TableBody,
+  TableCaption,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import Base from '@/layouts/Base.astro';
+import { formatScore, formatScoreRange } from '@/lib/format';
+import { sitePath } from '@/lib/site';
+
+const title = 'English writing AI baseline';
+const description = 'One AI rater judged 876 blind comparisons on 42 public English writing cases.';
+const standings = [
+  { name: 'GPT-6.1 Sol · High', score: 1358.87, interval: { lower: 1293.88, upper: 1423.86 } },
+  { name: 'GPT-6 Astra · High', score: 1265.4, interval: { lower: 1206.88, upper: 1323.91 } },
+  {
+    name: 'DeepSeek V4.1 Flash 1017 · High',
+    score: 1099.77,
+    interval: { lower: 1044, upper: 1155.54 },
+  },
+  { name: 'Gemini 4 Argon · High', score: 1068.61, interval: { lower: 1008.41, upper: 1128.81 } },
+  { name: 'Gemini 3.8 Flash · High', score: 1000, interval: { lower: 941.11, upper: 1058.89 } },
+  { name: 'Claude Opus 5.5 · High', score: 974.9, interval: { lower: 870.59, upper: 1079.2 } },
+  { name: 'Kimi K3 · High', score: 894.97, interval: { lower: 834.21, upper: 955.73 } },
+];
+---
+
+<Base {title} {description} section="leaderboards">
+  <PageHeader {title}>
+    <a slot="context" href={sitePath('/writing/en/')} class="self-start text-sm">
+      English writing leaderboard
+    </a>
+    <p class:list={[intro, 'text-pretty']}>
+      One AI rater evaluated blind pairs in staging using the maintainer's writing conventions. This
+      baseline uses the ballots saved by <time datetime="2026-11-22">November 22, 2026</time>.
+    </p>
+    <dl class={statList}>
+      <Stat label="Votes">876</Stat>
+      <Stat label="Effective votes">100</Stat>
+      <Stat label="Public cases">42</Stat>
+    </dl>
+  </PageHeader>
+
+  <div class="flex max-w-3xl flex-col gap-4">
+    <Table>
+      <TableCaption className="sr-only">AI baseline scores and 95% intervals</TableCaption>
+      <TableHeader>
+        <TableRow>
+          <TableHead scope="col" numeric>
+            Rank
+          </TableHead>
+          <TableHead scope="col">System</TableHead>
+          <TableHead scope="col" numeric>
+            Score
+          </TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {standings.map(({ name, score, interval }, index) => (
+          <TableRow>
+            <TableCell numeric>{index + 1}</TableCell>
+            <th scope="row" class="p-2 text-left font-medium text-balance">
+              {name}
+            </th>
+            <TableCell numeric>
+              <span class="block">{formatScore(score)}</span>
+              <span class="block text-xs text-muted-foreground">{formatScoreRange(interval)}</span>
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+
+    <p class:list={[note, 'text-pretty']}>
+      Scores are relative to Gemini 3.8 Flash · High at 1,000 points. All seven scores are
+      preliminary. The 95% intervals describe uncertainty across cases for this rater. The{' '}
+      <a href={sitePath('/methodology/#votes-scores')}>scoring method</a> caps the rater's total
+      vote weight at 100.
+    </p>
+    <p class:list={[note, 'text-pretty']}>
+      A follow-up review proposed 55 ballot revisions. The published scores use the original
+      choices.
+    </p>
+  </div>
+</Base>
