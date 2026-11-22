@@ -1,4 +1,4 @@
-import { getCollection } from 'astro:content';
+import { getCollection, getEntry } from 'astro:content';
 
 import { familyTitle, type Aspect } from '@/lib/aspects';
 import type { FamilyConfig, Scorer } from '@/lib/family';
@@ -162,14 +162,14 @@ export async function getFamilies(): Promise<Family[]> {
     getCollection('families'),
     getCollection('reports'),
     getCollection('systems'),
-    getCollection('currentReports'),
+    getEntry('currentReports', 'current'),
   ]);
 
   return publicFamilies(
     configs.map((entry) => ({ name: entry.id, config: entry.data })),
     reports.map((entry) => entry.data),
     Object.fromEntries(systems.map(({ id, data }) => [id, data.display_name])),
-    Object.fromEntries(current.map(({ id, data }) => [id, data.report])),
+    current?.data.reports,
   );
 }
 

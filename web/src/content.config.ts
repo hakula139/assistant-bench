@@ -36,21 +36,16 @@ const currentReports = defineCollection({
       const path = new URL('.arena/current.json', config.root);
       const source = await readFile(path, 'utf8').catch((error: unknown) => {
         if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
-          return null;
+          return '{}';
         }
         throw error;
       });
-      if (source === null) {
-        return;
-      }
-
-      const reports = z.record(z.string(), z.unknown()).parse(JSON.parse(source));
-      for (const [id, report] of Object.entries(reports)) {
-        store.set({ id, data: await context.parseData({ id, data: { report } }) });
-      }
+      const id = 'current';
+      const data = await context.parseData({ id, data: { reports: JSON.parse(source) } });
+      store.set({ id, data });
     },
   },
-  schema: z.strictObject({ report: z.nullable(reportSchema) }),
+  schema: z.strictObject({ reports: z.record(z.string(), z.nullable(reportSchema)) }),
 });
 
 const systems = defineCollection({
