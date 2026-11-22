@@ -23,7 +23,7 @@ import { chromium, type Browser } from 'playwright';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 
 import { makeState, VOTE_FAMILY } from '@/test/arena';
-import { readReport } from '@/test/fixture';
+import { netReport, readReport } from '@/test/fixture';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const origin = 'https://site.example';
@@ -67,7 +67,7 @@ beforeAll(async () => {
   await writeFile(join(reports, `${report.round}.json`), JSON.stringify(report));
   const arena = join(site, '.arena');
   await mkdir(arena);
-  const current = structuredClone(report);
+  const current = netReport(report);
   current.closed_at = releasedAt;
   current.systems['acme-large'].display_name = 'Acme Current';
   current.results.standings = current.results.standings.map((standing) =>
@@ -136,6 +136,10 @@ test('uses released reports across the site and keeps the same-day round', async
     'Acme Large',
   );
   expect(system.querySelector('h1')?.textContent).toBe('Acme Current');
+  const score = [...system.querySelectorAll('main dt')].find(
+    (term) => term.textContent === 'Net points per 100',
+  );
+  expect(score?.nextElementSibling?.textContent).toBe('32');
   expect(newSystem.querySelector('h1')?.textContent).toBe('Acme Edge');
   expect(newSystem.querySelector(`main dl a[href="/${board}/"]`)?.textContent).toBe('2026-10-21');
   expect(retired.querySelector('h1')?.textContent).toBe('Acme Tiny');
