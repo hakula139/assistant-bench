@@ -8,11 +8,7 @@ interface Props {
 }
 
 const { family } = Astro.props;
-const { rows, domain, anchorScore } = panelForest(family);
-const caption =
-  anchorScore === undefined
-    ? `${family.title} systems, none measured yet`
-    : `${family.title} point scores`;
+const { rows, caption, domain, anchorScore } = panelForest(family);
 ---
 
 <Forest client:visible caption={caption} rows={rows} domain={domain} anchorScore={anchorScore} />

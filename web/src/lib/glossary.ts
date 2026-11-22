@@ -41,6 +41,10 @@ export const terms = {
     term: 'Unranked',
     definition: 'Listed below the table, unscored, until comparisons connect it to the anchor.',
   },
+  unrankedNet: {
+    term: 'Unranked',
+    definition: 'The available comparisons cannot support a score against the reference.',
+  },
   votes: {
     term: 'Votes',
     definition: "The rater's votes on the system, leaving out pairs settled without a vote.",
@@ -205,6 +209,13 @@ export const categoryTerms: Record<Category, Term> = {
 
 /** The anchor's definition in a round that cannot rank the reference, naming both systems. */
 export function anchorTerm(method: VotesMethod): Term {
+  if ('kind' in method) {
+    return {
+      term: 'Reference',
+      definition: 'Every score estimates the result against this system.',
+    };
+  }
+
   return {
     ...terms.anchor,
     definition: `${terms.anchor.definition} Its recorded score is ${formatScore(method.anchor_score)}.`,
@@ -213,16 +224,22 @@ export function anchorTerm(method: VotesMethod): Term {
 
 /** The round's weighted vote total, naming the cap its method recorded. */
 export function effectiveVotesTerm(method: VotesMethod): Term {
+  if ('kind' in method) {
+    return { term: 'Effective votes', definition: 'Each eligible recorded vote counts once.' };
+  }
+
   return {
     term: 'Effective votes',
     definition: `Votes after weighting, where a voter with more than ${formatCount(method.actor_cap)} votes shares a weight of ${formatCount(method.actor_cap)} across them. Scores, win rates and both-bad rates use these weights, while vote counts stay raw.`,
   };
 }
 
-export function preliminaryTerm(rules: VotesRules): Term {
+export function preliminaryTerm(rules?: VotesRules | null): Term {
   return {
     ...terms.preliminary,
-    definition: `A score interval wider than ±${formatScore(rules.preliminary_half_width)} points, or no interval.`,
+    definition: !rules
+      ? 'A point estimate without a case-level uncertainty interval.'
+      : `A score interval wider than ±${formatScore(rules.preliminary_half_width)} points, or no interval.`,
   };
 }
 
@@ -231,6 +248,10 @@ export function fallbackAnchor(
   referenceName: string,
   method: VotesMethod,
 ): Term {
+  if ('kind' in method) {
+    return anchorTerm(method);
+  }
+
   return {
     ...terms.anchor,
     definition: `The most-voted system, ${anchorName}, fixed at ${formatScore(method.anchor_score)} in place of the reference ${referenceName}, which that round could not rank.`,

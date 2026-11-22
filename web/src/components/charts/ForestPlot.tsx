@@ -26,7 +26,7 @@ interface ForestPlotProps {
   unranked?: string[];
   /** Shared across category plots so their points use the same scale. */
   domain: [number, number];
-  anchorScore: number;
+  anchorScore?: number;
   /** Names the chart, unless an enclosing figure's caption already does. */
   label?: string;
 }

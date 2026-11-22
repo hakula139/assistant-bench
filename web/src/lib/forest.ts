@@ -180,7 +180,7 @@ export function roundRows(
   href: (system: string) => string,
   { standings, unranked }: { standings: Standing[]; unranked: string[] },
   names: SystemNames,
-  rules: VotesRules,
+  rules?: VotesRules | null,
 ): ForestRow[] {
   const unplaced = (system: string, reason: Unplaced) => ({
     system,

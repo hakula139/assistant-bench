@@ -63,7 +63,8 @@ interface LeaderboardProps {
   /** The system the scores are relative to, marked by name. */
   anchorSystem: string;
   /** The anchor's fixed score, ruled on the axis. */
-  anchorScore: number;
+  anchorScore?: number;
+  domain?: [number, number];
   /** The mark's definition, which names the reference when the anchor stands in for it. */
   anchorTerm: Term;
   preliminaryTerm: Term;
@@ -95,7 +96,7 @@ function ScoreCell({
 }: {
   row: LeaderboardRow;
   domain: [number, number];
-  anchorScore: number;
+  anchorScore?: number;
 }) {
   const summary = `${row.name}: ${formatScoreWithRange(row.score, row.interval)}`;
   return (
@@ -151,7 +152,11 @@ function PassRateCell({ rate }: { rate: PassRate | null }) {
 }
 
 /** Returns the marks a `Leaderboard` of `rows` draws, for its legend. */
-export function leaderboardMarks(rows: LeaderboardRow[], anchorScore: number): LegendMark[] {
+export function leaderboardMarks(
+  rows: LeaderboardRow[],
+  anchorScore?: number,
+  domain = forestDomain(rows),
+): LegendMark[] {
   return legendMarks(
     rows.map((row) => ({
       system: row.system,
@@ -159,7 +164,7 @@ export function leaderboardMarks(rows: LeaderboardRow[], anchorScore: number): L
       estimate: row,
       preliminary: row.preliminary,
     })),
-    forestDomain(rows),
+    domain,
     anchorScore,
   );
 }
@@ -170,11 +175,12 @@ export function Leaderboard({
   ranked,
   anchorSystem,
   anchorScore,
+  domain: fixedDomain,
   anchorTerm,
   preliminaryTerm,
   gateFailures,
 }: LeaderboardProps) {
-  const domain = useMemo(() => forestDomain(rows), [rows]);
+  const domain = useMemo(() => fixedDomain ?? forestDomain(rows), [fixedDomain, rows]);
   const tested = rows.some((row) => (row.standing?.pass_rate ?? null) !== null);
 
   const columns = useMemo(() => {
@@ -250,7 +256,10 @@ export function Leaderboard({
             )}
           </span>
         ),
-        meta: { numeric: true, term: ranked ? terms.scoreInterval : undefined },
+        meta: {
+          numeric: true,
+          term: ranked && anchorScore !== undefined ? terms.scoreInterval : undefined,
+        },
       }),
       helper.accessor('votes', {
         header: terms.votes.term,

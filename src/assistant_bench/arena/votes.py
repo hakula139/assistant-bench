@@ -114,6 +114,9 @@ class Snapshot(_Model):
     closing_revision: str | None
     production: Cut | None
     private: Cut | None
+    method: Literal['expected_net'] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode='after')
     def validate_cuts(self) -> Snapshot:
@@ -524,6 +527,7 @@ class _SnapshotHeader(_Model):
     closed_at: AwareDatetime
     category_order_json: Json[tuple[Category, ...]]
     closing_revision: str | None
+    method: Literal['expected_net'] | None = None
     expected_store_count: int
     expected_case_count: int
     expected_output_count: int
@@ -577,9 +581,9 @@ def save_snapshot(database: Database, snapshot: Snapshot) -> str:
     database.execute(
         'INSERT INTO vote_snapshots '
         '(id, family, taken_at, closed_at, category_order_json, closing_revision, '
-        'expected_store_count, expected_case_count, expected_output_count, '
+        'method, expected_store_count, expected_case_count, expected_output_count, '
         'expected_vote_count, manifest_digest) '
-        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) '
         'ON CONFLICT (id) DO NOTHING',
         [
             identity,
@@ -588,6 +592,7 @@ def save_snapshot(database: Database, snapshot: Snapshot) -> str:
             snapshot.closed_at.isoformat(),
             json.dumps(snapshot.category_order),
             snapshot.closing_revision,
+            snapshot.method,
             *counts,
             identity,
         ],
@@ -730,6 +735,7 @@ def _read_snapshot(database: Database, identity: str, *, sealed: bool) -> Snapsh
             closed_at=header.closed_at,
             category_order=header.category_order_json,
             closing_revision=header.closing_revision,
+            method=header.method,
             production=cuts.get('production'),
             private=cuts.get('private'),
         )
@@ -958,7 +964,8 @@ def _settlements(outputs: Sequence[OutputFacts]) -> tuple[ranking.Comparison, ..
         for left, right in combinations(sorted(systems), 2):
             weight = 1 / (len(systems[left]) * len(systems[right]))
             for a, b in product(systems[left], systems[right]):
-                if a.verdict == b.verdict == 'fail':
+                both_bad = a.verdict == b.verdict == 'fail'
+                if both_bad:
                     score = 0.5
                 elif a.verdict == 'fail':
                     score = 0.0
@@ -970,7 +977,9 @@ def _settlements(outputs: Sequence[OutputFacts]) -> tuple[ranking.Comparison, ..
                     continue
 
                 rows.append(
-                    ranking.Comparison(left, right, score, case, weight, sided=False)
+                    ranking.Comparison(
+                        left, right, score, case, weight, sided=False, both_bad=both_bad
+                    )
                 )
 
     return tuple(rows)

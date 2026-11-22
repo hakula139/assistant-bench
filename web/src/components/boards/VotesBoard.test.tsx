@@ -8,10 +8,11 @@ import { VotesBoard } from '@/components/boards/VotesBoard';
 import { Forest } from '@/components/site/Forest';
 import { forestDomain, roundRows } from '@/lib/forest';
 import { boardLabels } from '@/lib/method';
+import { fixedAnchor } from '@/lib/ranking';
 import type { PassRate } from '@/lib/report';
 import type { VotesReport } from '@/lib/reports';
 import { reportNames } from '@/lib/systems';
-import { FIXTURE_NAMES, readReport, shownSlugs } from '@/test/fixture';
+import { FIXTURE_NAMES, netReport, readReport, shownSlugs } from '@/test/fixture';
 import { stubPlotFrame } from '@/test/plot';
 import { trackDrawing, type TrackDrawing } from '@/test/track';
 
@@ -111,12 +112,27 @@ describe('VotesBoard', () => {
   });
   afterEach(cleanup);
 
+  test('draws the net board without archived diagnostics or an Elo scale', async () => {
+    const round = netReport(await load());
+    const html = render(round);
+
+    expect(text(html)).toContain('Expected net points per 100 comparisons against Acme Large.');
+    expect(text(html)).toContain('Unranked : Acme Edge, Acme Nano');
+    expect(text(html)).toContain('Acme Pro Preliminary 42');
+    expect(text(html)).not.toContain('Effective votes');
+    expect(head(html)).not.toContain('Score interval');
+    expect(comparison(html)).toBeUndefined();
+  });
+
   test('draws the labels, preliminary marks, and copy of the round it shows', async () => {
     const earlier = await load('report-early');
     const current = await load();
     earlier.systems['acme-pro'].display_name = 'Historical Pro';
     current.systems['acme-pro'].display_name = 'Current Pro';
-    earlier.results.rules.preliminary_half_width = 75;
+    earlier.results.rules = { preliminary_half_width: 75 };
+    if (!('anchor_score' in earlier.results.method)) {
+      throw new Error('Expected an Elo round');
+    }
     earlier.results.method.anchor_score = 1234;
     for (const row of earlier.results.standings) {
       row.score += 234;
@@ -699,7 +715,7 @@ describe('VotesBoard', () => {
         <Forest
           caption="Example"
           domain={forestDomain(results.standings)}
-          anchorScore={results.method.anchor_score}
+          anchorScore={fixedAnchor(results.method)}
           rows={roundRows(() => '/', results, reportNames(round.systems), results.rules)}
         />,
       );

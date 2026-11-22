@@ -282,7 +282,7 @@
     },
     "Cutoff": {
       "additionalProperties": false,
-      "description": "What closing read from one store, which freshness compares with the store.",
+      "description": "The store watermark and eligible vote count recorded by an archived round.",
       "properties": {
         "id": {
           "description": "The largest vote ID older than the undo window, or 0 when the store held none.",
@@ -398,6 +398,27 @@
       "title": "Distribution",
       "type": "object"
     },
+    "ExpectedNetMethod": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "expected_net",
+          "title": "Kind",
+          "type": "string"
+        },
+        "l2_penalty": {
+          "exclusiveMinimum": 0,
+          "title": "L2 Penalty",
+          "type": "number"
+        }
+      },
+      "required": [
+        "kind",
+        "l2_penalty"
+      ],
+      "title": "ExpectedNetMethod",
+      "type": "object"
+    },
     "FamilyName": {
       "maxLength": 256,
       "pattern": "^[a-z0-9][a-z0-9-]*(?![\\s\\S])",
@@ -405,7 +426,7 @@
     },
     "HeadToHead": {
       "additionalProperties": false,
-      "description": "Recorded votes between two systems, with half credit for either tie.\n\nThe outcome counts are raw choices, while `win_rate` uses the actors' weights.",
+      "description": "Raw vote counts and vote-weighted win rate for two opponents.",
       "properties": {
         "system": {
           "title": "System",
@@ -1081,13 +1102,37 @@
           "type": "string"
         },
         "method": {
-          "$ref": "#/$defs/VotesMethod"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/VotesMethod"
+            },
+            {
+              "$ref": "#/$defs/ExpectedNetMethod"
+            }
+          ],
+          "title": "Method"
         },
         "rules": {
-          "$ref": "#/$defs/VotesRules"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/VotesRules"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "cutoffs": {
-          "$ref": "#/$defs/Cutoffs"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Cutoffs"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "reference": {
           "description": "Configured reference, whether or not comparisons connect it.",
@@ -1095,12 +1140,12 @@
           "type": "string"
         },
         "anchor": {
-          "description": "Ranked system fixed at the recorded anchor score.",
+          "description": "The configured reference, or the substitute anchor in an archived Elo round.",
           "title": "Anchor",
           "type": "string"
         },
         "cases": {
-          "description": "Cases with a weighted comparison in the ranked component, which cluster the\nintervals.",
+          "description": "Cases in the evaluation, limited to the ranked component for archived Elo.",
           "minimum": 0,
           "title": "Cases",
           "type": "integer"
@@ -1192,14 +1237,20 @@
           "title": "Split Half Tau"
         },
         "public_held_out": {
-          "$ref": "#/$defs/SplitDiagnostic"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SplitDiagnostic"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
         "scorer",
         "method",
-        "rules",
-        "cutoffs",
         "reference",
         "anchor",
         "cases",
@@ -1213,8 +1264,7 @@
         "head_to_head",
         "categories",
         "length",
-        "split_half_tau",
-        "public_held_out"
+        "split_half_tau"
       ],
       "title": "VotesResults",
       "type": "object"

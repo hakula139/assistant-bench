@@ -1,8 +1,9 @@
 import { z } from 'astro/zod';
 import { describe, expect, test } from 'vitest';
 
+import { displayVoteScores, fixedAnchor } from '@/lib/ranking';
 import { reportSchema } from '@/lib/report';
-import { readFixture, readReport } from '@/test/fixture';
+import { netReport, readFixture, readReport } from '@/test/fixture';
 import { schemaShape } from '@/test/json-schema';
 
 function replaceField(payload: object, path: (string | number)[], value: unknown): void {
@@ -231,7 +232,7 @@ describe('reportSchema', () => {
       actor_cap: 50,
       interval_level: 0.9,
     });
-    Object.assign(payload.results.rules, { preliminary_half_width: 75 });
+    payload.results.rules = { preliminary_half_width: 75 };
 
     const parsed = reportSchema.parse(payload);
 
@@ -246,10 +247,40 @@ describe('reportSchema', () => {
     expect(shape).toEqual(schemaShape(committed));
   });
 
+  test('reads net scores without historical cutoffs and displays points per 100', async () => {
+    const payload = netReport(await readReport('report', 'votes'));
+    const { results } = payload;
+
+    expect(reportSchema.parse(payload)).toEqual(payload);
+    expect(displayVoteScores(results).standings[0]?.score).toBe(42);
+    expect(fixedAnchor(results.method)).toBeUndefined();
+
+    replaceField(payload, ['results', 'cutoffs'], {
+      production: { id: 1, votes: 1 },
+      private: null,
+    });
+    expect(reportSchema.safeParse(payload).success).toBe(false);
+  });
+
+  test.each([
+    ['a substitute anchor', ['anchor'], 'acme-mini'],
+    ['a score outside the net scale', ['standings', 0, 'score'], 2],
+    ['an Elo interval', ['standings', 0, 'interval'], { lower: -0.3, upper: 0.1 }],
+    ['an Elo decision', ['decision'], { leader: 'acme-pro', tied: [] }],
+  ] satisfies [string, (string | number)[], unknown][])(
+    'rejects %s on a net report',
+    async (_name, path, value) => {
+      const payload = netReport(await readReport('report', 'votes'));
+      replaceField(payload, ['results', ...path], value);
+
+      expect(reportSchema.safeParse(payload).success).toBe(false);
+    },
+  );
+
   test('preserves capped voter weights on the wire', async () => {
     const { results } = await readReport('report', 'votes');
 
-    expect(results.method.actor_cap).toBe(100);
+    expect(results.method).toMatchObject({ actor_cap: 100 });
     expect(results.votes).toBe(315);
     expect(results.dropped_votes).toBe(42);
     expect(results.effective_votes).toBeCloseTo(286);

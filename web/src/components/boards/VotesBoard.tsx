@@ -50,7 +50,7 @@ import {
 } from '@/lib/glossary';
 import { roundMethod, type BoardLabels } from '@/lib/method';
 import { systemPagePath } from '@/lib/paths';
-import { isPreliminary } from '@/lib/ranking';
+import { displayVoteScores, fixedAnchor, isPreliminary, NET_DOMAIN } from '@/lib/ranking';
 import type {
   CategoryBoard,
   CategoryStanding,
@@ -137,7 +137,7 @@ function RoundSummary({ round, lengthBias }: { round: VotesReport; lengthBias: T
           label={terms.votes.term}
           detail={
             <>
-              from {formatCountOf(results.voters, 'voter')} on{' '}
+              from {formatCountOf(results.voters, 'voter')} {'kind' in results.method ? '·' : 'on'}{' '}
               <span className="whitespace-nowrap">{formatCountOf(results.cases, 'case')}</span>
               {results.dropped_votes > 0 && (
                 <>
@@ -149,62 +149,74 @@ function RoundSummary({ round, lengthBias }: { round: VotesReport; lengthBias: T
         >
           {formatCount(results.votes)}
         </Stat>
-        <Stat label={<Hint term={effectiveVotesTerm(results.method)} />}>
-          {formatScore(results.effective_votes)}
-        </Stat>
-        <Stat label={<Hint term={terms.splitHalf} />}>{formatTau(results.split_half_tau)}</Stat>
+        {!('kind' in results.method) && (
+          <>
+            <Stat label={<Hint term={effectiveVotesTerm(results.method)} />}>
+              {formatScore(results.effective_votes)}
+            </Stat>
+            <Stat label={<Hint term={terms.splitHalf} />}>{formatTau(results.split_half_tau)}</Stat>
+          </>
+        )}
         {length !== null && (
           <Stat label={<Hint term={lengthBias} />}>{formatLengthBias(length)}</Stat>
         )}
       </dl>
-      <SnapshotStatus family={round.family} closedAt={round.closed_at} cutoffs={results.cutoffs} />
-      <details className={note}>
-        <summary>Public and held-out comparison</summary>
-        <p className="text-pretty">
-          Scores compare public and held-out cases after centering each split on the common system
-          field&apos;s mean. Private cases are excluded. This diagnostic cannot establish training
-          contamination.
-        </p>
-        <p className="text-pretty">
-          {results.public_held_out.unavailable === 'no_common_field'
-            ? 'Available cases: '
-            : 'Cases in the common field: '}
-          {formatCountOf(results.public_held_out.public_cases, 'public case')},{' '}
-          {formatCountOf(results.public_held_out.held_out_cases, 'held-out case')}.
-          {results.public_held_out.unavailable === 'insufficient_cases'
-            ? ' At least 30 independent cases per split are required.'
-            : results.public_held_out.unavailable !== null
-              ? ' Comparable estimates are unavailable because the common system field lacks an identifiable connected fit with non-separated outcomes.'
-              : ' Intervals use independent case clusters at the recorded interval level.'}
-        </p>
-        {results.public_held_out.scores.length > 0 && (
-          <Table>
-            <TableCaption>Public minus held-out score points.</TableCaption>
-            <TableHeader>
-              <TableRow>
-                <TableHead scope="col">System</TableHead>
-                <TableHead scope="col" numeric>
-                  Difference
-                </TableHead>
-                <TableHead scope="col" numeric>
-                  Interval
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {results.public_held_out.scores.map((row) => (
-                <TableRow key={row.system}>
-                  <TableCell>{systemName(reportNames(round.systems), row.system)}</TableCell>
-                  <TableCell numeric>{formatScore(row.difference)}</TableCell>
-                  <TableCell numeric>
-                    {formatScore(row.interval.lower)} to {formatScore(row.interval.upper)}
-                  </TableCell>
+      {results.cutoffs && (
+        <SnapshotStatus
+          family={round.family}
+          closedAt={round.closed_at}
+          cutoffs={results.cutoffs}
+        />
+      )}
+      {results.public_held_out && (
+        <details className={note}>
+          <summary>Public and held-out comparison</summary>
+          <p className="text-pretty">
+            Scores compare public and held-out cases after centering each split on the common system
+            field&apos;s mean. Private cases are excluded. This diagnostic cannot establish training
+            contamination.
+          </p>
+          <p className="text-pretty">
+            {results.public_held_out.unavailable === 'no_common_field'
+              ? 'Available cases: '
+              : 'Cases in the common field: '}
+            {formatCountOf(results.public_held_out.public_cases, 'public case')},{' '}
+            {formatCountOf(results.public_held_out.held_out_cases, 'held-out case')}.
+            {results.public_held_out.unavailable === 'insufficient_cases'
+              ? ' At least 30 independent cases per split are required.'
+              : results.public_held_out.unavailable !== null
+                ? ' Comparable estimates are unavailable because the common system field lacks an identifiable connected fit with non-separated outcomes.'
+                : ' Intervals use independent case clusters at the recorded interval level.'}
+          </p>
+          {results.public_held_out.scores.length > 0 && (
+            <Table>
+              <TableCaption>Public minus held-out score points.</TableCaption>
+              <TableHeader>
+                <TableRow>
+                  <TableHead scope="col">System</TableHead>
+                  <TableHead scope="col" numeric>
+                    Difference
+                  </TableHead>
+                  <TableHead scope="col" numeric>
+                    Interval
+                  </TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
-      </details>
+              </TableHeader>
+              <TableBody>
+                {results.public_held_out.scores.map((row) => (
+                  <TableRow key={row.system}>
+                    <TableCell>{systemName(reportNames(round.systems), row.system)}</TableCell>
+                    <TableCell numeric>{formatScore(row.difference)}</TableCell>
+                    <TableCell numeric>
+                      {formatScore(row.interval.lower)} to {formatScore(row.interval.upper)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </details>
+      )}
       <details className={note}>
         <summary>Round settings</summary>
         <p>{roundMethod(results.method, results.rules)}</p>
@@ -242,7 +254,11 @@ const costGapText: Record<CostGap, string> = {
 
 /** A family's leaderboard, category forest plots, and cost and latency scatters for one round. */
 export function VotesBoard({ base, round, labels }: VotesBoardProps) {
-  const { systems, results } = round;
+  const { systems } = round;
+  const results = useMemo(() => displayVoteScores(round.results), [round.results]);
+  const anchorScore = fixedAnchor(results.method);
+  const net = 'kind' in results.method;
+  const domain = net ? NET_DOMAIN : undefined;
   const names = useMemo(() => reportNames(systems), [systems]);
   const boards = results.categories;
   const [category, filter] = useCategory(boards.map((board) => board.category));
@@ -298,22 +314,29 @@ export function VotesBoard({ base, round, labels }: VotesBoardProps) {
       <RoundSummary round={round} lengthBias={labels.lengthBias} />
 
       <div className="flex flex-col gap-4">
+        {net && (
+          <p className={note}>
+            Expected net points per 100 comparisons against {systemName(names, results.reference)}.
+          </p>
+        )}
         <Leaderboard
           rows={rows}
           ranked={category === null}
           anchorSystem={results.anchor}
-          anchorScore={results.method.anchor_score}
+          anchorScore={anchorScore}
+          domain={domain}
           anchorTerm={anchorTerm}
           preliminaryTerm={preliminaryTerm(results.rules)}
           gateFailures={labels.gateFailures}
         />
         {unranked.length > 0 && (
           <p className={note}>
-            <Hint term={terms.unranked} />
-            {` with too few comparisons to place them: ${unranked
+            <Hint term={net ? terms.unrankedNet : terms.unranked} />
+            {net ? ': ' : ' with too few comparisons to place them: '}
+            {unranked
               .map((system) => systemName(names, system))
               .toSorted((a, b) => a.localeCompare(b))
-              .join(', ')}`}
+              .join(', ')}
           </p>
         )}
         {category === null && results.decision && results.standings.length > 1 && (
@@ -321,23 +344,24 @@ export function VotesBoard({ base, round, labels }: VotesBoardProps) {
         )}
         <ForestLegend
           className="max-lg:hidden"
-          marks={leaderboardMarks(rows, results.method.anchor_score)}
-          anchorScore={results.method.anchor_score}
+          marks={leaderboardMarks(rows, anchorScore, domain)}
+          anchorScore={anchorScore}
         />
       </div>
 
       {boards.length > 0 && (
         <Section title="Categories">
-          <p className={note}>{categoryNote}</p>
+          {!net && <p className={note}>{categoryNote}</p>}
           <ForestLegend
-            marks={categoryMarks(boards, results.method.anchor_score)}
-            anchorScore={results.method.anchor_score}
+            marks={categoryMarks(boards, anchorScore, domain)}
+            anchorScore={anchorScore}
           />
           <CategoryForests
             categories={boards}
             systems={order}
             names={names}
-            anchorScore={results.method.anchor_score}
+            anchorScore={anchorScore}
+            domain={domain}
           />
           <TableTwin>
             <Table>

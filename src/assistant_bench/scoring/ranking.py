@@ -39,6 +39,7 @@ class Comparison(NamedTuple):
     case: str
     weight: float = 1.0
     sided: bool = True
+    both_bad: bool = False
 
 
 @dataclass(frozen=True)
@@ -252,7 +253,12 @@ def split_difference(
     )
 
 
-def fit(matchups: Matchups, covariate: Floats | None = None) -> Fit:
+def fit(
+    matchups: Matchups,
+    covariate: Floats | None = None,
+    *,
+    identify_position: bool = False,
+) -> Fit:
     """Fit Bradley-Terry with a left-side intercept by penalized logistic loss.
 
     `covariate` adds a per-vote feature, which the fit drops unless it is
@@ -266,13 +272,17 @@ def fit(matchups: Matchups, covariate: Floats | None = None) -> Fit:
     # With a thread per core, scipy's OpenBLAS burns several cores during each tiny
     # L-BFGS-B fit, which on a loaded host slows the fit itself.
     with threadpool_limits(limits=1, user_api='blas'):
+        if identify_position:
+            observed = x[matchups.weight > 0, : len(matchups.systems) + 1]
+            if np.linalg.matrix_rank(observed) < len(matchups.systems):
+                x[:, len(matchups.systems)] = 0
         if covariate is not None:
             observed = x[matchups.weight > 0]
             if np.linalg.matrix_rank(observed) <= np.linalg.matrix_rank(
                 observed[:, :-1]
             ):
                 x = x[:, :-1]
-        theta = _minimize(x, matchups.score, matchups.weight, len(matchups.systems))
+        theta = fit_logistic(x, matchups.score, matchups.weight, len(matchups.systems))
 
     return _fit(theta, len(matchups.systems))
 
@@ -449,7 +459,8 @@ def _design(
     return x
 
 
-def _minimize(x: Floats, score: Floats, weights: Floats, k: int) -> Floats:
+def fit_logistic(x: Floats, score: Floats, weights: Floats, k: int) -> Floats:
+    """Fit a logistic predictor with L2 shrinkage on its first `k` columns."""
     penalty = np.zeros(x.shape[1])
     penalty[:k] = L2_PENALTY
 

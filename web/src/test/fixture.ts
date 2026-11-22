@@ -1,6 +1,6 @@
 import type { Scorer } from '@/lib/family';
 import { reportSchema } from '@/lib/report';
-import type { ScoredReport } from '@/lib/reports';
+import type { ScoredReport, VotesReport } from '@/lib/reports';
 import type { SystemNames } from '@/lib/systems';
 
 /** Display names for every system the fixtures name, each unlike its table name. */
@@ -100,4 +100,31 @@ export async function readReport<S extends Scorer>(
     throw new Error(`${name} is not a ${scorer} report`);
   }
   return report as ScoredReport<S>;
+}
+
+/** Reuses the synthetic report's labels and counts on the net-points scale. */
+export function netReport(round: VotesReport): VotesReport {
+  const fixture = structuredClone(round);
+  const { results } = fixture;
+  results.anchor = results.reference;
+  results.method = { kind: 'expected_net', l2_penalty: 0.01 };
+  results.decision = null;
+  results.length = null;
+  results.split_half_tau = null;
+  results.effective_votes = results.votes;
+  delete results.rules;
+  delete results.cutoffs;
+  delete results.public_held_out;
+
+  for (const [index, row] of results.standings.entries()) {
+    row.score = 0.42 - index * 0.1;
+    row.interval = null;
+  }
+  for (const board of results.categories) {
+    board.effective_votes = board.votes;
+    for (const [index, row] of board.standings.entries()) {
+      row.score = 0.3 - index * 0.1;
+    }
+  }
+  return fixture;
 }

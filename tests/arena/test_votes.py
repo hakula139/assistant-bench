@@ -1086,6 +1086,7 @@ class TestSnapshots:
         results = report.votes_results(analysis)
 
         assert results.votes == 4
+        assert results.public_held_out is not None
         assert results.public_held_out.public_cases == 1
         assert results.public_held_out.held_out_cases == 1
         assert {
@@ -1447,7 +1448,7 @@ class TestVotingInput:
         assert sorted(analysis.settlements) == sorted(
             [
                 *[Comparison('acme-large', 'acme-small', 1.0, 'won', 0.25, False)] * 4,
-                Comparison('acme-large', 'acme-small', 0.5, 'failed', 1.0, False),
+                Comparison('acme-large', 'acme-small', 0.5, 'failed', 1.0, False, True),
                 Comparison('acme-large', 'acme-small', 0.5, 'same', 1.0, False),
             ]
         )

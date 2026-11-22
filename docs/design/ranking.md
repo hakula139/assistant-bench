@@ -4,50 +4,21 @@ Votes families rank by point scores from pairwise votes, and tests and checkers 
 
 The checkers scorer gives a case a binary pass only when every applicable rule passes. It uses the case as its sampling unit, with the same exact pass-rate interval and paired leader comparison as task tests. Per-rule rates retain their applicable case and response denominators and provide no partial credit. Each bare / prompted comparison reports the mean paired case-score difference and a descriptive 95% SciPy paired percentile bootstrap interval. A single case or constant paired differences yield no interval because the observed sample cannot estimate variation.
 
-Every vote that [counts](arena.md#publication-and-closing) against its original publication enters the cumulative evaluation. Reports freeze the method, rules and descriptive diagnostics. Excluded and other uncounted votes count as `dropped_votes`. [Systems](systems.md#fingerprints) defines the configuration continuity required for pooling.
+Every eligible [vote](arena.md#publication-and-closing) counts once against its original publication. A settled output pair has weight `1 / (samples_a * samples_b)` on its case. Reports freeze the method and reference. Exclusions and other uncounted votes contribute to `dropped_votes`. [Systems](systems.md#fingerprints) defines the configuration continuity required for pooling.
 
-## The Fit
+## Expected Net Points
 
-Each row compares system A with B. Its outcome for A is 1 for `a`, 0 for `b`, and 0.5 for `tie` and `both_bad`. An actor with `n` eligible ordinary choices receives weight `min(1, 100 / n)` on each choice. These weights are assigned across the complete family evaluation before selecting components, categories or diagnostics. Each report records the cap as `method.actor_cap`.
+Wins earn +1, losses earn −1, ordinary ties earn 0, and a both-bad outcome costs each system one point. A failing output loses to a passing one. Identical passing outputs tie, and two failing outputs both lose.
 
-A settled output pair has weight `1 / (samples_a * samples_b)` on its case. Settled comparisons can rank a listed system without any recorded votes for it.
+The relative Bradley–Terry fit counts ordinary ties as half a win and excludes both-bad rows. An identifiable left-pane intercept controls for display order and drops out of predictions. A second logistic fit estimates joint rejection with an additive effect for each system, using all outcomes connected to the reference. Both fits shrink system coefficients with an L2 penalty of 0.01. The public score against the family's frozen reference is P(win) minus P(loss) minus P(both bad). The site shows it per 100 comparisons, and categories refit against the same reference.
 
-The weighted Bradley-Terry logistic objective uses +1 for A and −1 for B. Recorded votes also supply an unpenalized left-side intercept. Settled rows have no sided intercept. An L2 penalty of 0.01 on system strengths keeps unanimous point estimates finite. Strengths are centered at zero, and optimizer failure raises an error.
+A system needs a preference path to the reference and an identifiable joint rejection estimate for that matchup. Observed pairs must span the target contrast. With zero observed joint rejections, identified matchups use a rejection probability of zero. All published points are preliminary. The combined estimate has no case-level interval or leader decision.
 
-## Point Scores
+## Archived Elo
 
-Scores use 400 / ln 10 points per logit. The fit selects the component connected to the system with the greatest effective vote weight, with deterministic ordering for equal weights. The family's reference anchors the board when it belongs to that component. Otherwise the root anchors it. The anchor is fixed at 1,000, which shifts every point equally and preserves gaps and order.
+Archived rounds use a Bradley–Terry score on an Elo scale. They treat ordinary ties and both-bad outcomes as half a win, cap the total vote weight per voter, and fix the anchor at the score recorded in the report. The anchor may differ from the configured reference when the reference lacked qualifying comparisons.
 
-Only comparisons connect strengths. Every entrant in the selected component keeps its point, including a sparse unanimous entrant. Other eligible systems are `unranked`. Categories refit their own comparisons in the overall anchor's component and retain its anchor score. A category without that anchor has no ranked rows.
-
-`rank` is descriptive competition order by point score. The site marks a standing preliminary while its interval's half-width exceeds `rules.preliminary_half_width`, currently 50 points, or while it has no interval. Category refits never have one, so their scores are always preliminary.
-
-## Uncertainty
-
-The target is a system's strength on new cases drawn like the family's, judged by the same voters with their capped weights. The interval makes no claim about a new population of voters, which the report's voter count lets a reader judge.
-
-Votes on one case share that case's system-specific effects, and the actor and settlement weights are not frequencies, so neither the Hessian nor a row-level sandwich gives the right variance. The case-clustered sandwich is `A⁻¹BA⁻¹ · G / (G − 1)` (the CR1 correction of Cameron and Miller, 2015, [A Practitioner's Guide to Cluster-Robust Inference](https://doi.org/10.3368/jhr.50.2.317)), with `A` the penalized Hessian at the optimum, `B` the outer product of each case's summed scores and `G` the cases with a weighted row in the component. Settled rows enter under their own case. Every design row sums to zero over the strengths and the penalty treats them alike, so the covariance lies on the centered strengths: each interval measures a score against the field's average, and only the gap test below compares two systems. Each standing's `interval` spans t(G − 1) quantiles at `method.interval_level` around its point, on the board's scale, so the anchor has an interval too.
-
-A component with fewer than two cases, or whose comparisons are separated, has no intervals and no decision, so every standing is preliminary. The comparisons are separated when some strengths and left-side advantage fit every win and loss at least as well as a tie, strictly for some, with every half score tied, as when every vote favors one pane or one system wins every comparison. A linear program over the weighted rows tests for such a direction. The penalty keeps the points finite there, but the sandwich collapses toward zero.
-
-Simulations across vote counts, case counts, case effects and voter concentration kept the clustered interval's coverage between 93.8% and 95.7%, while the row-level sandwich fell to 90% and a case bootstrap to 91% at 40 cases. A normal quantile in place of t(G − 1) lost about 0.7 points.
-
-The decision names the system with the top point, the leader, and lists the systems a two-sided t(G − 1) Wald test of the score gap, with variance `C_ii + C_jj − 2C_ij`, cannot separate from it at the interval level. It reads as the tests board's [leader decision](#leader-decision) does, without a multiplicity correction.
-
-With case effects, widths stop shrinking like 1 / √votes once votes per case grow, since a fixed set of cases bounds what more votes can say, so adding cases narrows an interval faster than adding votes on the same cases. At 60 cases, seven systems reach ±50 points at about 500 votes, or 400 decisive ones, and ±75 points at about 200 votes, or 160 decisive ones.
-
-## Counts and Diagnostics
-
-`votes` and `decisive_votes` are raw eligible ordinary choice counts. `effective_votes` sums their actor weights and excludes settlements. Overall totals include eligible choices across all components. Each participating system counts a choice, so standing totals can sum to twice the overall count. Category counts use that category's choices with their original weights. Excluded and ineligible votes stay out of the fit and count in `dropped_votes`.
-
-| Field            | Meaning                                                                                                                                                                                                                   |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `length`         | Score change per standard deviation of (A − B) / (A + B) over recorded votes in the ranked component with two measured text lengths. HTML lengths are null. Null when constant or confounded with system or pane identity |
-| `split_half_tau` | Kendall's τ between the point orders fit to alternating votes, ordered by ID, over systems both halves connect to their root                                                                                              |
-
-Lengths count each Han character and each other whitespace-separated run as one unit. Length association and split-half agreement describe the observed votes alone.
-
-`public_held_out` compares public-minus-held-out scores on the systems present in both splits, with each split centered on their common field mean. Private cases and case keys appearing in both splits are excluded from this diagnostic. It requires at least 30 independent cases in each split after restricting comparisons to that common field, a connected identifiable fit in each, and non-separated outcomes. Its case counts describe the restricted comparisons. When no common field exists, the counts describe the available cases and no estimate is reported. Otherwise it records why estimates are unavailable. Its intervals add the two independent case-cluster covariance matrices and use the smaller case count minus one as the t degrees of freedom. These differences describe the observed cases and cannot establish training contamination.
+Archived intervals treat each case as one draw and describe new cases judged by the same voters. The archived metadata records the preliminary threshold and interval level. Reports may also show agreement across vote halves, length association, and differences between public and held-out cases.
 
 ## Test Pass Rates
 

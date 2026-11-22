@@ -528,7 +528,7 @@ class TestReport:
             actor_cap=50,
             interval_level=0.9,
         )
-        assert closed.results.rules.preliminary_half_width == 75.0
+        assert closed.results.rules == report.VotesRules(preliminary_half_width=75.0)
 
     @pytest.mark.parametrize(
         ('path', 'value'),
@@ -957,6 +957,17 @@ class TestWriteReport:
         assert path == reports_dir / 'arena' / '2026-10-21.json'
         assert Report.model_validate_json(path.read_text()) == closed
 
+    def test_preserves_same_day_report_from_another_method(self) -> None:
+        closed = Report.model_validate_json(REPORT_FIXTURE.read_text())
+        path = write_report(closed)
+        before = path.read_bytes()
+        scored = report.votes_results(make_analysis((make_evidence(0),)), net=True)
+
+        with pytest.raises(ValueError, match='different voting method'):
+            write_report(closed.model_copy(update={'results': scored}))
+
+        assert path.read_bytes() == before
+
 
 class TestReportedFingerprints:
     @staticmethod
@@ -1020,6 +1031,94 @@ class TestReportedFingerprints:
 
 
 class TestVotesResults:
+    def test_rescores_existing_evidence_with_unit_votes_and_joint_losses(self) -> None:
+        systems = (('a', 'b'), ('a', 'c'), ('b', 'c'))
+        choices: tuple[Choice, ...] = ('tie', 'both_bad')
+        evidence: list[HumanEvidence] = []
+        for pair in systems:
+            for choice in choices:
+                evidence.append(
+                    make_evidence(
+                        len(evidence), systems=pair, choice=choice, weight=0.25
+                    )
+                )
+        analysis = make_analysis(tuple(evidence))
+
+        legacy = report.votes_results(analysis)
+        scored = report.votes_results(analysis, net=True)
+
+        assert legacy.effective_votes == 1.5
+        assert legacy.standings[0].score == ranking.ANCHOR
+        assert scored.effective_votes == 6
+        assert scored.cutoffs is None
+        assert {row.system: row.score for row in scored.standings} == pytest.approx(
+            {'a': -0.5, 'b': -0.5, 'c': -0.5}
+        )
+        assert all(row.win_rate == 0.25 for row in scored.head_to_head)
+        assert all(row.interval is None for row in scored.standings)
+
+    def test_counts_rejections_from_an_unranked_opponent(self) -> None:
+        analysis = make_analysis(
+            (
+                make_evidence(0, systems=('a', 'b'), choice='tie'),
+                make_evidence(1, systems=('a', 'c'), choice='both_bad'),
+                make_evidence(2, systems=('b', 'c'), choice='both_bad'),
+            )
+        )
+
+        scored = report.votes_results(analysis, net=True)
+
+        assert [row.system for row in scored.standings] == ['a', 'b']
+        assert all(row.score < 0 for row in scored.standings)
+        assert scored.unranked == ['c']
+        assert scored.cases == 3
+
+    def test_joint_rejections_alone_do_not_establish_preferences(self) -> None:
+        analysis = make_analysis((make_evidence(0, choice='both_bad'),))
+
+        scored = report.votes_results(analysis, net=True)
+
+        assert scored.standings == []
+        assert scored.unranked == ['a', 'b']
+        assert scored.votes == scored.cases == 1
+
+    def test_zero_rejections_still_require_a_supported_matchup(self) -> None:
+        edges = (
+            make_evidence(0, systems=('a', 'b'), choice='tie'),
+            make_evidence(1, systems=('b', 'c'), choice='tie'),
+            make_evidence(2, systems=('a', 'c'), choice='tie'),
+        )
+        path = report.votes_results(make_analysis(edges[:2]), net=True)
+        triangle = report.votes_results(make_analysis(edges), net=True)
+
+        assert [(row.system, row.score) for row in path.standings] == [('b', 0)]
+        assert path.unranked == ['a', 'c']
+        assert {row.system: row.score for row in triangle.standings} == {
+            'a': 0,
+            'b': 0,
+            'c': 0,
+        }
+
+    def test_does_not_extrapolate_a_joint_rejection_from_a_bipartite_field(
+        self,
+    ) -> None:
+        analysis = make_analysis(
+            (
+                make_evidence(0, systems=('a', 'b'), choice='tie'),
+                make_evidence(1, systems=('a', 'b'), choice='both_bad'),
+                make_evidence(2, systems=('b', 'c'), choice='tie'),
+                make_evidence(3, systems=('b', 'c'), choice='both_bad'),
+                make_evidence(4, systems=('a', 'd'), choice='both_bad'),
+            )
+        )
+
+        scored = report.votes_results(analysis, net=True)
+
+        assert [row.system for row in scored.standings] == ['b']
+        assert -1 < scored.standings[0].score < 0
+        assert scored.unranked == ['a', 'c', 'd']
+        assert scored.votes == 5
+
     def test_split_diagnostic_excludes_private_cases_and_requires_independent_cases(
         self,
     ) -> None:
@@ -1039,6 +1138,7 @@ class TestVotesResults:
 
         diagnostic = report.votes_results(analysis).public_held_out
 
+        assert diagnostic is not None
         assert (diagnostic.public_cases, diagnostic.held_out_cases) == (30, 17)
         assert diagnostic.unavailable == 'insufficient_cases'
         assert diagnostic.scores == []

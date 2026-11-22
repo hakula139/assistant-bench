@@ -86,11 +86,10 @@ On public deployments, the sitekey comes from the Worker's `TURNSTILE_SITEKEY` v
 
 `web/worker/limits.ts` holds every number below except the per-minute request limit, which the `ratelimits` tables of `web/wrangler.toml` set. Each control prices one lever an abuser has, and none depends on what a vote chose.
 
-| Lever or need      | Control                                                                                                                                                                                          |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| A new browser      | One Turnstile solve on `POST /api/actors`, whose siteverify must succeed for the `TURNSTILE_HOSTNAME` var, then at most 5 new browsers per network tag in 24 hours                               |
-| A browser's weight | The actor cap at close                                                                                                                                                                           |
-| Request floods     | A Rate Limiting binding of 60 requests per 60 s, keyed by the browser, or by the network tag before admission                                                                                    |
-| Forged identities  | The `__Host-bench-actor` cookie, HttpOnly, Secure, SameSite=Strict and signed with `ACTOR_KEY`, valid for 400 days. POST routes require `Origin` to equal `APP_ORIGIN`, under a 16 KB body limit |
+| Lever or need     | Control                                                                                                                                                                                          |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| A new browser     | One Turnstile solve on `POST /api/actors`, whose siteverify must succeed for the `TURNSTILE_HOSTNAME` var, then at most 5 new browsers per network tag in 24 hours                               |
+| Request floods    | A Rate Limiting binding of 60 requests per 60 s, keyed by the browser, or by the network tag before admission                                                                                    |
+| Forged identities | The `__Host-bench-actor` cookie, HttpOnly, Secure, SameSite=Strict and signed with `ACTOR_KEY`, valid for 400 days. POST routes require `Origin` to equal `APP_ORIGIN`, under a 16 KB body limit |
 
 The admission insert counts new browsers on the same network tag and returns `daily_limit` once the quota is full. Admitted browsers can vote on every eligible comparison. A network tag is HMAC-SHA-256 under `IP_TAG_KEY` over the IPv4 address or the IPv6 /64. Raw addresses are never stored, in rows or in Workers Logs, and the daily cron clears tags older than 60 days from votes and browsers.
