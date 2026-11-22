@@ -12,7 +12,9 @@ src/assistant_bench/
 ├── arena/
 │   ├── commands.py      # Publication, status and moderation commands
 │   ├── d1.py            # Each hosted target's database and credential sources
+│   ├── leaderboard.py   # Delayed public standings and deployment confirmation
 │   ├── publication.py   # Immutable reviewed publications and their conditional activation
+│   ├── settlement.py    # Official vote cuts and pinned output measurements
 │   └── votes.py         # Vote cuts and moderation, the snapshots that save cuts, and the round they close
 ├── collection.py        # Collection of a family's trials into output records
 ├── canaries.py          # Route probes, their baseline comparison, and independent attempt records
