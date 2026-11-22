@@ -67,10 +67,14 @@ beforeAll(async () => {
   await writeFile(join(reports, `${report.round}.json`), JSON.stringify(report));
   const arena = join(site, '.arena');
   await mkdir(arena);
-  await writeFile(
-    join(arena, 'current.json'),
-    JSON.stringify({ [report.family]: { ...report, closed_at: releasedAt } }),
+  const current = structuredClone(report);
+  current.closed_at = releasedAt;
+  current.systems['acme-large'].display_name = 'Acme Current';
+  current.results.standings = current.results.standings.map((standing) =>
+    standing.system === 'acme-tiny' ? { ...standing, system: 'acme-edge' } : standing,
   );
+  current.results.unranked = current.results.unranked.filter((system) => system !== 'acme-edge');
+  await writeFile(join(arena, 'current.json'), JSON.stringify({ [report.family]: current }));
 
   const build = (outDir: string, extra: NodeJS.ProcessEnv = {}) =>
     promisify(execFile)(
@@ -108,16 +112,34 @@ test("bundles React's production build", async () => {
   ).toEqual([]);
 });
 
-test('builds the released board without replacing the same-day round', async () => {
-  const [current, closed] = await Promise.all(
-    ['writing/zh/index.html', 'writing/zh/rounds/2026-10-21/index.html'].map(async (path) => {
-      const html = await readFile(join(directory, path), 'utf8');
-      return new JSDOM(html).window.document.querySelector('main time')?.getAttribute('datetime');
-    }),
+test('uses released reports across the site and keeps the same-day round', async () => {
+  const board = 'writing/zh';
+  const dated = `${board}/rounds/2026-10-21`;
+  const [home, current, archived, system, newSystem, retired] = await Promise.all(
+    ['', board, dated, `${board}/acme-large`, `${board}/acme-edge`, `${board}/acme-tiny`].map(
+      async (path) => {
+        const html = await readFile(join(directory, path, 'index.html'), 'utf8');
+        return new JSDOM(html).window.document;
+      },
+    ),
   );
 
-  expect(current).toBe(releasedAt);
-  expect(closed).toBe('2026-10-21T18:00:00Z');
+  expect(home.querySelector('main')?.textContent).toContain('Acme Current');
+  expect(current.querySelector('main time')?.getAttribute('datetime')).toBe(releasedAt);
+  expect(current.querySelector('a[href="/writing/zh/acme-large/"]')?.textContent).toBe(
+    'Acme Current',
+  );
+  expect(archived.querySelector('main time')?.getAttribute('datetime')).toBe(
+    '2026-10-21T18:00:00Z',
+  );
+  expect(archived.querySelector('a[href="/writing/zh/acme-large/"]')?.textContent).toBe(
+    'Acme Large',
+  );
+  expect(system.querySelector('h1')?.textContent).toBe('Acme Current');
+  expect(newSystem.querySelector('h1')?.textContent).toBe('Acme Edge');
+  expect(newSystem.querySelector(`main dl a[href="/${board}/"]`)?.textContent).toBe('2026-10-21');
+  expect(retired.querySelector('h1')?.textContent).toBe('Acme Tiny');
+  expect(retired.querySelector(`main dl a[href="/${dated}/"]`)?.textContent).toBe('2026-10-21');
 });
 
 describe('built vote document', () => {
