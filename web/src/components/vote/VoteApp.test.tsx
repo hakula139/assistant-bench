@@ -443,11 +443,16 @@ describe('VoteApp', () => {
     expect(screen.getByText('Output A1')).toBeDefined();
   });
 
-  test('reports a challenge the Worker rejects without admitting the browser', async () => {
+  test.each([
+    ['challenge_failed', 400, 'Verification failed. Try again.'],
+    [
+      'daily_limit',
+      429,
+      'This network has added too many new browsers in the past 24 hours. Try again later.',
+    ],
+  ])('reports an admission refusal of %s', async (error, status, message) => {
     const api = stubApi({ admitted: false });
-    override(api, '/api/actors', () =>
-      Promise.resolve(Response.json({ error: 'challenge_failed' }, { status: 400 })),
-    );
+    override(api, '/api/actors', () => Promise.resolve(Response.json({ error }, { status })));
     history.replaceState(null, '', `/vote/?family=${FAMILY.family}`);
     render(<VoteApp />);
     await screen.findByTestId('turnstile');
@@ -456,7 +461,7 @@ describe('VoteApp', () => {
       widget().onSuccess?.('rejected-proof');
     });
 
-    expect(await screen.findByText('Verification failed. Try again.')).toBeDefined();
+    expect(await screen.findByText(message)).toBeDefined();
     expect(screen.getByRole('button', { name: 'Retry verification' })).toBeDefined();
     expect(screen.queryByText('Output A1')).toBeNull();
   });
@@ -1017,7 +1022,7 @@ describe('VoteApp', () => {
       true,
     ],
     ['unavailable', 500, 'Could not confirm whether your vote was saved.', true],
-    ['daily_limit', 429, 'This network has reached its daily limit. Try again tomorrow.', false],
+    ['rate_limited', 429, 'Too many requests. Wait a moment, then retry.', false],
     ['invalid_request', 400, 'The request could not be processed. Reload and try again.', false],
     ['forbidden', 403, 'The request could not be processed. Reload and try again.', false],
     ['too_large', 413, 'The request could not be processed. Reload and try again.', false],

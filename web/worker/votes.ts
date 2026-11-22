@@ -10,13 +10,13 @@ import type { Defect } from '@/lib/defects';
 import { ApiError, type Bindings } from './api';
 import { FRESHNESS_CACHE_SECONDS, UNDO_MS } from './limits';
 
-const STATE_FIELDS = 'prior.choice, prior.defects AS saved, publications.defects AS allowed';
-const STATE_JOINS = `
+const FIND = `
+  SELECT prior.choice, prior.defects AS saved, publications.defects AS allowed
+  FROM (SELECT 1)
   LEFT JOIN votes AS prior ON prior.pair_id = ?1 AND prior.actor_id = ?2
   LEFT JOIN pairs ON pairs.id = ?1 AND pairs.actor_id = ?2
   LEFT JOIN active ON active.family = pairs.family AND active.publication_id = pairs.publication_id
   LEFT JOIN publications ON publications.id = active.publication_id`;
-const FIND = `SELECT ${STATE_FIELDS} FROM (SELECT 1) ${STATE_JOINS}`;
 const RECEIPT = 'SELECT choice, defects AS saved FROM votes WHERE pair_id = ?1 AND actor_id = ?2';
 /** Reads the receipt for a missed write before another submission or undo can change it. */
 const CHECK_MISS = `${RECEIPT} AND changes() = 0`;
