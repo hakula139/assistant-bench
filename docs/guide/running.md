@@ -138,8 +138,6 @@ A canary refusal happens before new family trials start. For a failed probe, cor
 
 ## Voting
 
-Follow the site's Vote link and choose an available family. [Arena](../design/arena.md#vote-store) describes the production, staging and private vote stores.
-
 Publishing a family's outputs for production voting needs `public_voting = true` in its `family.toml`. Cloud commands need a Cloudflare API token with D1 Edit. Set exactly one credential source in `.env`: `BENCH_D1_TOKEN_FILE` names a file holding the token, or `BENCH_D1_ENV_FILE` names an existing dotenv file containing `CLOUDFLARE_API_TOKEN`. The dotenv source reads that token without expanding variables or changing the process environment.
 
 ```bash
@@ -152,8 +150,6 @@ uv run bench arena status production writing-zh
 
 `prepare` pins an existing sealed output generation and saves the publication in private D1, returning its ID. Run `bench collect` first when outputs are missing or stale. Review `inspect` before publishing that ID. Publishing again with the same ID changes nothing, and an interrupted publish completes when rerun. [Arena](../design/arena.md#publication-and-closing) describes what a publication holds and which cases production votes on.
 
-A family ends for a voter once no comparison is left, and each vote saves as you submit it. [Voting](voting.md) covers eligibility, keys, and issues, and [Arena](../design/arena.md) covers how pairs are chosen.
-
 ### Private Voting
 
 ```bash
@@ -162,9 +158,9 @@ uv run bench arena inspect <publication-id>
 uv run bench arena publish private <publication-id>
 ```
 
-Open the Access-protected private vote page to vote on held-out and transcript-derived cases, and on families without `public_voting`. Preparing and publishing make no model requests. Run `bench run` and `bench collect` first when those cases lack collected outputs.
+Use the private store for held-out and transcript-derived cases and for families without `public_voting`. Preparing and publishing make no model requests. Run `bench run` and `bench collect` first when those cases lack collected outputs.
 
-Use `bench arena status private` and `bench arena votes private <family>` to inspect this store. Votes persist in its D1 database independently of the client checkout.
+Inspect the publication with `bench arena status private` and its ballots with `bench arena votes private <family>`.
 
 ### Setting Up a Vote Store
 
@@ -215,4 +211,4 @@ uv run bench close writing-zh
 uv run bench close writing-zh --snapshot <snapshot-id>
 ```
 
-For a voted family, `bench close` seals the available production and private votes that can no longer be undone in private D1, combines them, and writes `reports/<family>/<round>.json`. Families without `public_voting` read only the private store. `--snapshot` replays a sealed snapshot by ID, preserving its close time, category order and each store's pinned outputs without reading the current family, catalog or private repository. For a `tests` or `checkers` family, closing uses the collected generation's pinned cases, code revision and public system labels. Commit the report through a PR. [Reports](../design/reports.md) describes its contents.
+For a voted family, close the current vote pool or pass a sealed snapshot ID to reproduce a round with its original closing time. A `tests` or `checkers` family closes from its collected generation. Commit the generated `reports/<family>/<round>.json` through a PR. [Reports](../design/reports.md#closing-a-round) describes the evidence each round freezes.

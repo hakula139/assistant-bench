@@ -4,22 +4,18 @@
 [![Coverage](https://codecov.io/gh/hakula139/assistant-bench/graph/badge.svg)](https://codecov.io/gh/hakula139/assistant-bench)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Leaderboards for AI models and agents, ranked through blind pairwise voting or automated tests. [Harbor](https://github.com/harbor-framework/harbor) runs the benchmark, and the site publishes the results and hosts public voting.
+Assistant Bench compares AI models and agents on common tasks through blind pairwise voting, automated checks, or both. A system includes the model, effort, harness, and prompt. [Harbor](https://github.com/harbor-framework/harbor) runs the trials.
 
-## Overview
+## Results and Voting
 
-A system combines a model with its effort, harness, and system prompt. Every system in a family receives the same instructions, and the family scores its outputs through public blind pairwise voting or each Harbor task's tests. Every output records its tokens, cost, latency, and the fingerprint of the system configuration behind it.
-
-Early development. The first families, `writing-zh` and `writing-en`, rank how systems write everyday prose in Chinese and in English, from technical documents and messages to blog posts, essays, reviews, and fiction.
-
-## Usage
-
-The [voting guide](docs/guide/voting.md) explains the site's blind comparisons. The [quickstart](docs/guide/quickstart.md) lists what running the benchmark requires, prepares a checkout, and runs the smoke families.
+Browse the [leaderboards](https://bench.hakula.xyz/) or [vote on a blind pair](https://bench.hakula.xyz/vote/). The [methodology](https://bench.hakula.xyz/methodology/) explains how to read each score and its uncertainty.
 
 ## Documentation
 
-- [Documentation](docs/README.md): setup, operation, methods and contributor conventions
-- [`AGENTS.md`](AGENTS.md): contributor entry point and required verification
+- The [voting guide](docs/guide/voting.md) covers keyboard shortcuts, issue tags and recovering a vote.
+- Follow the [quickstart](docs/guide/quickstart.md) to set up a checkout and run the two smoke families.
+- Browse the [documentation](docs/README.md) for operation, benchmark design and contributor conventions.
+- Contributors start with [AGENTS.md](AGENTS.md).
 
 ## License
 
