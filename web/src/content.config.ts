@@ -41,7 +41,8 @@ const currentReports = defineCollection({
         throw error;
       });
       const id = 'current';
-      const data = await context.parseData({ id, data: { reports: JSON.parse(source) } });
+      const reports: unknown = JSON.parse(source);
+      const data = await context.parseData({ id, data: { reports } });
       store.set({ id, data });
     },
   },
