@@ -1,10 +1,10 @@
 import { env } from 'cloudflare:workers';
-import { describe, expect, test, vi } from 'vitest';
+import { describe, expect, test } from 'vitest';
 
 import { UNDO_HEADER, UNDO_NONE } from '@/lib/arena';
 
 import { ipTag } from './actors';
-import { UNDO_MS, VOTES_PER_TAG, WINDOW_MS } from './limits';
+import { UNDO_MS } from './limits';
 import {
   actorOf,
   admitted,
@@ -18,9 +18,7 @@ import {
   vote,
   WRITING,
 } from './test/support';
-import { freshness, record, undo } from './votes';
-
-const TAG_IP = '198.51.100.9';
+import { freshness } from './votes';
 
 async function storedVotes() {
   const { results } = await env.DB.prepare(
@@ -41,26 +39,6 @@ async function coverage() {
   ).all();
   expect(results).toEqual(expected.results);
   return results;
-}
-
-/** Seeds recent votes from another actor on the same network. */
-async function fillCap({
-  count = VOTES_PER_TAG,
-  exclusion,
-}: { count?: number; exclusion?: string } = {}) {
-  const tag = await ipTag(env.IP_TAG_KEY, TAG_IP);
-  await env.DB.batch([
-    env.DB.prepare("INSERT INTO actors (id, created_at) VALUES ('filler', 0)"),
-    env.DB.prepare(
-      `WITH RECURSIVE slots(i) AS (VALUES (0) UNION ALL SELECT i + 1 FROM slots WHERE i + 1 < ?)
-       INSERT INTO votes (pair_id, actor_id, family, publication_id, case_key, a_output,
-         b_output, a_system, b_system, choice, defects, elapsed_ms, recorded_at, ip_tag, exclusion)
-       SELECT 'filler-' || i, 'filler', 'other', publication_id, case_key, output_key, output_key,
-         'x', 'y' || i,
-         'a', '{"a": [], "b": []}', 0, ?, ?, ?
-       FROM slots CROSS JOIN (SELECT publication_id, case_key, output_key FROM outputs LIMIT 1)`,
-    ).bind(count, Date.now(), tag, exclusion ?? null),
-  ]);
 }
 
 describe('POST /api/votes', () => {
@@ -189,96 +167,41 @@ describe('POST /api/votes', () => {
     expect(await storedVotes()).toEqual([]);
   });
 
-  test.each([
-    ['counted votes', {}],
-    ['excluded votes, which refund nothing', { exclusion: 'trash' }],
-  ])("stops the network's votes at its daily cap of %s and keeps the pair", async (_, options) => {
-    await fillCap(options);
-    const from = await admitted(TAG_IP);
-    const { pair } = await pairOf(from);
-
-    const response = await vote(from, pair?.id ?? '');
-
-    expect(response.status).toBe(429);
-    expect(await response.json()).toEqual({ error: 'daily_limit' });
-    expect(await pendingRow(pair?.id ?? '')).not.toBeNull();
-    await coverage();
-  });
-
-  test('shares the final slot across families and accepts an identical retry at the cap', async () => {
-    await fillCap({ count: 1_999 });
-    const writing = await admitted(TAG_IP);
-    const coding = await admitted(TAG_IP);
-    const writingPair = (await pairOf(writing, WRITING)).pair?.id ?? '';
-    const codingPair = (await pairOf(coding, CODING)).pair?.id ?? '';
-
-    const [writingVote, codingVote] = await Promise.all([
-      vote(writing, writingPair),
-      vote(coding, codingPair),
+  test('records votes from both browsers after a network reaches the former quota', async () => {
+    const ip = '198.51.100.9';
+    const previousVotes = 2_000;
+    const tag = await ipTag(env.IP_TAG_KEY, ip);
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO actors (id, created_at) VALUES ('filler', 0)"),
+      env.DB.prepare(
+        `WITH RECURSIVE slots(i) AS (VALUES (0) UNION ALL SELECT i + 1 FROM slots WHERE i + 1 < ?)
+         INSERT INTO votes (pair_id, actor_id, family, publication_id, case_key, a_output,
+           b_output, a_system, b_system, choice, defects, elapsed_ms, recorded_at, ip_tag)
+         SELECT 'filler-' || i, 'filler', 'other', publication_id, case_key, output_key, output_key,
+           'x', 'y' || i, 'a', '{"a": [], "b": []}', 0, ?, ?
+         FROM slots CROSS JOIN (SELECT publication_id, case_key, output_key FROM outputs LIMIT 1)`,
+      ).bind(previousVotes, Date.now(), tag),
     ]);
+    const [first, second] = [await admitted(ip), await admitted(ip)];
+    const firstPair = (await pairOf(first)).pair?.id ?? '';
+    const secondPair = (await pairOf(second)).pair?.id ?? '';
 
-    expect([writingVote.status, codingVote.status].sort()).toEqual([204, 429]);
-    const [winner, recorded, pending] = writingVote.ok
-      ? [writing, writingPair, codingPair]
-      : [coding, codingPair, writingPair];
-    const refused = writingVote.ok ? codingVote : writingVote;
-    expect(await refused.json()).toEqual({ error: 'daily_limit' });
-    expect(await pendingRow(pending)).not.toBeNull();
-    expect((await vote(winner, recorded)).status).toBe(204);
-    const conflicting = await vote(winner, recorded, 'b');
-    expect(conflicting.status).toBe(409);
-    expect(await conflicting.json()).toEqual({ error: 'stale_pair' });
-    expect(await env.DB.prepare('SELECT count(*) AS votes FROM votes').first('votes')).toBe(2_000);
-  });
+    const responses = await Promise.all([vote(first, firstPair), vote(second, secondPair)]);
 
-  test('keeps a capped request retryable when another browser immediately undoes a vote', async () => {
-    await fillCap({ count: VOTES_PER_TAG - 1 });
-    const earlier = await admitted(TAG_IP);
-    const earlierPair = (await pairOf(earlier)).pair?.id ?? '';
-    expect((await vote(earlier, earlierPair)).status).toBe(204);
-
-    const waiting = await admitted(TAG_IP);
-    const pair = (await pairOf(waiting)).pair?.id ?? '';
-    const earlierActor = await actorOf(earlier);
-    const waitingActor = await actorOf(waiting);
-    const tag = await ipTag(env.IP_TAG_KEY, TAG_IP);
-    const now = Date.now();
-    const batch = env.DB.batch.bind(env.DB);
-    vi.spyOn(env.DB, 'batch').mockImplementationOnce(async (statements) => {
-      const results = await batch(statements);
-      await undo(env.DB, earlierActor, { family: WRITING, pair: earlierPair }, now);
-      return results;
-    });
-
-    await expect(
-      record(env.DB, waitingActor, tag, { pair, choice: 'a', defects: { a: [], b: [] } }, now),
-    ).rejects.toMatchObject({ code: 'daily_limit' });
-    expect(await pendingRow(pair)).not.toBeNull();
-    expect((await vote(waiting, pair)).status).toBe(204);
-  });
-
-  test('uses a slot freed by the rolling window and then by undo', async () => {
-    await fillCap();
-    await env.DB.prepare('UPDATE votes SET recorded_at = ? WHERE pair_id = ?')
-      .bind(Date.now() - WINDOW_MS - 1, 'filler-0')
-      .run();
-    const from = await admitted(TAG_IP);
-    const first = await pairOf(from);
-    expect((await vote(from, first.pair?.id ?? '')).status).toBe(204);
-    const undo = await call(from, 'POST', '/votes/undo', { family: WRITING, pair: first.pair?.id });
-    expect(undo.status).toBe(204);
-
-    const restored = await pairOf(from);
-    const response = await vote(from, restored.pair?.id ?? '');
-
-    expect(response.status).toBe(204);
+    expect(responses.map(({ status }) => status)).toEqual([204, 204]);
+    expect(
+      await env.DB.prepare('SELECT count(*) AS votes FROM votes WHERE ip_tag = ?')
+        .bind(tag)
+        .first('votes'),
+    ).toBe(previousVotes + 2);
+    expect(await pendingRow(firstPair)).toBeNull();
+    expect(await pendingRow(secondPair)).toBeNull();
   });
 });
 
 describe('POST /api/votes/confirm', () => {
-  test('confirms the same choice and issue sets even at the vote cap', async () => {
-    await fillCap({ count: VOTES_PER_TAG - 1 });
-    const from = await admitted(TAG_IP);
+  test('confirms the same choice and issue sets', async () => {
+    const from = await admitted();
     const { pair } = await pairOf(from);
     const recorded = { pair: pair?.id, choice: 'b', defects: { a: ['tone', 'facts'], b: [] } };
     expect((await call(from, 'POST', '/votes', recorded)).status).toBe(204);
