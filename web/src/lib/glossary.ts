@@ -41,6 +41,10 @@ export const terms = {
     term: 'Unranked',
     definition: 'Listed below the table, unscored, until comparisons connect it to the anchor.',
   },
+  unrankedNet: {
+    term: 'Unranked',
+    definition: 'The available comparisons cannot support a score against the reference.',
+  },
   votes: {
     term: 'Votes',
     definition: "The rater's votes on the system, leaving out pairs settled without a vote.",

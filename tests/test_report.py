@@ -1057,6 +1057,31 @@ class TestVotesResults:
         assert all(row.win_rate == 0.25 for row in scored.head_to_head)
         assert all(row.interval is None for row in scored.standings)
 
+    def test_counts_rejections_from_an_unranked_opponent(self) -> None:
+        analysis = make_analysis(
+            (
+                make_evidence(0, systems=('a', 'b'), choice='tie'),
+                make_evidence(1, systems=('a', 'c'), choice='both_bad'),
+                make_evidence(2, systems=('b', 'c'), choice='both_bad'),
+            )
+        )
+
+        scored = report.votes_results(analysis, net=True)
+
+        assert [row.system for row in scored.standings] == ['a', 'b']
+        assert all(row.score < 0 for row in scored.standings)
+        assert scored.unranked == ['c']
+        assert scored.cases == 3
+
+    def test_joint_rejections_alone_do_not_establish_preferences(self) -> None:
+        analysis = make_analysis((make_evidence(0, choice='both_bad'),))
+
+        scored = report.votes_results(analysis, net=True)
+
+        assert scored.standings == []
+        assert scored.unranked == ['a', 'b']
+        assert scored.votes == 1
+
     def test_does_not_extrapolate_a_joint_rejection_from_a_bipartite_field(
         self,
     ) -> None:

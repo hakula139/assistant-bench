@@ -10,7 +10,7 @@ Every eligible [vote](arena.md#publication-and-closing) counts once against its 
 
 Wins earn +1, losses earn −1, ordinary ties earn 0, and a both-bad outcome costs each system one point. A failing output loses to a passing one. Identical passing outputs tie, and two failing outputs both lose.
 
-The relative Bradley–Terry fit counts ordinary ties as half a win and excludes both-bad rows. An identifiable left-pane intercept controls for display order and drops out of predictions. A second logistic fit estimates joint rejection with an additive effect for each system. Both fits shrink system coefficients with an L2 penalty of 0.01. The public score against the family's frozen reference is P(win) minus P(loss) minus P(both bad). The site shows it per 100 comparisons, and categories refit against the same reference.
+The relative Bradley–Terry fit counts ordinary ties as half a win and excludes both-bad rows. An identifiable left-pane intercept controls for display order and drops out of predictions. A second logistic fit estimates joint rejection with an additive effect for each system, using all outcomes connected to the reference. Both fits shrink system coefficients with an L2 penalty of 0.01. The public score against the family's frozen reference is P(win) minus P(loss) minus P(both bad). The site shows it per 100 comparisons, and categories refit against the same reference.
 
 A system needs a preference path to the reference and an identifiable joint rejection estimate for that matchup. Observed pairs must span the target contrast. When the available component has no joint rejections, the estimated rejection probability is zero. All published points are preliminary. The combined estimate has no case-level interval or leader decision.
 

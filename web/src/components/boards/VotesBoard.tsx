@@ -257,7 +257,8 @@ export function VotesBoard({ base, round, labels }: VotesBoardProps) {
   const { systems } = round;
   const results = useMemo(() => displayVoteScores(round.results), [round.results]);
   const anchorScore = fixedAnchor(results.method);
-  const domain = 'kind' in results.method ? NET_DOMAIN : undefined;
+  const net = 'kind' in results.method;
+  const domain = net ? NET_DOMAIN : undefined;
   const names = useMemo(() => reportNames(systems), [systems]);
   const boards = results.categories;
   const [category, filter] = useCategory(boards.map((board) => board.category));
@@ -313,7 +314,7 @@ export function VotesBoard({ base, round, labels }: VotesBoardProps) {
       <RoundSummary round={round} lengthBias={labels.lengthBias} />
 
       <div className="flex flex-col gap-4">
-        {domain && (
+        {net && (
           <p className={note}>
             Expected net points per 100 comparisons against {systemName(names, results.reference)}.
           </p>
@@ -330,11 +331,12 @@ export function VotesBoard({ base, round, labels }: VotesBoardProps) {
         />
         {unranked.length > 0 && (
           <p className={note}>
-            <Hint term={terms.unranked} />
-            {` with too few comparisons to place them: ${unranked
+            <Hint term={net ? terms.unrankedNet : terms.unranked} />
+            {net ? ': ' : ' with too few comparisons to place them: '}
+            {unranked
               .map((system) => systemName(names, system))
               .toSorted((a, b) => a.localeCompare(b))
-              .join(', ')}`}
+              .join(', ')}
           </p>
         )}
         {category === null && results.decision && results.standings.length > 1 && (
@@ -349,7 +351,7 @@ export function VotesBoard({ base, round, labels }: VotesBoardProps) {
 
       {boards.length > 0 && (
         <Section title="Categories">
-          <p className={note}>{categoryNote}</p>
+          {!net && <p className={note}>{categoryNote}</p>}
           <ForestLegend
             marks={categoryMarks(boards, anchorScore, domain)}
             anchorScore={anchorScore}

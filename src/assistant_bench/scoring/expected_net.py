@@ -20,34 +20,35 @@ class Scores:
 def rate(comparisons: Sequence[ranking.Comparison], reference: str) -> Scores:
     """Estimate win minus loss minus joint rejection with no pane advantage.
 
-    The preference graph excludes joint rejections. A rejected pair gives no
-    relative evidence, but still reduces both systems' expected points.
+    Joint rejections inform the rejection fit. Preference uses the remaining
+    rows, so a system can contribute evidence without receiving a score.
     """
-    preference = [row for row in comparisons if row.weight > 0 and not row.both_bad]
-    directional = ranking.Matchups.build(preference)
+    observed = [row for row in comparisons if row.weight > 0]
+    directional = ranking.Matchups.build([row for row in observed if not row.both_bad])
     if reference not in directional.systems:
         return Scores({}, 0)
 
     anchored = directional.component(reference)
-    systems = anchored.systems
-    index = {system: i for i, system in enumerate(systems)}
-    connected = [
-        row
-        for row in comparisons
-        if row.weight > 0 and row.left in index and row.right in index
-    ]
-    position = index[reference]
-    with threadpool_limits(limits=1, user_api='blas'):
-        strength = ranking.fit(anchored, identify_position=True).strength
-        rejection, identified = _joint_rejection(connected, index, position)
-
+    strength = ranking.fit(anchored, identify_position=True).strength
+    position = anchored.systems.index(reference)
     margin: ranking.Floats = 2 * expit(strength - float(strength[position])) - 1
+
+    full = ranking.Matchups.build(observed).component(reference)
+    index = {system: i for i, system in enumerate(full.systems)}
+    connected = [row for row in observed if row.left in index and row.right in index]
+    with threadpool_limits(limits=1, user_api='blas'):
+        rejection, identified = _joint_rejection(connected, index, index[reference])
+
+    selected = [index[system] for system in anchored.systems]
+    rejection = rejection[selected]
     points = np.clip((1 - rejection) * margin - rejection, -1, 1)
     cases = len({row.case for row in connected})
     return Scores(
         {
             system: float(point)
-            for system, point, usable in zip(systems, points, identified, strict=True)
+            for system, point, usable in zip(
+                anchored.systems, points, identified[selected], strict=True
+            )
             if usable
         },
         cases,
