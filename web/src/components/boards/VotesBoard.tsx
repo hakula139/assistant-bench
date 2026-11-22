@@ -167,7 +167,7 @@ function RoundSummary({ round, lengthBias }: { round: VotesReport; lengthBias: T
         )}
       </dl>
       <p className={note}>
-        {'kind' in results.method ? 'Snapshot hour' : 'Closed'}{' '}
+        As of{' '}
         <time dateTime={round.closed_at}>{closedTime.format(new Date(round.closed_at))} UTC</time>.
       </p>
       {results.public_held_out && (

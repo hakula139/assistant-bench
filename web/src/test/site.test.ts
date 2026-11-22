@@ -33,7 +33,8 @@ let directory: string;
 let prefixed: string;
 let fixture: string;
 let browser: Browser | undefined;
-const releasedAt = '2026-10-21T19:30:00Z';
+const archivedAt = '2026-10-21T18:17:00Z';
+const releasedAt = '2026-10-21T19:00:00Z';
 
 beforeAll(async () => {
   // Vitest sets `NODE_ENV=test`, under which Vite would bundle React's development build, and a
@@ -62,6 +63,7 @@ beforeAll(async () => {
   }
   const report = await readReport('report', 'votes');
   report.family = 'writing-zh';
+  report.closed_at = archivedAt;
   const reports = join(fixture, 'reports', report.family);
   await mkdir(reports, { recursive: true });
   await writeFile(join(reports, `${report.round}.json`), JSON.stringify(report));
@@ -129,9 +131,7 @@ test('uses released reports across the site and keeps the same-day round', async
   expect(current.querySelector('a[href="/writing/zh/acme-large/"]')?.textContent).toBe(
     'Acme Current',
   );
-  expect(archived.querySelector('main time')?.getAttribute('datetime')).toBe(
-    '2026-10-21T18:00:00Z',
-  );
+  expect(archived.querySelector('main time')?.getAttribute('datetime')).toBe(archivedAt);
   expect(archived.querySelector('a[href="/writing/zh/acme-large/"]')?.textContent).toBe(
     'Acme Large',
   );
