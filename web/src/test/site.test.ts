@@ -23,7 +23,7 @@ import { chromium, type Browser } from 'playwright';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 
 import { makeState, VOTE_FAMILY } from '@/test/arena';
-import { readReport } from '@/test/fixture';
+import { netReport, readReport } from '@/test/fixture';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const origin = 'https://site.example';
@@ -33,6 +33,8 @@ let directory: string;
 let prefixed: string;
 let fixture: string;
 let browser: Browser | undefined;
+const archivedAt = '2026-10-21T18:17:00Z';
+const releasedAt = '2026-10-21T19:00:00Z';
 
 beforeAll(async () => {
   // Vitest sets `NODE_ENV=test`, under which Vite would bundle React's development build, and a
@@ -61,9 +63,20 @@ beforeAll(async () => {
   }
   const report = await readReport('report', 'votes');
   report.family = 'writing-zh';
+  report.closed_at = archivedAt;
   const reports = join(fixture, 'reports', report.family);
   await mkdir(reports, { recursive: true });
   await writeFile(join(reports, `${report.round}.json`), JSON.stringify(report));
+  const arena = join(site, '.arena');
+  await mkdir(arena);
+  const current = netReport(report);
+  current.closed_at = releasedAt;
+  current.systems['acme-large'].display_name = 'Acme Current';
+  current.results.standings = current.results.standings.map((standing) =>
+    standing.system === 'acme-tiny' ? { ...standing, system: 'acme-edge' } : standing,
+  );
+  current.results.unranked = current.results.unranked.filter((system) => system !== 'acme-edge');
+  await writeFile(join(arena, 'current.json'), JSON.stringify({ [report.family]: current }));
 
   const build = (outDir: string, extra: NodeJS.ProcessEnv = {}) =>
     promisify(execFile)(
@@ -99,6 +112,42 @@ test("bundles React's production build", async () => {
   expect(
     scripts.filter((_, index) => sources[index].includes('Download the React DevTools')),
   ).toEqual([]);
+});
+
+test('uses released reports across the site and keeps the same-day round', async () => {
+  const board = 'writing/zh';
+  const dated = `${board}/rounds/2026-10-21`;
+  const [home, current, archived, system, newSystem, retired] = await Promise.all(
+    ['', board, dated, `${board}/acme-large`, `${board}/acme-edge`, `${board}/acme-tiny`].map(
+      async (path) => {
+        const html = await readFile(join(directory, path, 'index.html'), 'utf8');
+        return new JSDOM(html).window.document;
+      },
+    ),
+  );
+
+  expect(home.querySelector('main')?.textContent).toContain('Acme Current');
+  expect(current.querySelector('main time')?.getAttribute('datetime')).toBe(releasedAt);
+  expect(current.querySelector('a[href="/writing/zh/acme-large/"]')?.textContent).toBe(
+    'Acme Current',
+  );
+  expect(archived.querySelector('main time')?.getAttribute('datetime')).toBe(archivedAt);
+  const currentLink = [...archived.querySelectorAll('main a')].find(
+    (link) => link.textContent === 'View the current board',
+  );
+  expect(currentLink?.getAttribute('href')).toBe(`/${board}/`);
+  expect(archived.querySelector('a[href="/writing/zh/acme-large/"]')?.textContent).toBe(
+    'Acme Large',
+  );
+  expect(system.querySelector('h1')?.textContent).toBe('Acme Current');
+  const score = [...system.querySelectorAll('main dt')].find(
+    (term) => term.textContent === 'Net points per 100',
+  );
+  expect(score?.nextElementSibling?.textContent).toBe('32');
+  expect(newSystem.querySelector('h1')?.textContent).toBe('Acme Edge');
+  expect(newSystem.querySelector(`main dl a[href="/${board}/"]`)?.textContent).toBe('2026-10-21');
+  expect(retired.querySelector('h1')?.textContent).toBe('Acme Tiny');
+  expect(retired.querySelector(`main dl a[href="/${dated}/"]`)?.textContent).toBe('2026-10-21');
 });
 
 describe('built vote document', () => {
@@ -212,7 +261,6 @@ describe('built pages', () => {
   ].join('\n');
   const api = new Map<string, unknown>([
     ['GET /api/families', { families: [VOTE_FAMILY] }],
-    ['GET /api/freshness', { status: 'current' }],
     ['GET /api/pair', voteState],
   ]);
   let pages: string[];

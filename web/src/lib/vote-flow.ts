@@ -5,7 +5,6 @@ import {
   errorView,
   familiesView,
   familyName,
-  freshnessView,
   pairId,
   pairState,
   taggedDefects,
@@ -16,7 +15,6 @@ import {
   type UndoRequest,
   type VoteRequest,
 } from '@/lib/arena';
-import type { Cutoffs } from '@/lib/report';
 
 export const errorMessages: Record<ErrorCode, string> = {
   invalid_request: 'The request could not be processed. Reload and try again.',
@@ -177,20 +175,6 @@ export const castVote = (body: VoteRequest) => request(z.undefined(), 'POST', '/
 export const confirmVote = (body: VoteRequest) =>
   request(z.undefined(), 'POST', '/votes/confirm', body);
 export const undoVote = (body: UndoRequest) => request(z.undefined(), 'POST', '/votes/undo', body);
-
-/**
- * Asks whether this store's counted votes still match the round's cut.
- */
-export function checkFreshness(family: string, cutoffs: Cutoffs, signal: AbortSignal) {
-  const values: Record<string, string> = { family };
-  for (const [store, cutoff] of Object.entries(cutoffs)) {
-    if (cutoff !== null) {
-      values[store] = String(cutoff.id);
-      values[`${store}_votes`] = String(cutoff.votes);
-    }
-  }
-  return request(freshnessView, 'GET', `/freshness?${query(values)}`, undefined, signal);
-}
 
 // ── Tab Draft ──
 

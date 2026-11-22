@@ -3,7 +3,7 @@ import { viewOf } from '@/components/scorers';
 import { ScorerIcon } from '@/components/site/Method';
 import { sectionTitle } from '@/components/site/PageParts';
 import { scorers } from '@/lib/method';
-import { boardPath, type Family } from '@/lib/reports';
+import { boardPath, currentReport, type Family } from '@/lib/reports';
 
 interface Props {
   family: Family;
@@ -12,10 +12,12 @@ interface Props {
 const { family } = Astro.props;
 const { scorer } = family;
 const { Panel, roundDetail } = viewOf(family);
-const report = family.rounds.at(-1);
+const report = currentReport(family);
 const round = report
   ? [`Round ${report.round}`, roundDetail(family)].filter(Boolean).join(' · ')
-  : 'No round has closed yet';
+  : family.scorer === 'votes' && family.current === null
+    ? 'No current scores'
+    : 'No round has closed yet';
 ---
 
 <section

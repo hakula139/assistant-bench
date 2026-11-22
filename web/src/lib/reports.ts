@@ -1,4 +1,4 @@
-import { getCollection } from 'astro:content';
+import { getCollection, getEntry } from 'astro:content';
 
 import { familyTitle, type Aspect } from '@/lib/aspects';
 import type { FamilyConfig, Scorer } from '@/lib/family';
@@ -35,7 +35,10 @@ interface ScoredFamily<S extends Scorer> {
   systemNames: SystemNames;
 }
 
-export type VotesFamily = ScoredFamily<'votes'>;
+export type VotesFamily = ScoredFamily<'votes'> & {
+  /** The released Arena aggregate. Null means an explicit empty board. */
+  current?: VotesReport | null;
+};
 
 export type TestsFamily = ScoredFamily<'tests'>;
 export type CheckersFamily = ScoredFamily<'checkers'>;
@@ -98,6 +101,7 @@ export function publicFamilies(
   configs: { name: string; config: FamilyConfig }[],
   reports: Report[],
   systemNames: SystemNames,
+  currentReports: Record<string, Report | null> = {},
 ): Family[] {
   const owners = new Map<string, string>();
   for (const { name, config } of configs) {
@@ -107,6 +111,19 @@ export function publicFamilies(
       throw new Error(`families ${owner} and ${name} share the full name ${title}`);
     }
     owners.set(title, name);
+  }
+
+  const current = new Map<string, VotesReport | null>();
+  for (const [name, report] of Object.entries(currentReports)) {
+    const config = configs.find((entry) => entry.name === name)?.config;
+    if (config?.public !== true || config.scorer !== 'votes') {
+      throw new Error(`current report needs a public voted family: ${name}`);
+    }
+    if (report !== null && report.family !== name) {
+      throw new Error(`current report ${report.family} is keyed as ${name}`);
+    }
+
+    current.set(name, report === null ? null : scoredRounds('votes', [report])[0]);
   }
 
   const rounds = Map.groupBy(reports, (report) => report.family);
@@ -125,7 +142,13 @@ export function publicFamilies(
       const reports = rounds.get(name) ?? [];
       return [
         config.scorer === 'votes'
-          ? { ...listing, scorer: 'votes', config, rounds: scoredRounds('votes', reports) }
+          ? {
+              ...listing,
+              scorer: 'votes',
+              config,
+              rounds: scoredRounds('votes', reports),
+              ...(current.has(name) && { current: current.get(name) }),
+            }
           : config.scorer === 'tests'
             ? { ...listing, scorer: 'tests', config, rounds: scoredRounds('tests', reports) }
             : { ...listing, scorer: 'checkers', config, rounds: scoredRounds('checkers', reports) },
@@ -135,22 +158,34 @@ export function publicFamilies(
 }
 
 export async function getFamilies(): Promise<Family[]> {
-  const [configs, reports, systems] = await Promise.all([
+  const [configs, reports, systems, current] = await Promise.all([
     getCollection('families'),
     getCollection('reports'),
     getCollection('systems'),
+    getEntry('currentReports', 'current'),
   ]);
 
   return publicFamilies(
     configs.map((entry) => ({ name: entry.id, config: entry.data })),
     reports.map((entry) => entry.data),
     Object.fromEntries(systems.map(({ id, data }) => [id, data.display_name])),
+    current?.data.reports,
   );
 }
 
-/** Returns the systems with a page on a family's board: those its voted rounds placed. */
+export function currentReport(family: VotesFamily): VotesReport | undefined;
+export function currentReport(family: Family): Report | undefined;
+export function currentReport(family: Family): Report | undefined {
+  if (family.scorer === 'votes' && family.current !== undefined) {
+    return family.current ?? undefined;
+  }
+  return family.rounds.at(-1);
+}
+
+/** Returns systems placed on the current board or in its closed rounds. */
 export function systemPages(family: VotesFamily): Set<string> {
-  return new Set(family.rounds.flatMap(({ results }) => results.standings.map((s) => s.system)));
+  const rounds = family.current ? [...family.rounds, family.current] : family.rounds;
+  return new Set(rounds.flatMap(({ results }) => results.standings.map((s) => s.system)));
 }
 
 export interface BoardLink {
@@ -159,21 +194,21 @@ export interface BoardLink {
   current: boolean;
 }
 
-export interface RoundLink {
-  round: string;
-  href: string;
-}
-
-/**
- * Returns links to a family's closed rounds, newest first, for the page of the round `named`, or
- * for the board's path, which shows the latest. The latest links the board's path except on its
- * own round page, so the round on screen always links the page itself.
- */
-export function roundLinks(family: Family, named?: string): RoundLink[] {
-  return family.rounds.toReversed().map(({ round }, index) => ({
-    round,
-    href: index === 0 && round !== named ? boardPath(family) : roundPath(family, round),
-  }));
+/** Links the current board and its closed rounds, marking the page on screen. */
+export function roundLinks(family: Family, named?: string): BoardLink[] {
+  const live = family.scorer === 'votes' && family.current !== undefined;
+  const rounds = family.rounds.toReversed().map(({ round }, index) => {
+    const latest = !live && index === 0;
+    return {
+      href: latest && round !== named ? boardPath(family) : roundPath(family, round),
+      label: latest ? `${round} (latest)` : round,
+      current: live || named !== undefined ? round === named : latest,
+    };
+  });
+  if (live) {
+    rounds.unshift({ href: boardPath(family), label: 'Current', current: named === undefined });
+  }
+  return rounds;
 }
 
 /**

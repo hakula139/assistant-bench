@@ -1,14 +1,8 @@
-import type {
-  Freshness,
-  FreshnessQuery,
-  TaggedDefects,
-  UndoRequest,
-  VoteRequest,
-} from '@/lib/arena';
+import type { TaggedDefects, UndoRequest, VoteRequest } from '@/lib/arena';
 import type { Defect } from '@/lib/defects';
 
-import { ApiError, type Bindings } from './api';
-import { FRESHNESS_CACHE_SECONDS, UNDO_MS } from './limits';
+import { ApiError } from './api';
+import { UNDO_MS } from './limits';
 
 const FIND = `
   SELECT prior.choice, prior.defects AS saved, publications.defects AS allowed
@@ -52,10 +46,6 @@ const WITHDRAW = `
   DELETE FROM votes
   WHERE actor_id = ?1 AND family = ?2 AND pair_id = ?3 AND changes() = 1
   RETURNING id`;
-const FRESHNESS = `
-  SELECT EXISTS (SELECT 1 FROM votes WHERE family = ?1 AND exclusion IS NULL AND id > ?2)
-    OR (SELECT coalesce(sum(votes), 0) FROM pair_vote_counts WHERE family = ?1) <> ?3
-    AS stale`;
 
 interface Found {
   choice: string | null;
@@ -162,47 +152,4 @@ export async function undo(db: D1Database, actor: string, request: UndoRequest, 
   if (withdrawn.results.length === 0) {
     throw new ApiError(409, 'nothing_to_undo');
   }
-}
-
-/**
- * Whether this store's counted votes differ from the round's cut, including moderation changes.
- */
-export async function freshness(
-  db: D1Database,
-  store: Bindings['STORE'],
-  query: FreshnessQuery,
-): Promise<Freshness> {
-  if (store !== 'production' || query.production === undefined) {
-    return 'unknown';
-  }
-  const row = await db
-    .prepare(FRESHNESS)
-    .bind(query.family, Number(query.production), Number(query.production_votes))
-    .first<{ stale: number }>();
-  return row?.stale ? 'stale' : 'current';
-}
-
-/**
- * Answers a freshness request from this data center's cache, reading the store at most once per
- * `FRESHNESS_CACHE_SECONDS` for each set of parameters, so busy boards cost no more rows.
- */
-export async function cachedFreshness(
-  url: string,
-  answer: () => Promise<Freshness>,
-): Promise<Freshness> {
-  const key = new URL(url);
-  key.searchParams.sort();
-  const hit = await caches.default.match(key);
-  if (hit !== undefined) {
-    return (await hit.json<{ status: Freshness }>()).status;
-  }
-  const status = await answer();
-  await caches.default.put(
-    key,
-    Response.json(
-      { status },
-      { headers: { 'Cache-Control': `max-age=${FRESHNESS_CACHE_SECONDS}` } },
-    ),
-  );
-  return status;
 }

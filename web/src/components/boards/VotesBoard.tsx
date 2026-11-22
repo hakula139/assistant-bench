@@ -6,7 +6,6 @@ import {
   leaderboardMarks,
   type LeaderboardRow,
 } from '@/components/boards/Leaderboard';
-import { SnapshotStatus } from '@/components/boards/SnapshotStatus';
 import { CategoryForests, categoryMarks } from '@/components/charts/CategoryForests';
 import {
   paretoFrontier,
@@ -62,6 +61,12 @@ import type {
 import type { VotesReport } from '@/lib/reports';
 import { reportNames, systemName, type SystemNames } from '@/lib/systems';
 import { useCategory } from '@/lib/use-category';
+
+const closedTime = new Intl.DateTimeFormat('en', {
+  dateStyle: 'medium',
+  timeStyle: 'short',
+  timeZone: 'UTC',
+});
 
 interface VotesBoardProps {
   /** The board's path, which each system's page extends. */
@@ -161,13 +166,10 @@ function RoundSummary({ round, lengthBias }: { round: VotesReport; lengthBias: T
           <Stat label={<Hint term={lengthBias} />}>{formatLengthBias(length)}</Stat>
         )}
       </dl>
-      {results.cutoffs && (
-        <SnapshotStatus
-          family={round.family}
-          closedAt={round.closed_at}
-          cutoffs={results.cutoffs}
-        />
-      )}
+      <p className={note}>
+        As of{' '}
+        <time dateTime={round.closed_at}>{closedTime.format(new Date(round.closed_at))} UTC</time>.
+      </p>
       {results.public_held_out && (
         <details className={note}>
           <summary>Public and held-out comparison</summary>

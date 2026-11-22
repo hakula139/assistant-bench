@@ -6,7 +6,7 @@ import {
   type ForestRow,
 } from '@/lib/forest';
 import { displayVoteScores, fixedAnchor, NET_DOMAIN } from '@/lib/ranking';
-import { systemPath, type VotesFamily } from '@/lib/reports';
+import { currentReport, systemPath, type VotesFamily } from '@/lib/reports';
 import { reportNames } from '@/lib/systems';
 
 /** A voted family's home panel rows and axis: its latest round, or its systems before one. */
@@ -16,7 +16,7 @@ export function panelForest(family: VotesFamily): {
   domain: [number, number];
   anchorScore?: number;
 } {
-  const report = family.rounds.at(-1);
+  const report = currentReport(family);
   if (!report) {
     return {
       rows: unmeasuredRows(family.config.systems, family.systemNames),

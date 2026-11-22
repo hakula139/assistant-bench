@@ -8,7 +8,6 @@ import { UNDO_MS } from './limits';
 import {
   actorOf,
   admitted,
-  browser,
   call,
   CODING,
   pairOf,
@@ -18,7 +17,6 @@ import {
   vote,
   WRITING,
 } from './test/support';
-import { freshness } from './votes';
 
 async function storedVotes() {
   const { results } = await env.DB.prepare(
@@ -434,89 +432,9 @@ describe('POST /api/votes/undo', () => {
   });
 });
 
-describe('freshness', () => {
+describe('pair vote counts', () => {
   const caseKey = '32be94015839ac0131d6874ffcc11c79f78e8059790f678d80fa7008a1286c22';
   const systems = ['acme-large', 'acme-small'] as const;
-
-  /** The IDs of every vote, and the counted votes, as `bench close` reads them. */
-  async function read() {
-    const { results } = await env.DB.prepare(
-      'SELECT id, exclusion IS NULL AS counted FROM votes ORDER BY id',
-    ).all<{ id: number; counted: number }>();
-    return { ids: results.map(({ id }) => id), counted: results.filter((row) => row.counted) };
-  }
-
-  test.each([
-    ['current while the counted votes match', 'production', 0, true, 'current'],
-    ['stale with a counted vote after the cutoff', 'production', 1, true, 'stale'],
-    ['unknown on local while its counted votes match', 'local', 0, true, 'unknown'],
-    ['unknown on local after its cutoff', 'local', 1, true, 'unknown'],
-    ['unknown without a production cutoff', 'production', 0, false, 'unknown'],
-    ['unknown on staging', 'staging', 0, true, 'unknown'],
-  ] as const)('answers %s', async (_, store, later, cut, expected) => {
-    await seedVote(WRITING, caseKey, systems);
-    await seedVote(WRITING, caseKey, systems);
-    const { ids } = await read();
-    const cutoff = ids[ids.length - 1 - later];
-
-    const status = await freshness(env.DB, store, {
-      family: WRITING,
-      ...(cut
-        ? {
-            [store === 'local' ? 'private' : 'production']: String(cutoff),
-            [store === 'local' ? 'private_votes' : 'production_votes']: String(ids.length - later),
-          }
-        : {}),
-    });
-
-    expect(status).toBe(expected);
-  });
-
-  test.each([
-    ['an exclusion', undefined, 'trash'],
-    ['a restore', 'trash', null],
-  ] as const)('turns stale after %s at or below the cutoff', async (_, before, after) => {
-    await seedVote(WRITING, caseKey, systems, { exclusion: before });
-    await seedVote(WRITING, caseKey, systems);
-    const { ids, counted } = await read();
-    const query = {
-      family: WRITING,
-      production: String(ids[1]),
-      production_votes: String(counted.length),
-    };
-    expect(await freshness(env.DB, 'production', query)).toBe('current');
-
-    await env.DB.prepare('UPDATE votes SET exclusion = ? WHERE id = ?').bind(after, ids[0]).run();
-
-    expect(await freshness(env.DB, 'production', query)).toBe('stale');
-  });
-
-  test('leaves excluded votes after the cutoff out', async () => {
-    await seedVote(WRITING, caseKey, systems, { exclusion: 'trash' });
-
-    const response = await call(
-      browser(),
-      'GET',
-      `/freshness?family=${WRITING}&production=0&production_votes=0`,
-    );
-
-    expect(await response.json()).toEqual({ status: 'current' });
-  });
-
-  test('turns stale when a newer counted vote replaces one at the cutoff', async () => {
-    await seedVote(WRITING, caseKey, systems);
-    const { ids } = await read();
-    const query = { family: WRITING, production: String(ids[0]), production_votes: '1' };
-    await env.DB.prepare("UPDATE votes SET exclusion = 'trash' WHERE id = ?").bind(ids[0]).run();
-    await seedVote(WRITING, caseKey, systems);
-
-    const status = await freshness(env.DB, 'production', query);
-
-    expect(status).toBe('stale');
-    expect(await coverage()).toEqual([
-      { family: WRITING, low_system: 'acme-large', high_system: 'acme-small', votes: 1 },
-    ]);
-  });
 
   test('counts reversed systems together and isolates families through moderation and deletion', async () => {
     await seedVote(WRITING, caseKey, systems);
@@ -524,7 +442,6 @@ describe('freshness', () => {
     await publish('other-writing', { other: { 'acme-large': ['a'], 'acme-small': ['b'] } });
     await seedVote('other-writing', 'other', systems, { exclusion: 'trash' });
     await seedVote(WRITING, caseKey, systems, { exclusion: 'trash' });
-    const { ids } = await read();
     expect(await coverage()).toEqual([
       { family: WRITING, low_system: 'acme-large', high_system: 'acme-small', votes: 2 },
     ]);
@@ -560,34 +477,5 @@ describe('freshness', () => {
             ]),
       ]);
     }
-    expect(
-      await freshness(env.DB, 'production', {
-        family: WRITING,
-        production: String(ids.at(-1)),
-        production_votes: '0',
-      }),
-    ).toBe('current');
-  });
-
-  test('reuses an answer for the same parameters, in any order, for a minute', async () => {
-    await seedVote(WRITING, caseKey, systems);
-    const { ids } = await read();
-    const from = browser();
-    const ask = async (query: string) =>
-      (await (await call(from, 'GET', `/freshness?${query}`)).json<{ status: string }>()).status;
-    const cut = `production=${ids[0]}&production_votes=1`;
-    expect(await ask(`family=${WRITING}&${cut}`)).toBe('current');
-
-    await seedVote(WRITING, caseKey, systems);
-
-    expect(await ask(`${cut}&family=${WRITING}`)).toBe('current');
-    expect(await ask(`family=${WRITING}&production=${ids[0]}&production_votes=2`)).toBe('stale');
-  });
-
-  test('rejects a cutoff without its counted votes', async () => {
-    const response = await call(browser(), 'GET', `/freshness?family=${WRITING}&production=0`);
-
-    expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ error: 'invalid_request' });
   });
 });

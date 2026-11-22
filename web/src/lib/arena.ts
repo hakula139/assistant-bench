@@ -17,8 +17,6 @@ export const taggedDefects = z.strictObject({
   b: z.array(defectSchema),
 });
 const count = z.int().check(z.nonnegative());
-/** A vote ID or a vote count as a query parameter. */
-const queryCount = z.string().check(z.regex(/^\d{1,15}$/));
 
 // ── Requests ──
 
@@ -34,25 +32,6 @@ export const voteRequest = z.strictObject({
   defects: taggedDefects,
 });
 export const undoRequest = z.strictObject({ family: familyName, pair: pairId });
-/** Each available store's cutoff and counted votes, supplied together. */
-export const freshnessQuery = z
-  .strictObject({
-    family: familyName,
-    production: z.optional(queryCount),
-    production_votes: z.optional(queryCount),
-    private: z.optional(queryCount),
-    private_votes: z.optional(queryCount),
-  })
-  .check(
-    z.refine((value) =>
-      ['production', 'private'].every(
-        (store) =>
-          (value[store as 'production' | 'private'] === undefined) ===
-          (value[`${store}_votes` as 'production_votes' | 'private_votes'] === undefined),
-      ),
-    ),
-  );
-
 // ── Responses ──
 
 export const familiesView = z.strictObject({
@@ -81,7 +60,6 @@ export const pairState = z.strictObject({
   remaining: count,
   undo: z.boolean(),
 });
-export const freshnessView = z.strictObject({ status: z.enum(['current', 'stale', 'unknown']) });
 const errorCode = z.enum([
   'invalid_request',
   'forbidden',
@@ -106,10 +84,8 @@ export type Choice = z.infer<typeof choiceSchema>;
 export type TaggedDefects = z.infer<typeof taggedDefects>;
 export type VoteRequest = z.infer<typeof voteRequest>;
 export type UndoRequest = z.infer<typeof undoRequest>;
-export type FreshnessQuery = z.infer<typeof freshnessQuery>;
 export type FamilyView = z.infer<typeof familiesView>['families'][number];
 export type PairView = z.infer<typeof pairView>;
 export type PairState = z.infer<typeof pairState>;
-export type Freshness = z.infer<typeof freshnessView>['status'];
 export type ErrorCode = z.infer<typeof errorCode>;
 export type ErrorView = z.infer<typeof errorView>;
