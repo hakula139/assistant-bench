@@ -15,6 +15,9 @@ API_BASE_URL = 'https://api.cloudflare.com/client/v4'
 TIMEOUT_SEC = 120.0
 """Long enough to upload a statement of several megabytes over a slow link."""
 
+_MAX_PARAMS = 100
+"""D1's limit on the parameters one statement binds."""
+
 type Param = str | int | float | None
 type Row = dict[str, JsonValue]
 
@@ -34,6 +37,26 @@ class Database(Protocol):
     def execute(self, sql: str, params: Sequence[Param] = ()) -> Result:
         """Run one statement in auto-commit, binding `params` to its `?` slots."""
         ...
+
+
+def insert_missing(
+    database: Database,
+    table: str,
+    columns: Sequence[str],
+    rows: Sequence[Sequence[Param]],
+) -> None:
+    """Insert rows missing from the table in statements within D1's parameter limit."""
+    per_statement = _MAX_PARAMS // len(columns)
+    placeholders = f'({", ".join("?" * len(columns))})'
+
+    for start in range(0, len(rows), per_statement):
+        chunk = rows[start : start + per_statement]
+        database.execute(
+            # `table` and `columns` are constants from callers.
+            f'INSERT INTO {table} ({", ".join(columns)}) VALUES '  # noqa: S608
+            f'{", ".join([placeholders] * len(chunk))} ON CONFLICT DO NOTHING',
+            [value for row in chunk for value in row],
+        )
 
 
 class SQLiteDatabase:

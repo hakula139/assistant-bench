@@ -770,6 +770,47 @@ class TestRestore:
 
 
 class TestSnapshots:
+    def test_batches_facts_within_the_d1_parameter_limit(
+        self, private_store: SQLiteDatabase, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        pairs = [
+            (
+                fact(f'{index:02}-a', f'c{index:02}', 'acme-large'),
+                fact(f'{index:02}-b', f'c{index:02}', 'acme-small'),
+            )
+            for index in range(26)
+        ]
+        saved = snapshot(
+            tuple(output for pair in pairs for output in pair),
+            tuple(vote(index, a, b) for index, (a, b) in enumerate(pairs, start=1)),
+        )
+        execute = private_store.execute
+        batches: dict[str, list[int]] = {
+            'vote_snapshot_cases': [],
+            'vote_snapshot_outputs': [],
+            'vote_snapshot_votes': [],
+        }
+
+        def trace(sql: str, params: Sequence[Param] = ()) -> Result:
+            if sql.startswith('INSERT INTO '):
+                table = sql.split()[2]
+                if table in batches:
+                    batches[table].append(len(params))
+
+            return execute(sql, params)
+
+        monkeypatch.setattr(private_store, 'execute', trace)
+
+        identity = votes.save_snapshot(private_store, saved)
+
+        assert votes.read_snapshot(private_store, identity) == saved
+        assert votes.save_snapshot(private_store, saved) == identity
+        assert batches == {
+            'vote_snapshot_cases': [100, 4],
+            'vote_snapshot_outputs': [100, 100, 8],
+            'vote_snapshot_votes': [100, 4],
+        }
+
     def test_persists_private_vote_facts_without_candidate_bodies(
         self, private_store: SQLiteDatabase
     ) -> None:

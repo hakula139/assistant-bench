@@ -17,7 +17,7 @@ from pydantic import (
     model_validator,
 )
 
-from assistant_bench.database import Database, Param
+from assistant_bench.database import Database, insert_missing
 from assistant_bench.families import (
     Case,
     CaseSource,
@@ -49,9 +49,6 @@ CASE_SPLITS: dict[CaseSource, CaseSplit] = {
     'transcript': 'private',
     'held-out': 'held-out',
 }
-
-MAX_PARAMS = 100
-"""D1's limit on the parameters one statement binds."""
 
 _ELIGIBLE_CASES = (
     'SELECT DISTINCT a.system AS low_system, b.system AS high_system, a.case_key '
@@ -439,7 +436,7 @@ def stage(
             publication.target,
         ],
     )
-    _insert(
+    insert_missing(
         database,
         'cases',
         (
@@ -464,7 +461,7 @@ def stage(
             for case in publication.cases
         ],
     )
-    _insert(
+    insert_missing(
         database,
         'outputs',
         (
@@ -644,25 +641,6 @@ def activate(database: Database, publication_id: str, now: datetime) -> bool:
             'not activated. Publish the same ID again.'
         )
     return True
-
-
-def _insert(
-    database: Database,
-    table: str,
-    columns: Sequence[str],
-    rows: Sequence[Sequence[Param]],
-) -> None:
-    """Insert rows missing from the table in statements within D1's parameter limit."""
-    per_statement = MAX_PARAMS // len(columns)
-    placeholders = f'({", ".join("?" * len(columns))})'
-    for start in range(0, len(rows), per_statement):
-        chunk = rows[start : start + per_statement]
-        database.execute(
-            # `table` and `columns` are constants from callers.
-            f'INSERT INTO {table} ({", ".join(columns)}) VALUES '  # noqa: S608
-            f'{", ".join([placeholders] * len(chunk))} ON CONFLICT DO NOTHING',
-            [value for row in chunk for value in row],
-        )
 
 
 def _digest(value: JsonValue) -> str:

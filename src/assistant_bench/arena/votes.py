@@ -24,7 +24,7 @@ from assistant_bench.arena.publication import (
     OutputFacts,
     output_key,
 )
-from assistant_bench.database import Database, Param
+from assistant_bench.database import Database, Param, insert_missing
 from assistant_bench.families import Category, Choice, Defect, FamilyName
 from assistant_bench.messages import InputError, error_lines
 from assistant_bench.outputs import Output
@@ -536,27 +536,30 @@ def save_snapshot(database: Database, snapshot: Snapshot) -> str:
                 cut.output_generation,
             ],
         )
-        for case in inventory.cases:
-            database.execute(
-                'INSERT INTO vote_snapshot_cases '
-                '(snapshot_id, target, case_key, facts_json) VALUES (?, ?, ?, ?) '
-                'ON CONFLICT (snapshot_id, target, case_key) DO NOTHING',
-                [identity, target, case.key, case.model_dump_json()],
-            )
-        for output in inventory.outputs:
-            database.execute(
-                'INSERT INTO vote_snapshot_outputs '
-                '(snapshot_id, target, output_key, facts_json) VALUES (?, ?, ?, ?) '
-                'ON CONFLICT (snapshot_id, target, output_key) DO NOTHING',
-                [identity, target, output.key, output.model_dump_json()],
-            )
-        for vote in cut.votes:
-            database.execute(
-                'INSERT INTO vote_snapshot_votes '
-                '(snapshot_id, target, vote_id, vote_json) VALUES (?, ?, ?, ?) '
-                'ON CONFLICT (snapshot_id, target, vote_id) DO NOTHING',
-                [identity, target, vote.id, vote.model_dump_json()],
-            )
+        insert_missing(
+            database,
+            'vote_snapshot_cases',
+            ('snapshot_id', 'target', 'case_key', 'facts_json'),
+            [
+                (identity, target, case.key, case.model_dump_json())
+                for case in inventory.cases
+            ],
+        )
+        insert_missing(
+            database,
+            'vote_snapshot_outputs',
+            ('snapshot_id', 'target', 'output_key', 'facts_json'),
+            [
+                (identity, target, output.key, output.model_dump_json())
+                for output in inventory.outputs
+            ],
+        )
+        insert_missing(
+            database,
+            'vote_snapshot_votes',
+            ('snapshot_id', 'target', 'vote_id', 'vote_json'),
+            [(identity, target, vote.id, vote.model_dump_json()) for vote in cut.votes],
+        )
     if _read_snapshot(database, identity, sealed=False) != snapshot:
         raise InputError(f'Snapshot `{identity}` conflicts with its stored facts.')
     database.execute(
