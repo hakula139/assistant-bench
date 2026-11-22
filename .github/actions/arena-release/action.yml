@@ -1,0 +1,81 @@
+name: Release the Arena
+description: Build production from its mature Arena reports inside the production queue.
+inputs:
+  cloudflare-token:
+    description: The production Cloudflare API token.
+    required: true
+  mode:
+    description: Capture an hourly candidate, release changes, or deploy a checked main build.
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Prepare the D1 credential file
+      id: credential
+      shell: bash
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.cloudflare-token }}
+      run: |
+        token_file=$(mktemp "$RUNNER_TEMP/arena-d1.XXXXXXXX")
+        printf '%s' "$CLOUDFLARE_API_TOKEN" >"$token_file"
+        echo "path=$token_file" >>"$GITHUB_OUTPUT"
+
+    - name: Capture the hourly Arena candidate
+      if: inputs.mode == 'capture'
+      shell: bash
+      env:
+        BENCH_D1_TOKEN_FILE: ${{ steps.credential.outputs.path }}
+      run: nix develop -c uv run --locked python -m assistant_bench.arena.leaderboard capture
+
+    - name: Export mature Arena reports
+      id: reports
+      if: inputs.mode != 'capture'
+      shell: bash
+      env:
+        BENCH_D1_TOKEN_FILE: ${{ steps.credential.outputs.path }}
+      run: |
+        umask 077
+        changed=$(nix develop -c uv run --locked python -m assistant_bench.arena.leaderboard export \
+          web/.arena/current.json "$RUNNER_TEMP/arena-release.json")
+        if [[ "$changed" != true && "$changed" != false ]]; then
+          echo 'Arena export did not produce a release status.' >&2
+          exit 1
+        fi
+        echo "changed=$changed" >>"$GITHUB_OUTPUT"
+
+    - name: Build the production site
+      if: inputs.mode == 'deploy' || steps.reports.outputs.changed == 'true'
+      shell: bash
+      run: |
+        nix develop -c pnpm install --frozen-lockfile
+        nix develop -c pnpm build
+
+    - name: Apply voting D1 migrations
+      if: inputs.mode == 'deploy'
+      shell: bash
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.cloudflare-token }}
+      run: nix develop -c pnpm --filter web exec wrangler d1 migrations apply DB --env production --remote
+
+    - name: Deploy to Cloudflare Workers
+      if: inputs.mode == 'deploy' || steps.reports.outputs.changed == 'true'
+      shell: bash
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.cloudflare-token }}
+      run: nix develop -c pnpm --filter web exec wrangler deploy --env production
+
+    - name: Confirm the published Arena reports
+      if: inputs.mode == 'deploy' || steps.reports.outputs.changed == 'true'
+      shell: bash
+      env:
+        BENCH_D1_TOKEN_FILE: ${{ steps.credential.outputs.path }}
+      run: |
+        nix develop -c uv run --locked python -m assistant_bench.arena.leaderboard mark \
+          "$RUNNER_TEMP/arena-release.json"
+
+    - name: Remove release credentials and manifest
+      if: always() && steps.credential.outputs.path != ''
+      shell: bash
+      env:
+        BENCH_D1_TOKEN_FILE: ${{ steps.credential.outputs.path }}
+      run: rm -f -- "$BENCH_D1_TOKEN_FILE" "$RUNNER_TEMP/arena-release.json"

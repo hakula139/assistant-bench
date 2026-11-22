@@ -1,0 +1,70 @@
+name: Arena Release
+
+on:
+  schedule:
+    - cron: '7 * * * *'
+    - cron: '2,17,32,47 * * * *'
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  release:
+    name: Release Arena Reports
+    if: github.ref == 'refs/heads/main' && vars.ARENA_PUBLICATION_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: production
+      queue: max
+      cancel-in-progress: false
+    environment:
+      name: production
+      deployment: false
+
+    steps:
+      - name: Check the tested production revision
+        id: deployed
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          head=$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)
+          if [[ "$head" != "$GITHUB_SHA" ]]; then
+            echo "Skipping the Arena job, since main has moved on to $head."
+            exit 0
+          fi
+
+          runs=$(gh api --method GET "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs" \
+            -f head_sha="$GITHUB_SHA" -f event=push -f status=success --jq '.workflow_runs[].id')
+          for run in $runs; do
+            deployed=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/jobs" --paginate --jq '
+              .jobs[]
+              | select(.name == "Deploy Voting" and .conclusion == "success")
+              | .steps[]
+              | select(.name == "Deploy the production site" and .conclusion == "success")
+              | .conclusion')
+            if [[ "$deployed" == success ]]; then
+              echo 'ready=true' >>"$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          echo 'Waiting for a successful main deployment of this revision.'
+
+      - name: Checkout
+        if: steps.deployed.outputs.ready == 'true'
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Nix
+        if: steps.deployed.outputs.ready == 'true'
+        uses: hakulab/devkit/.github/actions/setup-nix@v3
+
+      - name: Process the Arena schedule
+        if: steps.deployed.outputs.ready == 'true'
+        uses: ./.github/actions/arena-release
+        with:
+          cloudflare-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          mode: ${{ github.event.schedule == '7 * * * *' && 'capture' || 'release' }}

@@ -25,13 +25,32 @@ Set each project's job timeout to several times its measured successful duration
 
 ## Deploy
 
-Production and PR previews consume Web Check's `site-dist` artifact. `web/wrangler.toml` owns their Worker and database bindings. Deploy secrets are scoped to the steps that run Wrangler.
+`web/wrangler.toml` defines the Worker and database bindings. Worker secrets configured through [Running](../guide/running.md#setting-up-a-vote-store) persist across deploys.
 
-- **Deploy Voting:** runs after CI Result on `main`, in the `production` environment. Its concurrency group retains up to 100 pending deploys and lets a running deploy finish. Before deploying, it compares the commit with the current `main` head and skips a superseded commit. It applies pending D1 migrations before deploying the voting Worker and its site assets.
-- **Deploy Preview:** waits for Node and Web checks on same-repository PRs. It publishes an asset-only Worker Preview named `pr-<number>` and comments the stable preview URL, the commit's deployment URL, and the workflow logs. Its `workers.dev` URL sends `X-Robots-Tag: noindex`. The `preview-<number>` concurrency group is shared with cleanup. A deploy checks that the PR is still open after joining that group, so one starting after cleanup skips deployment.
-- **Preview Cleanup:** runs on PR closure through `pull_request_target`, deletes the preview, deactivates its deployments, and updates the comment. It uses the trusted default-branch workflow and checkout because the event carries secrets, including for PRs with merge conflicts. Changes to cleanup take effect once merged.
+### Production
 
-All three jobs use `CLOUDFLARE_API_TOKEN`, with the account configured in Wrangler. The token needs Workers Scripts Edit and D1 Edit. Applying migrations can create the `d1_migrations` table even when no migration is pending. Worker secrets configured through [Running](../guide/running.md#setting-up-a-vote-store) persist across deploys. Static previews have no voting bindings.
+Production jobs share a queue and check the current `main` head after joining it. Scheduled jobs wait for a successful push deployment of that exact revision.
+
+| Trigger                                 | Outcome                                                                        |
+| --------------------------------------- | ------------------------------------------------------------------------------ |
+| Deploy Voting after CI Result on `main` | Build with mature reports, apply voting D1 migrations, and deploy the Worker.  |
+| Arena Release, hourly                   | Capture a candidate from the official vote stores.                             |
+| Arena Release, every 15 minutes         | Deploy when the selected reports change and have completed the two-hour delay. |
+
+Both deployment paths confirm the selected reports after a successful Worker deploy. Applying Wrangler migrations can create the `d1_migrations` table even when no migration is pending.
+
+To enable the schedule:
+
+1. Apply the private D1 migrations. The `production` environment's `CLOUDFLARE_API_TOKEN` needs Workers Scripts Edit and D1 Edit for both official stores.
+2. Wait for Deploy Voting on the current `main` revision to succeed.
+3. Set the repository variable `ARENA_PUBLICATION_ENABLED` to `true`.
+
+### GitHub previews
+
+Preview jobs use the repository token. Deploy Preview consumes Web Check's `site-dist` artifact. Static previews have no voting bindings.
+
+- **Deploy Preview** waits for Node and Web checks on same-repository PRs. It publishes an asset-only Worker Preview named `pr-<number>` and comments the stable preview URL, the commit's deployment URL, and the workflow logs. Its `workers.dev` URL sends `X-Robots-Tag: noindex`. The `preview-<number>` queue is shared with cleanup. A deploy checks that the PR is still open after joining it.
+- **Preview Cleanup** runs on PR closure through `pull_request_target`, deletes the preview, deactivates its deployments, and updates the comment. It uses the trusted default-branch workflow and checkout because the event carries secrets. Changes to cleanup take effect once merged.
 
 ### GitLab Pages
 

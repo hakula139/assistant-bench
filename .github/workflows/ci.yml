@@ -276,25 +276,9 @@ jobs:
         if: steps.head.outputs.current
         uses: hakulab/devkit/.github/actions/setup-nix@v3
 
-      - name: Install dependencies
+      - name: Deploy the production site
         if: steps.head.outputs.current
-        run: nix develop -c pnpm install --frozen-lockfile
-
-      - name: Download site artifact
-        if: steps.head.outputs.current
-        uses: actions/download-artifact@v8
+        uses: ./.github/actions/arena-release
         with:
-          name: site-dist
-          path: web/dist/
-
-      - name: Apply D1 migrations
-        if: steps.head.outputs.current
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: nix develop -c pnpm --filter web exec wrangler d1 migrations apply DB --env production --remote
-
-      - name: Deploy to Cloudflare Workers
-        if: steps.head.outputs.current
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: nix develop -c pnpm --filter web exec wrangler deploy --env production
+          cloudflare-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          mode: deploy
