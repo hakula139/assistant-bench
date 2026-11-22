@@ -19,7 +19,7 @@ from pydantic import TypeAdapter
 from typer.core import TyperGroup
 
 from assistant_bench import canaries, collection, execution, jobs, report
-from assistant_bench.arena import publication, votes
+from assistant_bench.arena import settlement, votes
 from assistant_bench.arena.commands import app as arena_app
 from assistant_bench.arena.d1 import connect
 from assistant_bench.arguments import (
@@ -35,7 +35,7 @@ from assistant_bench.catalog import (
     load_export,
     load_systems,
 )
-from assistant_bench.database import D1Error, Database
+from assistant_bench.database import D1Error
 from assistant_bench.families import (
     CheckersSettings,
     Family,
@@ -431,50 +431,18 @@ def _take_snapshot(family: Family) -> str:
 
 
 def _capture_snapshot(family: Family, revision: str) -> str:
-    assert isinstance(family.settings, VotesSettings)
     taken_at = datetime.now(UTC)
-    with connect('private') as database:
-        with connect('production') as public_database:
-            production = _pin_cut(
-                database,
-                votes.read_cut(
-                    public_database,
-                    family.name,
-                    taken_at,
-                    include_active=family.settings.public_voting,
-                ),
-            )
-        private = _pin_cut(database, votes.read_cut(database, family.name, taken_at))
-        if production is None and private is None:
+    with connect('private') as database, connect('production') as production:
+        snapshot = settlement.capture(family, database, production, taken_at, revision)
+        if snapshot is None:
             raise InputError(
                 f'Family `{family.name}` has no active voting publication '
                 'or eligible voting history. '
                 'Prepare and publish a production or private voting round first.'
             )
-        identity = votes.save_snapshot(
-            database,
-            votes.Snapshot(
-                family=family.name,
-                taken_at=taken_at,
-                closed_at=taken_at,
-                category_order=tuple(family.settings.categories),
-                closing_revision=revision,
-                method='expected_net',
-                production=production,
-                private=private,
-            ),
-        )
+        identity = votes.save_snapshot(database, snapshot)
     typer.echo(f'Votes sealed as snapshot `{identity}`.')
     return identity
-
-
-def _pin_cut(database: Database, cut: votes.Cut | None) -> votes.Cut | None:
-    if cut is None or not cut.inventory.outputs:
-        return cut
-    prepared = publication.preparation(database, cut.inventory.id)
-    return cut.model_copy(
-        update={'output_generation': prepared.collection_id if prepared else None}
-    )
 
 
 def _close_votes(family: str, identity: str) -> report.Report:
@@ -482,25 +450,7 @@ def _close_votes(family: str, identity: str) -> report.Report:
         snapshot = votes.read_snapshot(database, identity)
         if snapshot.family != family:
             raise InputError('The saved vote snapshot belongs to a different family.')
-        state = State(database)
-        outputs: dict[publication.VotingTarget, list[Output]] = {}
-        for target, cut in snapshot.cuts():
-            outputs[target] = (
-                read_outputs(
-                    family,
-                    state,
-                    generation=state.collection_generation(cut.output_generation),
-                )
-                if cut.output_generation is not None
-                else []
-            )
-        return report.close_votes(
-            votes.voting_input(snapshot, outputs),
-            snapshot.closed_at,
-            fingerprints=votes.fingerprints(snapshot),
-            system_names=votes.system_names(snapshot),
-            net=snapshot.method == 'expected_net',
-        )
+        return settlement.score(snapshot, settlement.analysis(database, snapshot))
 
 
 def _close_tests(family: Family) -> report.Report:

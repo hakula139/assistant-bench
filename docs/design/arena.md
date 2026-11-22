@@ -24,6 +24,10 @@ Closing verifies the counts and canonical digest of both cuts before sealing the
 - **Settlements and measurements.** Active inventory supplies settled comparisons and pins any output collection used for latency, tokens and cost. A missing collection pin or output contributes null. Historical ballots contribute votes and their own tags and lengths.
 - **Report.** Each store's cutoff is the largest vote ID older than the undo window, or zero. The report records the count of votes included in each cut. Candidate contents and network tags stay outside the sealed facts and public report.
 
+### Delayed standings
+
+The leaderboard command captures one aggregate per public votes family per UTC hour. It compares each capture with the previous candidate and skips identical standings. A changed candidate stays in private D1 for two hours after capture. The deploy exports the latest eligible aggregate for each family and confirms it after the site deploy succeeds. Captures with no eligible comparisons clear the current standings once the delay expires. Dated reports in `reports/` remain available at their existing dates.
+
 ## Blinding
 
 The browser receives the approved instruction and checklist, the case's category, the two outputs' text or diff and a random pair ID. HTML pairs omit output strings and derive two authenticated preview URLs from the pair ID and side. System names, fingerprints, output keys, timings and per-system counts never leave the Worker, and its error responses carry only fixed messages. Output content can still identify its author, so reviewing a publication's listing must check the exact content the page shows.
