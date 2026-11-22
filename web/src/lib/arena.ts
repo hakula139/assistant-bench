@@ -10,6 +10,7 @@ export const familyName = z
 export const pairId = z.uuid();
 export const UNDO_HEADER = 'Arena-Undo';
 export const UNDO_NONE = 'none';
+export const MAX_BATCH_VOTES = 8;
 export const choiceSchema = z.enum(['a', 'b', 'tie', 'both_bad']);
 const defectSchema = z.enum(defects);
 export const taggedDefects = z.strictObject({
@@ -30,6 +31,18 @@ export const voteRequest = z.strictObject({
   pair: pairId,
   choice: choiceSchema,
   defects: taggedDefects,
+});
+export const pairBatchRequest = z.strictObject({
+  family: familyName,
+  count: z.int().check(z.positive(), z.maximum(MAX_BATCH_VOTES)),
+});
+export const voteBatchRequest = z.strictObject({
+  family: familyName,
+  votes: z.array(voteRequest).check(
+    z.minLength(1),
+    z.maxLength(MAX_BATCH_VOTES),
+    z.refine((votes) => new Set(votes.map(({ pair }) => pair)).size === votes.length),
+  ),
 });
 export const undoRequest = z.strictObject({ family: familyName, pair: pairId });
 // ── Responses ──
@@ -60,6 +73,11 @@ export const pairState = z.strictObject({
   remaining: count,
   undo: z.boolean(),
 });
+export const pairBatchView = z.strictObject({ pairs: z.array(pairView) });
+const voteStatus = z.enum(['recorded', 'identical', 'stale_pair', 'invalid_request']);
+export const voteBatchView = z.strictObject({
+  votes: z.array(z.strictObject({ pair: pairId, status: voteStatus })),
+});
 const errorCode = z.enum([
   'invalid_request',
   'forbidden',
@@ -83,6 +101,7 @@ export const errorView = z.strictObject({
 export type Choice = z.infer<typeof choiceSchema>;
 export type TaggedDefects = z.infer<typeof taggedDefects>;
 export type VoteRequest = z.infer<typeof voteRequest>;
+export type VoteStatus = z.infer<typeof voteStatus>;
 export type UndoRequest = z.infer<typeof undoRequest>;
 export type FamilyView = z.infer<typeof familiesView>['families'][number];
 export type PairView = z.infer<typeof pairView>;

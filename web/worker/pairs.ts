@@ -1,4 +1,4 @@
-import type { PairState } from '@/lib/arena';
+import type { PairState, PairView } from '@/lib/arena';
 import type { Category } from '@/lib/categories';
 import type { Defect } from '@/lib/defects';
 
@@ -17,6 +17,7 @@ interface PendingRow {
   id: string;
   publication_id: string;
   case_key: string;
+  batched: 0 | 1;
   a_system: string;
   b_system: string;
   instruction: string;
@@ -78,12 +79,16 @@ const ACTIVE = `
   WHERE active.family = ?`;
 const PENDING = `
   SELECT pairs.id, pairs.publication_id, pairs.case_key, a.system AS a_system, b.system AS b_system,
-    cases.instruction, cases.checklist, cases.category, a.content AS a, b.content AS b
-  FROM pairs
+    pairs.batched, cases.instruction, cases.checklist, cases.category, a.content AS a, b.content AS b
+  FROM pending_pairs AS pairs
   JOIN cases ON cases.publication_id = pairs.publication_id AND cases.case_key = pairs.case_key
   JOIN outputs AS a ON a.publication_id = pairs.publication_id AND a.output_key = pairs.a_output
   JOIN outputs AS b ON b.publication_id = pairs.publication_id AND b.output_key = pairs.b_output
-  WHERE pairs.actor_id = ? AND pairs.family = ?`;
+  WHERE pairs.actor_id = ? AND pairs.family = ?
+    AND (pairs.batched = 0 OR pairs.publication_id = (
+      SELECT publication_id FROM active WHERE family = pairs.family
+    ))
+  ORDER BY pairs.batched, pairs.position`;
 const ACTOR_VOTES = `
   SELECT id, pair_id, case_key, a_system, b_system, exclusion IS NULL AS counted, recorded_at
   FROM votes WHERE actor_id = ? AND family = ?`;
@@ -100,26 +105,53 @@ const COVERAGE = `
   SELECT low_system AS low, high_system AS high, votes
   FROM pair_vote_counts WHERE family = ?`;
 /** Issues from the actor's snapshot while its publication, pending ID and vote history still agree. */
+const CAN_ISSUE = `
+  EXISTS (SELECT 1 FROM active WHERE family = ?2 AND publication_id = ?3)
+    AND (SELECT id FROM pairs WHERE actor_id = ?1 AND family = ?2) IS ?5
+    AND NOT EXISTS (
+      SELECT 1 FROM batch_pairs WHERE actor_id = ?1 AND family = ?2 AND publication_id = ?3
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM votes INDEXED BY votes_family WHERE family = ?2 AND id > ?6 AND actor_id = ?1
+    )`;
 const ISSUE = `
   INSERT INTO pairs (id, actor_id, family, publication_id, case_key, a_output, b_output, issued_at)
-  SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8
-  WHERE EXISTS (SELECT 1 FROM active WHERE family = ?3 AND publication_id = ?4)
-    AND (SELECT id FROM pairs WHERE actor_id = ?2 AND family = ?3) IS ?9
-    AND NOT EXISTS (
-      SELECT 1 FROM votes INDEXED BY votes_family WHERE family = ?3 AND id > ?10 AND actor_id = ?2
-    )
+  SELECT ?7, ?1, ?2, ?3, ?8, ?9, ?10, ?4
+  WHERE ${CAN_ISSUE}
   ON CONFLICT (actor_id, family) DO UPDATE SET
     id = excluded.id, publication_id = excluded.publication_id, case_key = excluded.case_key,
     a_output = excluded.a_output, b_output = excluded.b_output, issued_at = excluded.issued_at
   WHERE pairs.publication_id <> excluded.publication_id`;
+const ISSUE_BATCH = `
+  INSERT INTO batch_pairs
+    (id, actor_id, family, publication_id, case_key, a_output, b_output, issued_at, position)
+  SELECT json_extract(slot.value, '$.id'), ?1, ?2, ?3, json_extract(slot.value, '$.caseKey'),
+    json_extract(slot.value, '$.a'), json_extract(slot.value, '$.b'), ?4, slot.key
+  FROM json_each(?7) AS slot
+  WHERE ${CAN_ISSUE}`;
 const PAIR_FAMILY = `
-  SELECT pairs.family FROM pairs
+  SELECT pairs.family FROM pending_pairs AS pairs
   JOIN active ON active.family = pairs.family AND active.publication_id = pairs.publication_id
   WHERE pairs.id = ? AND pairs.actor_id = ?`;
-const REPLACE = `
-  UPDATE pairs SET id = ?, case_key = ?, a_output = ?, b_output = ?, issued_at = ?
-  WHERE id = ? AND actor_id = ?
-    AND publication_id = (SELECT publication_id FROM active WHERE family = pairs.family)`;
+function replace(table: 'pairs' | 'batch_pairs') {
+  return `
+    UPDATE ${table} AS chosen SET id = ?1, case_key = ?2, a_output = ?3, b_output = ?4, issued_at = ?5
+    WHERE id = ?6 AND actor_id = ?7
+      AND publication_id = (SELECT publication_id FROM active WHERE family = chosen.family)
+      AND NOT EXISTS (
+        SELECT 1 FROM pending_pairs AS other
+        JOIN outputs AS a ON a.publication_id = other.publication_id AND a.output_key = other.a_output
+        JOIN outputs AS b ON b.publication_id = other.publication_id AND b.output_key = other.b_output
+        WHERE other.actor_id = ?7 AND other.family = chosen.family
+          AND other.publication_id = chosen.publication_id AND other.case_key = ?2
+          AND a.system IN (?8, ?9) AND b.system IN (?8, ?9)
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM votes
+        WHERE actor_id = ?7 AND family = chosen.family AND case_key = ?2
+          AND min(a_system, b_system) = ?8 AND max(a_system, b_system) = ?9
+      )`;
+}
 
 const key = (...parts: string[]) => JSON.stringify(parts);
 const sorted = (a: string, b: string): SystemPair => (a < b ? [a, b] : [b, a]);
@@ -235,6 +267,7 @@ interface Standing {
   active: ActiveRow;
   /** The pending pair, while it belongs to the active publication. */
   pending: PendingRow | undefined;
+  offered: PendingRow[];
   storedPair: string | null;
   voted: VoteRow[];
   groups: ReadonlyMap<string, CandidateGroup>;
@@ -253,12 +286,14 @@ async function read(db: D1Database, actor: string, family: string): Promise<Stan
     throw new ApiError(404, 'no_round');
   }
 
-  const pending = (pendingRows.results as PendingRow[]).at(0);
+  const stored = pendingRows.results as PendingRow[];
+  const offered = stored.filter(({ publication_id }) => publication_id === active.id);
   const voted = voteRows.results as VoteRow[];
   return {
     active,
-    pending: pending?.publication_id === active.id ? pending : undefined,
-    storedPair: pending?.id ?? null,
+    pending: offered.at(0),
+    offered,
+    storedPair: stored.find(({ batched }) => !batched)?.id ?? null,
     voted,
     groups: candidates(pairRows.results as PairCases[], voted),
   };
@@ -290,24 +325,59 @@ function view(
   undoPair = latestUndoPair(voted, now),
 ): PairSnapshot {
   const state: PairState = {
-    pair:
-      pending === undefined
-        ? null
-        : {
-            id: pending.id,
-            instruction: pending.instruction,
-            checklist: JSON.parse(pending.checklist) as string[],
-            category: pending.category,
-            ...(active.render === 'html'
-              ? { render: active.render }
-              : { render: active.render, a: pending.a, b: pending.b }),
-            defects: JSON.parse(active.defects) as Defect[],
-          },
+    pair: pending === undefined ? null : pairView(active, pending),
     votes: voted.length,
     remaining: [...groups.values()].reduce((sum, group) => sum + group.caseKeys.length, 0),
     undo: undoPair !== null,
   };
   return { state, undoPair };
+}
+
+function pairView(active: ActiveRow, pending: PendingRow): PairView {
+  return {
+    id: pending.id,
+    instruction: pending.instruction,
+    checklist: JSON.parse(pending.checklist) as string[],
+    category: pending.category,
+    ...(active.render === 'html'
+      ? { render: active.render }
+      : { render: active.render, a: pending.a, b: pending.b }),
+    defects: JSON.parse(active.defects) as Defect[],
+  };
+}
+
+function reserve(groups: Map<string, CandidateGroup>, { caseKey, systems }: Comparison) {
+  const pairKey = key(...systems);
+  const group = groups.get(pairKey);
+  if (group === undefined) {
+    return;
+  }
+  const caseKeys = group.caseKeys.filter((remaining) => remaining !== caseKey);
+  if (caseKeys.length === 0) {
+    groups.delete(pairKey);
+  } else {
+    groups.set(pairKey, { ...group, caseKeys });
+  }
+}
+
+function available({ groups, offered }: Standing, except?: string) {
+  const remaining = new Map(groups);
+  for (const pair of offered) {
+    if (pair.id !== except) {
+      reserve(remaining, { caseKey: pair.case_key, systems: sorted(pair.a_system, pair.b_system) });
+    }
+  }
+  return remaining;
+}
+
+async function currentCoverage(db: D1Database, family: string) {
+  const coverage = await db
+    .prepare(COVERAGE)
+    .bind(family)
+    .all<{ low: string; high: string; votes: number }>();
+  return new Map(
+    coverage.results.map(({ low, high, votes }) => [key(...sorted(low, high)), votes]),
+  );
 }
 
 /** The actor's pending pair in a family, drawn afresh when it belongs to no active publication. */
@@ -350,16 +420,8 @@ async function issue(
 ): Promise<PairSnapshot | undefined> {
   const { active, groups, storedPair, voted } = standing;
   const publication = active.id;
-  const coverage = await db
-    .prepare(COVERAGE)
-    .bind(family)
-    .all<{ low: string; high: string; votes: number }>();
   const rank = ranker(actorKey, actor, family);
-  const comparison = await draw(
-    rank,
-    groups,
-    new Map(coverage.results.map(({ low, high, votes }) => [key(...sorted(low, high)), votes])),
-  );
+  const comparison = await draw(rank, groups, await currentCoverage(db, family));
   const drawn = await place(db, publication, rank, comparison);
   const id = crypto.randomUUID();
 
@@ -370,26 +432,76 @@ async function issue(
     db
       .prepare(ISSUE)
       .bind(
-        id,
         actor,
         family,
         publication,
-        drawn.caseKey,
-        drawn.a,
-        drawn.b,
         now,
         storedPair,
         active.vote_cut,
+        id,
+        drawn.caseKey,
+        drawn.a,
+        drawn.b,
       ),
     db.prepare(PENDING).bind(actor, family),
     db.prepare(LATEST_UNDO).bind(JSON.stringify(undoCandidates)),
   ]);
-  const current = (pending.results as PendingRow[]).at(0);
-  if (current !== undefined && current.publication_id !== publication) {
-    throw new ApiError(409, 'stale_pair');
-  }
+  const current = (pending.results as PendingRow[]).find(
+    ({ publication_id }) => publication_id === publication,
+  );
   const undoPair = (undo.results as Pick<VoteRow, 'pair_id'>[]).at(0)?.pair_id ?? null;
   return current?.id === id ? view(standing, current, now, undoPair) : undefined;
+}
+
+/** Offers at most one open batch per browser and family. Active receipts remain stable on retry. */
+export async function pairBatch(
+  db: D1Database,
+  actorKey: string,
+  actor: string,
+  family: string,
+  count: number,
+  now: number,
+): Promise<PairView[]> {
+  const standing = await read(db, actor, family);
+  const { active, offered, storedPair } = standing;
+  const existing = () => offered.slice(0, count).map((pair) => pairView(active, pair));
+  if (offered.some(({ batched }) => batched) || offered.length >= count) {
+    return existing();
+  }
+  const remaining = available(standing);
+  if (remaining.size === 0) {
+    return existing();
+  }
+
+  const rank = ranker(actorKey, actor, family);
+  const counts = await currentCoverage(db, family);
+  const comparisons: Comparison[] = [];
+  while (remaining.size > 0 && offered.length + comparisons.length < count) {
+    const comparison = await draw(rank, remaining, counts);
+    reserve(remaining, comparison);
+    const pairKey = key(...comparison.systems);
+    counts.set(pairKey, (counts.get(pairKey) ?? 0) + 1);
+    comparisons.push(comparison);
+  }
+  const rows = await Promise.all(
+    comparisons.map(async (comparison) => ({
+      id: crypto.randomUUID(),
+      ...(await place(db, active.id, rank, comparison)),
+    })),
+  );
+  const [inserted, pending] = await db.batch([
+    db
+      .prepare(ISSUE_BATCH)
+      .bind(actor, family, active.id, now, storedPair, active.vote_cut, JSON.stringify(rows)),
+    db.prepare(PENDING).bind(actor, family),
+  ]);
+  const current = (pending.results as PendingRow[]).filter(
+    ({ publication_id }) => publication_id === active.id,
+  );
+  if (inserted.meta.changes === 0 && !current.some(({ batched }) => batched)) {
+    throw new ApiError(409, 'stale_pair');
+  }
+  return current.slice(0, count).map((pair) => pairView(active, pair));
 }
 
 /**
@@ -415,9 +527,13 @@ export async function skip(
     throw new ApiError(409, 'stale_pair');
   }
 
-  const systems = key(...sorted(pending.a_system, pending.b_system));
+  const systems = sorted(pending.a_system, pending.b_system);
   const rank = ranker(actorKey, actor, family);
-  const comparison = await next(rank, standing.groups.get(systems), pending.case_key);
+  const comparison = await next(
+    rank,
+    available(standing, pair).get(key(...systems)),
+    pending.case_key,
+  );
   if (comparison === null) {
     return view(standing, pending, now);
   }
@@ -425,12 +541,15 @@ export async function skip(
   const drawn = await place(db, standing.active.id, rank, comparison);
   const [replaced, current] = await db.batch([
     db
-      .prepare(REPLACE)
-      .bind(crypto.randomUUID(), drawn.caseKey, drawn.a, drawn.b, now, pair, actor),
+      .prepare(replace(pending.batched ? 'batch_pairs' : 'pairs'))
+      .bind(crypto.randomUUID(), drawn.caseKey, drawn.a, drawn.b, now, pair, actor, ...systems),
     db.prepare(PENDING).bind(actor, family),
   ]);
   if (replaced.meta.changes === 0) {
     throw new ApiError(409, 'stale_pair');
   }
-  return view(standing, (current.results as PendingRow[]).at(0), now);
+  const nextPair = (current.results as PendingRow[]).find(
+    ({ publication_id }) => publication_id === standing.active.id,
+  );
+  return view(standing, nextPair, now);
 }
