@@ -2,7 +2,15 @@ import { describe, expect, test } from 'vitest';
 
 import type { FamilyConfig, VotesConfig } from '@/lib/family';
 import { reportSchema, type Report } from '@/lib/report';
-import { boardSlug, publicFamilies, systemPages, type VotesFamily } from '@/lib/reports';
+import {
+  boardSlug,
+  currentReport,
+  publicFamilies,
+  roundLinks,
+  roundPaths,
+  systemPages,
+  type VotesFamily,
+} from '@/lib/reports';
 import { FIXTURE_NAMES, readFixture, readReport } from '@/test/fixture';
 
 const votes = (listed: boolean, displayName = 'Prose'): VotesConfig => ({
@@ -61,6 +69,56 @@ describe('publicFamilies', () => {
       [later.round, later.closed_at],
     ]);
     expect(systemPages(family).has('acme-large')).toBe(true);
+  });
+
+  test('keeps a same-day closed round distinct from the released board', async () => {
+    const name = 'writing-prose';
+    const closed = await report(name, '2026-10-07', '2026-10-07T18:00:00Z');
+    const released = { ...closed, closed_at: '2026-10-07T23:00:00Z' };
+    const [family] = publicFamilies(
+      [{ name, config: votes(true) }],
+      [closed],
+      {},
+      {
+        [name]: released,
+      },
+    );
+
+    expect(currentReport(family)).toBe(released);
+    expect(roundPaths([family]).map(({ props }) => props.round)).toEqual([closed]);
+    expect(roundLinks(family, closed.round)).toEqual([
+      { href: '/writing/prose/', label: 'Current', current: false },
+      { href: '/writing/prose/rounds/2026-10-07/', label: closed.round, current: true },
+    ]);
+    expect(roundLinks(family).map(({ current }) => current)).toEqual([true, false]);
+  });
+
+  test('keeps closed rounds when the released board has no scores', async () => {
+    const name = 'writing-prose';
+    const closed = await report(name, '2026-10-07', '2026-10-07T18:00:00Z');
+    const [family] = publicFamilies(
+      [{ name, config: votes(true) }],
+      [closed],
+      {},
+      {
+        [name]: null,
+      },
+    );
+
+    expect(currentReport(family)).toBeUndefined();
+    expect(roundPaths([family]).map(({ props }) => props.round)).toEqual([closed]);
+  });
+
+  test('rejects a release keyed under another family or for a private family', async () => {
+    const name = 'writing-prose';
+    const closed = await report('another-family', '2026-10-07', '2026-10-07T18:00:00Z');
+
+    expect(() =>
+      publicFamilies([{ name, config: votes(true) }], [], {}, { [name]: closed }),
+    ).toThrow(`current report another-family is keyed as ${name}`);
+    expect(() =>
+      publicFamilies([{ name, config: votes(false) }], [], {}, { [name]: null }),
+    ).toThrow(`current report needs a public voted family: ${name}`);
   });
 
   test("refuses a report that another scorer than its family's wrote", async () => {

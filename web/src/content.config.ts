@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises';
+
 import { defineCollection } from 'astro:content';
 import { file, glob } from 'astro/loaders';
 import { z } from 'astro/zod';
@@ -25,9 +27,35 @@ const reports = defineCollection({
   schema: reportSchema,
 });
 
+const currentReports = defineCollection({
+  loader: {
+    name: 'arena-release',
+    async load(context) {
+      const { config, store } = context;
+      store.clear();
+      const path = new URL('.arena/current.json', config.root);
+      const source = await readFile(path, 'utf8').catch((error: unknown) => {
+        if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+          return null;
+        }
+        throw error;
+      });
+      if (source === null) {
+        return;
+      }
+
+      const reports = z.record(z.string(), z.unknown()).parse(JSON.parse(source));
+      for (const [id, report] of Object.entries(reports)) {
+        store.set({ id, data: await context.parseData({ id, data: { report } }) });
+      }
+    },
+  },
+  schema: z.strictObject({ report: z.nullable(reportSchema) }),
+});
+
 const systems = defineCollection({
   loader: file('../systems.toml'),
   schema: systemConfigSchema,
 });
 
-export const collections = { families, reports, systems };
+export const collections = { families, reports, currentReports, systems };

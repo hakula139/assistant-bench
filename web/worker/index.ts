@@ -7,7 +7,6 @@ import { routePath } from 'hono/route';
 import {
   admissionRequest,
   familyQuery,
-  freshnessQuery,
   previewRequest,
   skipRequest,
   UNDO_HEADER,
@@ -33,7 +32,7 @@ import { BODY_LIMIT_BYTES } from './limits';
 import { pairState, skip, type PairSnapshot } from './pairs';
 import { preview, previewHeaders, previewUnavailable } from './previews';
 import { retain } from './retention';
-import { cachedFreshness, confirm, freshness, record, undo } from './votes';
+import { confirm, record, undo } from './votes';
 
 /** Answers every request that fails its schema with 400 `invalid_request`. */
 function rejectInvalid(result: { success: boolean }) {
@@ -176,14 +175,7 @@ const api = new Hono<Api>()
     const actor = await requireActor(c, now);
     await undo(c.env.DB, actor, c.req.valid('json'), now);
     return c.body(null, 204);
-  })
-  .get('/freshness', sValidator('query', freshnessQuery, rejectInvalid), async (c) => {
-    const status = await cachedFreshness(c.req.url, () =>
-      freshness(c.env.DB, c.env.STORE, c.req.valid('query')),
-    );
-    return c.json({ status });
-  })
-  .onError(respondError);
+  });
 
 export const app = new Hono<Api>()
   .use(async (c, next) => {

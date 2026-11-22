@@ -74,7 +74,12 @@ describe('blinding', () => {
     await send(from, 'GET', `/pair?family=${BLIND}`);
     await send(from, 'POST', '/votes/undo', { family: BLIND, pair: skipped });
     await send(from, 'POST', '/votes/undo', { family: BLIND, pair: skipped });
-    await send(from, 'GET', `/freshness?family=${BLIND}&production=0&production_votes=0`);
+    const freshness = await send(
+      from,
+      'GET',
+      `/freshness?family=${BLIND}&production=0&production_votes=0`,
+    );
+    expect(freshness.status).toBe(404);
 
     for (const response of responses) {
       const text = [

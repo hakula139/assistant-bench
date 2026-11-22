@@ -59,17 +59,18 @@ const appearances = rounds.flatMap(({ round, systems, results: canonical }) => {
   const { reference, anchor, method, rules } = results;
   return standing ? [{ round, systems, reference, anchor, method, rules, standing }] : [];
 });
-const latest = rounds.findLast(({ results }) =>
-  results.standings.some((item) => item.system === system),
-);
-const last = appearances.at(-1);
-if (latest === undefined || last === undefined) {
+const standingFor = (report: VotesFamily['rounds'][number]) =>
+  report.results.standings.find((item) => item.system === system);
+const current = family.current ?? undefined;
+const live = current !== undefined && standingFor(current) !== undefined;
+const latest = live ? current : rounds.findLast((report) => standingFor(report) !== undefined);
+const results = latest === undefined ? undefined : displayVoteScores(latest.results);
+const standing = results?.standings.find((item) => item.system === system);
+if (latest === undefined || results === undefined || standing === undefined) {
   throw new Error(`${system} has no standing on ${family.config.display_name}`);
 }
 const { round, systems } = latest;
-const results = displayVoteScores(latest.results);
 const net = 'kind' in results.method;
-const { standing } = last;
 const names = reportNames(systems);
 const name = (item: string) => systemName(names, item);
 const standings = results.standings;
@@ -131,7 +132,7 @@ const latencyRows = distributionRows((item) => item.latency_sec);
       client:visible
       standing={standing}
       round={round}
-      roundHref={roundPath(family, round)}
+      roundHref={live ? boardPath(family) : roundPath(family, round)}
       net={net}
     />
   </PageHeader>
@@ -195,8 +196,10 @@ const latencyRows = distributionRows((item) => item.latency_sec);
       </Section>
     )}
 
-    <Section title="Rounds">
-      <RoundsTable client:visible appearances={appearances} />
-    </Section>
+    {appearances.length > 0 && (
+      <Section title="Rounds">
+        <RoundsTable client:visible appearances={appearances} />
+      </Section>
+    )}
   </div>
 </Base>

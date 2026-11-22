@@ -9,7 +9,7 @@ import { RoundSwitcher } from '@/components/site/RoundSwitcher';
 import Base from '@/layouts/Base.astro';
 import { boardGuide } from '@/lib/method';
 import type { Report } from '@/lib/report';
-import { boardPath, roundLinks, type BoardLink, type Family } from '@/lib/reports';
+import { boardPath, currentReport, roundLinks, type BoardLink, type Family } from '@/lib/reports';
 import { sitePath, SOURCE } from '@/lib/site';
 
 interface Props {
@@ -24,8 +24,10 @@ const { family, boards, named } = Astro.props;
 const { config, title } = family;
 const { Board } = viewOf(family);
 const guide = boardGuide(config);
-const newest = family.rounds.at(-1);
+const newest = currentReport(family);
 const round = named ?? newest;
+const live = family.scorer === 'votes' && family.current !== undefined;
+const roundSummary = live && named === undefined ? 'Current board' : `Round ${round?.round}`;
 ---
 
 <Base
@@ -49,12 +51,12 @@ const round = named ?? newest;
         {guide.inputs}
       </a>
     </div>
-    {round && (
-      <RoundSwitcher client:load rounds={roundLinks(family, named?.round)} shown={round.round} />
+    {family.rounds.length > 0 && (
+      <RoundSwitcher client:load rounds={roundLinks(family, named?.round)} summary={roundSummary} />
     )}
-    {newest && round !== newest && (
+    {newest && named && round !== newest && (
       <p class={note}>
-        This is an earlier round.{' '}
+        {live ? 'This is a closed round.' : 'This is an earlier round.'}{' '}
         <span class="text-nowrap">
           The latest is <a href={boardPath(family)}>{newest.round}</a>.
         </span>

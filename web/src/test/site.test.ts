@@ -33,6 +33,7 @@ let directory: string;
 let prefixed: string;
 let fixture: string;
 let browser: Browser | undefined;
+const releasedAt = '2026-10-21T19:30:00Z';
 
 beforeAll(async () => {
   // Vitest sets `NODE_ENV=test`, under which Vite would bundle React's development build, and a
@@ -64,6 +65,12 @@ beforeAll(async () => {
   const reports = join(fixture, 'reports', report.family);
   await mkdir(reports, { recursive: true });
   await writeFile(join(reports, `${report.round}.json`), JSON.stringify(report));
+  const arena = join(site, '.arena');
+  await mkdir(arena);
+  await writeFile(
+    join(arena, 'current.json'),
+    JSON.stringify({ [report.family]: { ...report, closed_at: releasedAt } }),
+  );
 
   const build = (outDir: string, extra: NodeJS.ProcessEnv = {}) =>
     promisify(execFile)(
@@ -99,6 +106,18 @@ test("bundles React's production build", async () => {
   expect(
     scripts.filter((_, index) => sources[index].includes('Download the React DevTools')),
   ).toEqual([]);
+});
+
+test('builds the released board without replacing the same-day round', async () => {
+  const [current, closed] = await Promise.all(
+    ['writing/zh/index.html', 'writing/zh/rounds/2026-10-21/index.html'].map(async (path) => {
+      const html = await readFile(join(directory, path), 'utf8');
+      return new JSDOM(html).window.document.querySelector('main time')?.getAttribute('datetime');
+    }),
+  );
+
+  expect(current).toBe(releasedAt);
+  expect(closed).toBe('2026-10-21T18:00:00Z');
 });
 
 describe('built vote document', () => {
@@ -212,7 +231,6 @@ describe('built pages', () => {
   ].join('\n');
   const api = new Map<string, unknown>([
     ['GET /api/families', { families: [VOTE_FAMILY] }],
-    ['GET /api/freshness', { status: 'current' }],
     ['GET /api/pair', voteState],
   ]);
   let pages: string[];

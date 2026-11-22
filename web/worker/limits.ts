@@ -19,8 +19,5 @@ export const TAG_RETENTION_MS = 60 * DAY_MS;
 /** How long a pending pair survives after its issue. */
 export const PAIR_RETENTION_MS = 30 * DAY_MS;
 
-/** How long a data center reuses a freshness answer. */
-export const FRESHNESS_CACHE_SECONDS = 60;
-
 /** The largest request body any route accepts. */
 export const BODY_LIMIT_BYTES = 16 * 1024;

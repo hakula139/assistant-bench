@@ -6,7 +6,7 @@ The site under `web/` has two views built from one Astro project and one compone
 
 The site lists only families with `public = true` and their reports. Before its first round closes, a family shows unmeasured systems under their current display names. Closed rounds use their own frozen public identities. Titles and meta tags use full family names. The build rejects incomplete report metadata, public family IDs without their aspect prefix, and reports scored by another scorer than their family's.
 
-A board's path shows its latest round, while each closed round keeps a permanent page. Round links preserve filters. Family pages link sibling boards, and system pages link appearances across those boards.
+A board's path shows its latest round or its released Arena aggregate. Each closed round keeps a permanent dated page, including a round with the same date as the current board. Round links preserve filters. System pages link their appearances across sibling boards.
 
 Each board uses the shared scorer and render registries for steps, labels, and its methodology link. Captions explain the family's configuration, and legends show only marks the figure draws. Definitions open by tap, click, or Enter. A fallback anchor's definition names the reference it stands in for.
 

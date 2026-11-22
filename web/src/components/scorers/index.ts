@@ -14,7 +14,13 @@ import TestsThenVotes from '@/components/scorers/votes/TestsThenVotes.astro';
 import { legendMarks, type LegendMark } from '@/lib/forest';
 import { formatCountOf } from '@/lib/format';
 import type { RenderSection } from '@/lib/method';
-import type { CheckersFamily, Family, TestsFamily, VotesFamily } from '@/lib/reports';
+import {
+  currentReport,
+  type CheckersFamily,
+  type Family,
+  type TestsFamily,
+  type VotesFamily,
+} from '@/lib/reports';
 
 /** How the site renders the families `F` of one scorer. */
 interface ScorerView<F extends Family> {
@@ -50,7 +56,7 @@ export const scorerViews = {
       return legendMarks(rows, domain, anchorScore);
     },
     roundDetail: (family) => {
-      const round = family.rounds.at(-1);
+      const round = currentReport(family);
       return round ? formatCountOf(round.results.votes, 'vote') : null;
     },
   },

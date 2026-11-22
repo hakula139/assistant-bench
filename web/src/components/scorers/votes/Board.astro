@@ -8,7 +8,7 @@ import { boardPath, type VotesFamily, type VotesReport } from '@/lib/reports';
 
 interface Props {
   family: VotesFamily;
-  /** The closed round to show, or nothing before the first round closes. */
+  /** The released report or closed round to show. */
   round: VotesReport | undefined;
 }
 
@@ -19,7 +19,9 @@ const rows = round === undefined ? unmeasuredRows(config.systems, family.systemN
 
 {round === undefined ? (
   <div class="flex flex-col gap-4">
-    <p class={note}>No round has closed yet.</p>
+    <p class={note}>
+      {family.current === null ? 'No current scores.' : 'No round has closed yet.'}
+    </p>
     <Forest
       client:visible
       caption={`${family.title} systems, none measured yet`}

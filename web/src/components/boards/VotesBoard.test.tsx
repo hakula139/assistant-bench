@@ -233,7 +233,9 @@ describe('VotesBoard', () => {
       'Split-half τ',
       'Length bias',
     ]);
-    expect(parse(html).querySelector('[role="status"]')?.textContent).toMatch(/^Closed /);
+    expect(parse(html).querySelector('time')?.getAttribute('datetime')).toBe(
+      '2026-10-21T18:00:00Z',
+    );
   });
 
   test.each([
