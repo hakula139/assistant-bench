@@ -3,7 +3,7 @@ import { describe, expect, test } from 'vitest';
 
 import { displayVoteScores, fixedAnchor } from '@/lib/ranking';
 import { reportSchema } from '@/lib/report';
-import { readFixture, readReport } from '@/test/fixture';
+import { netReport, readFixture, readReport } from '@/test/fixture';
 import { schemaShape } from '@/test/json-schema';
 
 function replaceField(payload: object, path: (string | number)[], value: unknown): void {
@@ -248,26 +248,11 @@ describe('reportSchema', () => {
   });
 
   test('reads net scores without historical cutoffs and displays points per 100', async () => {
-    const payload = await readReport('report', 'votes');
+    const payload = netReport(await readReport('report', 'votes'));
     const { results } = payload;
-    results.anchor = results.reference;
-    results.method = { kind: 'expected_net', l2_penalty: 0.01 };
-    results.decision = null;
-    for (const row of results.standings) {
-      row.score = -0.25;
-      row.interval = null;
-    }
-    for (const board of results.categories) {
-      for (const row of board.standings) {
-        row.score = -0.25;
-      }
-    }
-    delete results.rules;
-    delete results.cutoffs;
-    delete results.public_held_out;
 
     expect(reportSchema.parse(payload)).toEqual(payload);
-    expect(displayVoteScores(results).standings[0]?.score).toBe(-25);
+    expect(displayVoteScores(results).standings[0]?.score).toBe(42);
     expect(fixedAnchor(results.method)).toBeUndefined();
 
     replaceField(payload, ['results', 'cutoffs'], {
@@ -276,6 +261,21 @@ describe('reportSchema', () => {
     });
     expect(reportSchema.safeParse(payload).success).toBe(false);
   });
+
+  test.each([
+    ['a substitute anchor', ['anchor'], 'acme-mini'],
+    ['a score outside the net scale', ['standings', 0, 'score'], 2],
+    ['an Elo interval', ['standings', 0, 'interval'], { lower: -0.3, upper: 0.1 }],
+    ['an Elo decision', ['decision'], { leader: 'acme-pro', tied: [] }],
+  ] satisfies [string, (string | number)[], unknown][])(
+    'rejects %s on a net report',
+    async (_name, path, value) => {
+      const payload = netReport(await readReport('report', 'votes'));
+      replaceField(payload, ['results', ...path], value);
+
+      expect(reportSchema.safeParse(payload).success).toBe(false);
+    },
+  );
 
   test('preserves capped voter weights on the wire', async () => {
     const { results } = await readReport('report', 'votes');

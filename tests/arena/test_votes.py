@@ -1086,6 +1086,7 @@ class TestSnapshots:
         results = report.votes_results(analysis)
 
         assert results.votes == 4
+        assert results.public_held_out is not None
         assert results.public_held_out.public_cases == 1
         assert results.public_held_out.held_out_cases == 1
         assert {

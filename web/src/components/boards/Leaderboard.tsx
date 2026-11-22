@@ -256,7 +256,10 @@ export function Leaderboard({
             )}
           </span>
         ),
-        meta: { numeric: true, term: ranked ? terms.scoreInterval : undefined },
+        meta: {
+          numeric: true,
+          term: ranked && anchorScore !== undefined ? terms.scoreInterval : undefined,
+        },
       }),
       helper.accessor('votes', {
         header: terms.votes.term,

@@ -41,11 +41,12 @@ src/assistant_bench/
 │   └── usage.py         # Validated measured token counters shared by every transport
 ├── scoring/
 │   ├── checkers.py      # Deterministic instruction checks for collected replies
+│   ├── expected_net.py  # Reference-adjusted vote preferences and joint rejection
 │   ├── gates.py         # Eligibility gates for voted outputs
 │   ├── length.py        # Shared output length measurement
 │   ├── pass_rates.py    # Task-clustered pass-rate intervals, pass^k, and the paired leader test
 │   ├── ranking.py       # Bradley-Terry point fit and its descriptive diagnostics
-│   └── weighting.py     # Family-wide cumulative actor caps
+│   └── weighting.py     # Archived Elo voter weights
 ├── families.py          # Family, gate, case and vote models with explicit pinned source roots
 ├── catalog.py           # Systems and prices from systems.toml and the nixos-config export
 ├── state.py             # Private run claims, immutable records and active collection pointers
@@ -76,7 +77,7 @@ Imports point downward through these layers, so a module never imports one above
 9. `families`, `catalog`, and `state`
 10. `artifacts`, `database`, `generation`, `git`, `messages`, `paths`, `diffs`, and `html`
 
-`families` and `outputs` are separated from `collection`, `tasks`, and `jobs` so that the arena and the reports read family settings and output records without the Harbor job code. `report` sits below the arena modules because it owns the report inputs and the fixed votes method, which the arena builds from vote cuts. A module becomes a subpackage only once it holds several members along one axis, as `harnesses/` does for agents and the environment single-call agents run in, and `scoring/` does for the ways outputs are scored.
+`families` and `outputs` are separated from `collection`, `tasks`, and `jobs` so that the arena and the reports read family settings and output records without the Harbor job code. `report` sits below the arena modules because it owns the report inputs and scoring dispatch, which the arena builds from vote cuts. A module becomes a subpackage only once it holds several members along one axis, as `harnesses/` does for agents and the environment single-call agents run in, and `scoring/` does for the ways outputs are scored.
 
 ## Families and Scorers
 

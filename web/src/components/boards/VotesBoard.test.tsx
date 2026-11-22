@@ -12,7 +12,7 @@ import { fixedAnchor } from '@/lib/ranking';
 import type { PassRate } from '@/lib/report';
 import type { VotesReport } from '@/lib/reports';
 import { reportNames } from '@/lib/systems';
-import { FIXTURE_NAMES, readReport, shownSlugs } from '@/test/fixture';
+import { FIXTURE_NAMES, netReport, readReport, shownSlugs } from '@/test/fixture';
 import { stubPlotFrame } from '@/test/plot';
 import { trackDrawing, type TrackDrawing } from '@/test/track';
 
@@ -111,6 +111,18 @@ describe('VotesBoard', () => {
     window.history.replaceState(null, '', '/');
   });
   afterEach(cleanup);
+
+  test('draws the net board without archived diagnostics or an Elo scale', async () => {
+    const round = netReport(await load());
+    const html = render(round);
+
+    expect(text(html)).toContain('Expected net points per 100 comparisons against Acme Large.');
+    expect(text(html)).toContain('Unranked : Acme Edge, Acme Nano');
+    expect(text(html)).toContain('Acme Pro Preliminary 42');
+    expect(text(html)).not.toContain('Effective votes');
+    expect(head(html)).not.toContain('Score interval');
+    expect(comparison(html)).toBeUndefined();
+  });
 
   test('draws the labels, preliminary marks, and copy of the round it shows', async () => {
     const earlier = await load('report-early');

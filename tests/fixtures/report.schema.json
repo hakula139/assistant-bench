@@ -282,7 +282,7 @@
     },
     "Cutoff": {
       "additionalProperties": false,
-      "description": "What closing read from one store, which freshness compares with the store.",
+      "description": "The store watermark and eligible vote count recorded by an archived round.",
       "properties": {
         "id": {
           "description": "The largest vote ID older than the undo window, or 0 when the store held none.",
@@ -426,7 +426,7 @@
     },
     "HeadToHead": {
       "additionalProperties": false,
-      "description": "Recorded votes between two systems, with half credit for either tie.\n\nThe outcome counts are raw choices, while `win_rate` uses the actors' weights.",
+      "description": "Raw vote counts and vote-weighted win rate for two opponents.",
       "properties": {
         "system": {
           "title": "System",
@@ -1140,12 +1140,12 @@
           "type": "string"
         },
         "anchor": {
-          "description": "Ranked system fixed at the recorded anchor score.",
+          "description": "The configured reference, or the substitute anchor in an archived Elo round.",
           "title": "Anchor",
           "type": "string"
         },
         "cases": {
-          "description": "Cases with a weighted comparison in the ranked component, which cluster the\nintervals.",
+          "description": "Cases in the evaluation, limited to the ranked component for archived Elo.",
           "minimum": 0,
           "title": "Cases",
           "type": "integer"

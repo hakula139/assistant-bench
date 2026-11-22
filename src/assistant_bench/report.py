@@ -139,7 +139,7 @@ NET_METHOD = ExpectedNetMethod(kind='expected_net', l2_penalty=ranking.L2_PENALT
 
 
 class Cutoff(_Model):
-    """What closing read from one store, which freshness compares with the store."""
+    """The store watermark and eligible vote count recorded by an archived round."""
 
     id: Annotated[int, Field(strict=True, ge=0)]
     """The largest vote ID older than the undo window, or 0 when the store held none."""
@@ -208,10 +208,7 @@ class Standing(_Model):
 
 
 class HeadToHead(_Model):
-    """Recorded votes between two systems, with half credit for either tie.
-
-    The outcome counts are raw choices, while `win_rate` uses the actors' weights.
-    """
+    """Raw vote counts and vote-weighted win rate for two opponents."""
 
     system: str
     opponent: str

@@ -30,7 +30,7 @@ import RoundPage from '@/pages/[aspect]/[board]/rounds/[round].astro';
 import NotFoundPage from '@/pages/404.astro';
 import HomePage from '@/pages/index.astro';
 import MethodologyPage from '@/pages/methodology.astro';
-import { FIXTURE_NAMES, readReport, shownSlugs, visitIslandProps } from '@/test/fixture';
+import { FIXTURE_NAMES, netReport, readReport, shownSlugs, visitIslandProps } from '@/test/fixture';
 
 const listed = vi.hoisted(() => ({ families: [] as Family[] }));
 vi.mock(import('@/lib/reports'), async (importOriginal) => ({
@@ -427,15 +427,7 @@ describe('family panel', () => {
 
   test('labels a measured family panel with its net score units', async () => {
     const arena = await family();
-    const round = arena.rounds.at(-1);
-    if (!round) {
-      throw new Error('Expected a round');
-    }
-    round.results.method = { kind: 'expected_net', l2_penalty: 0.01 };
-    for (const [index, row] of round.results.standings.entries()) {
-      row.score = index === 0 ? 0.42 : 0;
-      row.interval = null;
-    }
+    arena.rounds[1] = netReport(arena.rounds[1]);
 
     const html = await render(FamilyPanel, { family: arena });
 
@@ -495,6 +487,18 @@ describe('family panel', () => {
 });
 
 describe('system page', () => {
+  test('uses net units in the current standing and preserves the earlier Elo score', async () => {
+    const arena = await family();
+    arena.rounds[1] = netReport(arena.rounds[1]);
+
+    const html = await render(SystemPage, { family: arena, system: 'acme-pro', boards: [] });
+
+    expect(headerStats(html)[0]).toBe('Net points per 100 42');
+    expect(text(html)).toContain('Each vote counts once.');
+    expect(text(html)).toContain('42 net / 100');
+    expect(text(html)).toContain('900');
+  });
+
   test("renders win rates under each voter's weight", async () => {
     const html = await render(SystemPage, {
       family: await family(),
