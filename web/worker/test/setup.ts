@@ -14,6 +14,7 @@ beforeEach(async () => {
     ...[
       'votes',
       'pair_vote_counts',
+      'batch_pairs',
       'pairs',
       'actors',
       'active',

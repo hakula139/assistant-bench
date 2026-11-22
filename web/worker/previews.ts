@@ -21,7 +21,7 @@ export async function preview(
 ): Promise<string> {
   const row = await db
     .prepare(
-      `SELECT outputs.content FROM pairs
+      `SELECT outputs.content FROM pending_pairs AS pairs
        JOIN active ON active.family = pairs.family
          AND active.publication_id = pairs.publication_id
        JOIN publications ON publications.id = pairs.publication_id AND publications.render = 'html'

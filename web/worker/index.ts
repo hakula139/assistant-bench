@@ -7,11 +7,13 @@ import { routePath } from 'hono/route';
 import {
   admissionRequest,
   familyQuery,
+  pairBatchRequest,
   previewRequest,
   skipRequest,
   UNDO_HEADER,
   UNDO_NONE,
   undoRequest,
+  voteBatchRequest,
   voteRequest,
   type ErrorView,
 } from '@/lib/arena';
@@ -29,10 +31,10 @@ import {
 } from './actors';
 import { ApiError, type Api, type Bindings } from './api';
 import { BODY_LIMIT_BYTES } from './limits';
-import { pairState, skip, type PairSnapshot } from './pairs';
+import { pairBatch, pairState, skip, type PairSnapshot } from './pairs';
 import { preview, previewHeaders, previewUnavailable } from './previews';
 import { retain } from './retention';
-import { confirm, record, undo } from './votes';
+import { confirm, record, recordBatch, undo } from './votes';
 
 /** Answers every request that fails its schema with 400 `invalid_request`. */
 function rejectInvalid(result: { success: boolean }) {
@@ -146,6 +148,13 @@ const api = new Hono<Api>()
       await pairState(c.env.DB, c.env.ACTOR_KEY, actor, c.req.valid('query').family, now),
     );
   })
+  .post('/pair/batch', sValidator('json', pairBatchRequest, rejectInvalid), async (c) => {
+    const now = Date.now();
+    const actor = await requireActor(c, now);
+    const { family, count } = c.req.valid('json');
+    const pairs = await pairBatch(c.env.DB, c.env.ACTOR_KEY, actor, family, count, now);
+    return c.json({ pairs });
+  })
   .get('/previews/:pair/:side', sValidator('param', previewRequest, rejectInvalid), async (c) => {
     const actor = await requireActor(c, Date.now());
     const { pair, side } = c.req.valid('param');
@@ -164,6 +173,12 @@ const api = new Hono<Api>()
     const actor = await requireActor(c, now);
     await record(c.env.DB, actor, c.get('tag'), c.req.valid('json'), now);
     return c.body(null, 204);
+  })
+  .post('/votes/batch', sValidator('json', voteBatchRequest, rejectInvalid), async (c) => {
+    const now = Date.now();
+    const actor = await requireActor(c, now);
+    const { family, votes } = c.req.valid('json');
+    return c.json({ votes: await recordBatch(c.env.DB, actor, c.get('tag'), votes, now, family) });
   })
   .post('/votes/confirm', sValidator('json', voteRequest, rejectInvalid), async (c) => {
     const actor = await requireActor(c, Date.now());

@@ -11,5 +11,6 @@ export async function retain(db: D1Database, now: number): Promise<void> {
       .prepare('UPDATE actors SET ip_tag = NULL WHERE ip_tag IS NOT NULL AND created_at <= ?')
       .bind(tagged),
     db.prepare('DELETE FROM pairs WHERE issued_at <= ?').bind(now - PAIR_RETENTION_MS),
+    db.prepare('DELETE FROM batch_pairs WHERE issued_at <= ?').bind(now - PAIR_RETENTION_MS),
   ]);
 }
