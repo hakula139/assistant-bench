@@ -341,13 +341,13 @@ describe('methodology page', () => {
     expect(stepHints(html)).toEqual([]);
   });
 
-  test('limits the score interval to new cases and opens the example points', async () => {
+  test('shows net points and explains the scope of archived intervals', async () => {
     const html = await render(MethodologyPage, {});
 
     expect(text(html)).toContain(
       "Each score's interval covers new cases like the round's, judged by the same voters, and does not extend to new voters.",
     );
-    expect(islandHints(html, 'Forest')).toEqual(['1,040', '930', '380', 'no votes']);
+    expect(islandHints(html, 'Forest')).toEqual(['42', '9', '−61', 'no votes']);
   });
 
   test('defines the terms a board of diffs uses in its own section', async () => {

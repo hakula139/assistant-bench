@@ -2513,8 +2513,7 @@ class TestClose:
         closed = report.Report.model_validate_json(path.read_text())
         assert closed.results.scorer == 'votes'
         assert closed.results.votes == (2 if receipt == 'distinct' else 1)
-        assert closed.results.cutoffs.production == report.Cutoff(id=1, votes=1)
-        assert closed.results.cutoffs.private == report.Cutoff(id=1, votes=1)
+        assert closed.results.cutoffs is None
         assert all(row.mean_cost_usd == 0.5 for row in closed.results.standings)
         (header,) = store.private_database.execute(
             'SELECT id FROM vote_snapshots WHERE sealed = 1'
@@ -2523,6 +2522,10 @@ class TestClose:
         assert saved.production is not None
         assert saved.production.inventory.outputs == ()
         assert saved.production.output_generation is None
+        assert saved.private is not None
+        for cut in (saved.production, saved.private):
+            assert cut.cutoff == 1
+            assert len(cut.votes) == 1
 
     def test_names_publication_preparation_when_no_store_is_active(
         self,
