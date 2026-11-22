@@ -1,7 +1,7 @@
 ---
 import { renderSections, scorerViews } from '@/components/scorers';
 import { partId } from '@/components/scorers/parts';
-import { intro, list, PageHeader, Section, stack } from '@/components/site/PageParts';
+import { PageHeader, Section, stack } from '@/components/site/PageParts';
 import Base from '@/layouts/Base.astro';
 import type { Scorer } from '@/lib/family';
 import { scorers } from '@/lib/method';
@@ -36,12 +36,7 @@ const contents = [
 <Base title="Methodology" section="methodology">
   <div class="grid gap-8 lg:grid-cols-[minmax(0,1fr)_13rem] lg:gap-x-16 lg:gap-y-10">
     <div class="lg:col-start-1">
-      <PageHeader title="Methodology">
-        <p class={intro}>
-          Every system in a family answers the same cases or tasks, and the family's scorer turns
-          the results into a leaderboard.
-        </p>
-      </PageHeader>
+      <PageHeader title="Methodology" />
     </div>
 
     <nav
@@ -74,10 +69,9 @@ const contents = [
     <article class:list={[stack, 'leading-relaxed lg:col-start-1']}>
       <Section id="systems" title="Systems and rounds">
         <p>
-          A family is one leaderboard: a fixed set of cases or tasks and the systems that answer
-          them. A system is a model with its effort, harness, and prompt, and changing any part
-          makes a new system. Each round is a dated snapshot that refits every result so far.
-          Families are grouped by aspect, the skill they measure.
+          Each family compares systems on a common set of cases or tasks. A system fixes the model,
+          effort, harness, and prompt. Each dated round records the systems and evidence used to
+          produce its leaderboard.
         </p>
       </Section>
 
@@ -88,23 +82,15 @@ const contents = [
       ))}
 
       <Section id="limits" title="Known limits">
-        <ul class:list={['list-disc', list]}>
-          <li>
-            One person casts every vote, so each voted board reflects that person's preferences.
-          </li>
-          <li>
-            Voted scores are relative, so only the both-bad and gate-failure rates measure outputs
-            on an absolute scale.
-          </li>
-          <li>
-            Voted scores carry no length adjustment. Each round summary reports whether the rater
-            favors longer or shorter outputs.
-          </li>
-        </ul>
+        <p>
+          A voted board reflects the preferences of its voters. The round summary gives their count
+          and shows whether they favored longer or shorter outputs. The score has no length
+          adjustment.
+        </p>
         <p class="text-muted-foreground">
-          The design notes on <a href={`${docs}/ranking.md`}>ranking</a>, the{' '}
-          <a href={`${docs}/arena.md`}>vote arena</a>, and each{' '}
-          <a href={`${SOURCE}/tree/main/docs/design/families`}>family</a> cover the math.
+          See the <a href={`${docs}/ranking.md`}>ranking method</a>,{' '}
+          <a href={`${docs}/arena.md`}>voting design</a>, and{' '}
+          <a href={`${SOURCE}/tree/main/docs/design/families`}>family-specific limitations</a>.
         </p>
       </Section>
     </article>

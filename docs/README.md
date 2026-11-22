@@ -7,14 +7,15 @@
 
 ## Use and Operate
 
-- [Running](guide/running.md): configure credentials, generate and collect outputs, manage spend, publish votes and close rounds.
+- [Running](guide/running.md) covers credentials, generation and collection, budgets, publication and closing rounds.
 - [Authoring](guide/authoring.md): add families, cases, tasks and systems.
 - [Data](conventions/data.md): choose where sources and runtime records belong.
 
 ## Understand Results
 
 - [Systems](design/systems.md): generation identity, harnesses and route probes.
-- [Ranking](design/ranking.md) and [Reports](design/reports.md): statistical methods, uncertainty and frozen round evidence.
+- Read the [methodology](https://bench.hakula.xyz/methodology/) to interpret a leaderboard and its uncertainty.
+- [Ranking](design/ranking.md) and [Reports](design/reports.md) explain how to reproduce scores from the evidence frozen in each round.
 - [Writing](design/families/writing.md) and [Coding](design/families/coding.md): measurement goals, source policies and limitations.
 - [Arena](design/arena.md) and [Site](design/site.md): blind comparisons, publication boundaries and presentation.
 
