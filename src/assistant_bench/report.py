@@ -201,7 +201,7 @@ class Standing(_Model):
 
 
 class HeadToHead(_Model):
-    """Human choices between two systems, with half credit for either tie.
+    """Recorded votes between two systems, with half credit for either tie.
 
     The outcome counts are raw choices, while `win_rate` uses the actors' weights.
     """
@@ -274,13 +274,13 @@ class VotesResults(_Model):
     intervals."""
 
     votes: Annotated[int, Field(ge=0)]
-    """Eligible human choices across every component."""
+    """Eligible recorded votes across every component."""
     effective_votes: Annotated[float, Field(ge=0)]
-    """Eligible human row weight across every component, excluding settlements."""
+    """Total weight of eligible recorded votes across every component."""
     dropped_votes: int
     """Excluded votes plus votes on outputs the publication no longer admits."""
     voters: int
-    """Browsers with at least one eligible human choice."""
+    """Distinct voter identities with at least one eligible recorded vote."""
 
     standings: list[Standing]
     unranked: list[str]
@@ -898,7 +898,7 @@ class AnalysisInput:
     """Every frozen case with its category."""
 
     ordinary: tuple[HumanEvidence, ...]
-    """Eligible human choices, ordered by vote ID."""
+    """Eligible recorded votes, ordered by vote ID."""
 
     settlements: tuple[ranking.Comparison, ...]
     outputs: tuple[OutputMeasurement, ...]

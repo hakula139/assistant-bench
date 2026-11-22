@@ -6,7 +6,7 @@ A report publishes one closed round's aggregates under public system IDs. [`repo
 
 `uv run bench close <family>` closes a round into `reports/<family>/<round>.json`. A voted family seals cuts of its available production and private votes in private D1. `--snapshot <id>` replays that immutable snapshot with its original closing time. A test-scored family collects an immutable output generation and aggregates it with the exact public and private source revisions frozen by collection. The round is the UTC closing date, so closing again that day replaces its file. Reports are committed through ordinary PRs.
 
-Voted closure uses each cut's publication facts, frozen labels and associated output generation. Missing historical generation evidence leaves measurements unknown. Replay needs no current family, case sources or catalog. Closure requires eligible human choices or settled comparisons. A fully settled round can close with zero votes and voters. Several fingerprints under one system ID, or a malformed prior report, fail closure with an explanation.
+Voted closure uses each cut's publication facts, frozen labels and associated output generation. Missing historical generation evidence leaves measurements unknown. Replay needs no current family, case sources or catalog. Closure requires eligible recorded votes or settled comparisons. A fully settled round can close with zero votes and voters. Several fingerprints under one system ID, or a malformed prior report, fail closure with an explanation.
 
 ## Frozen Identity
 

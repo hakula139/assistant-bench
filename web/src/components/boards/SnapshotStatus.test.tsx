@@ -62,21 +62,23 @@ describe('SnapshotStatus', () => {
     },
   );
 
-  test('discloses an unchecked source when a combined round is current here', async () => {
+  test.each([
+    [15, ' The round also includes votes from another source, which has not been checked.'],
+    [0, ''],
+  ])('describes the unchecked source when it recorded %i votes', async (votes, sourceNote) => {
+    const message = 'This voting service has no new counted votes since the round closed.';
     stubFetch(Promise.resolve(Response.json({ status: 'current' })));
 
     render(
       <SnapshotStatus
         family="writing-zh"
         closedAt={closedAt}
-        cutoffs={{ ...cutoffs, private: { id: 20, votes: 15 } }}
+        cutoffs={{ ...cutoffs, private: { id: 20, votes } }}
       />,
     );
 
-    expect((await screen.findByText(/another source/)).textContent).toContain(
-      'The round also includes votes from another source, which has not been checked.',
-    );
-    expect(screen.getByRole('status').textContent).not.toContain('uses every counted vote');
+    const notice = await screen.findByText(message, { exact: false });
+    expect(notice.textContent).toBe(`${closed} ${message}${sourceNote}`);
   });
 
   test.each([

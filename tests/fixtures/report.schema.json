@@ -405,7 +405,7 @@
     },
     "HeadToHead": {
       "additionalProperties": false,
-      "description": "Human choices between two systems, with half credit for either tie.\n\nThe outcome counts are raw choices, while `win_rate` uses the actors' weights.",
+      "description": "Recorded votes between two systems, with half credit for either tie.\n\nThe outcome counts are raw choices, while `win_rate` uses the actors' weights.",
       "properties": {
         "system": {
           "title": "System",
@@ -1106,13 +1106,13 @@
           "type": "integer"
         },
         "votes": {
-          "description": "Eligible human choices across every component.",
+          "description": "Eligible recorded votes across every component.",
           "minimum": 0,
           "title": "Votes",
           "type": "integer"
         },
         "effective_votes": {
-          "description": "Eligible human row weight across every component, excluding settlements.",
+          "description": "Total weight of eligible recorded votes across every component.",
           "minimum": 0,
           "title": "Effective Votes",
           "type": "number"
@@ -1123,7 +1123,7 @@
           "type": "integer"
         },
         "voters": {
-          "description": "Browsers with at least one eligible human choice.",
+          "description": "Distinct voter identities with at least one eligible recorded vote.",
           "title": "Voters",
           "type": "integer"
         },

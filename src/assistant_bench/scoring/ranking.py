@@ -102,7 +102,7 @@ class Matchups:
         )
 
     def root(self, order: Sequence[str]) -> str:
-        """Return the system incident on the greatest effective human weight.
+        """Return the system incident on the greatest effective vote weight.
 
         Only sided rows count as votes. A tie follows `order`, then the name.
         """
@@ -171,7 +171,7 @@ class Component:
     """The point fit of one connected component."""
 
     root: str
-    """System incident on the component's greatest effective human weight."""
+    """System incident on the component's greatest effective vote weight."""
     anchor: str
     """System at `ANCHOR`, the reference when the component holds it, else the root."""
     ratings: PointRatings
@@ -287,7 +287,7 @@ def rate_root(
 ) -> Component:
     """Fit the component of the root, given at least one comparison.
 
-    The root is the system incident on the greatest effective human weight, and
+    The root is the system incident on the greatest effective vote weight, and
     `order` breaks ties. The reference anchors the component when it belongs to it,
     and the root anchors it otherwise.
     """
