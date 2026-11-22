@@ -80,6 +80,7 @@ class Vote(_Model):
     choice: Choice
     defects: TaggedDefects
     elapsed_ms: int
+    pair_id: str | None = Field(default=None, exclude_if=lambda value: value is None)
     publication: BallotPublication | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
@@ -267,6 +268,7 @@ def read_cut(
             'a_output', v.a_output, 'b_output', v.b_output,
             'a_system', v.a_system, 'b_system', v.b_system, 'choice', v.choice,
             'defects', json(v.defects), 'elapsed_ms', v.elapsed_ms,
+            'pair_id', v.pair_id,
             'publication', CASE
                 WHEN v.publication_id IS NOT (SELECT id FROM active_publication)
                 THEN json_object(
@@ -286,7 +288,12 @@ def read_cut(
         JOIN case_facts AS c ON c.publication_id = p.id AND c.case_key = a.case_key
         WHERE v.exclusion IS NULL
         ORDER BY sort_rank, sort_key, sort_id""",
-        [family, include_active, family, int(now.timestamp() * 1000) - UNDO_WINDOW_MS],
+        [
+            family,
+            int(include_active),
+            family,
+            int(now.timestamp() * 1000) - UNDO_WINDOW_MS,
+        ],
     ).rows
     if not rows:
         return None
@@ -757,6 +764,19 @@ class _CountedVote(NamedTuple):
     actor: str
     a: OutputFacts
     b: OutputFacts
+    case: CaseFacts | None
+
+    def receipt_facts(self) -> tuple[object, ...]:
+        """Identify the evidence graded by a submission in either official store."""
+        return (
+            self.vote.case_key,
+            self.vote.choice,
+            tuple(sorted(self.vote.defects.a)),
+            tuple(sorted(self.vote.defects.b)),
+            self.case,
+            self.a,
+            self.b,
+        )
 
 
 def voting_input(
@@ -768,15 +788,32 @@ def voting_input(
     cases = [case for _, cut in cuts for case in cut.inventory.cases]
     outputs = [output for _, cut in cuts for output in cut.inventory.outputs]
     counted: list[_CountedVote] = []
+    receipts: dict[str, _CountedVote] = {}
     for store, cut in cuts:
         published = {output.key: output for output in cut.inventory.outputs}
+        published_cases = {case.key: case for case in cut.inventory.cases}
         for vote in cut.votes:
             if vote.publication is None:
                 a, b = published.get(vote.a_output), published.get(vote.b_output)
+                case = published_cases.get(vote.case_key)
             else:
                 a, b = vote.publication.a, vote.publication.b
-            if a is not None and b is not None and _counts(vote, a, b):
-                counted.append(_CountedVote(vote, f'{store}:{vote.actor}', a, b))
+                case = vote.publication.case
+            if a is None or b is None or not _counts(vote, a, b):
+                continue
+
+            row = _CountedVote(vote, f'{store}:{vote.actor}', a, b, case)
+            if vote.pair_id is not None:
+                previous = receipts.get(vote.pair_id)
+                if previous is not None:
+                    if previous.receipt_facts() != row.receipt_facts():
+                        raise InputError(
+                            'Official vote stores disagree on a ballot receipt.'
+                        )
+                    continue
+                receipts[vote.pair_id] = row
+
+            counted.append(row)
 
     actors = [row.actor for row in counted]
     ordinary = tuple(
@@ -799,10 +836,20 @@ def voting_input(
             else vote.publication.case.category,
             split=None if vote.publication is None else vote.publication.case.split,
         )
-        for (vote, actor, a, b), weight in zip(
+        for (vote, actor, a, b, _), weight in zip(
             counted, actor_weights(actors), strict=True
         )
     )
+
+    policy = snapshot.policy
+    defects = dict.fromkeys(policy.defects)
+    categories = dict.fromkeys(snapshot.category_order)
+    for evidence in ordinary:
+        if evidence.category is None:
+            continue
+
+        categories.setdefault(evidence.category)
+        defects.update(dict.fromkeys((*evidence.defects_a, *evidence.defects_b)))
 
     measured: dict[str, Output] = {}
     for target, cut in cuts:
@@ -819,21 +866,9 @@ def voting_input(
         )
     return AnalysisInput(
         family=snapshot.family,
-        reference=snapshot.policy.reference,
+        reference=policy.reference,
         systems=tuple(system_names(snapshot)),
-        defects=tuple(
-            dict.fromkeys(
-                (
-                    *snapshot.policy.defects,
-                    *(
-                        defect
-                        for row in ordinary
-                        if row.category is not None
-                        for defect in (*row.defects_a, *row.defects_b)
-                    ),
-                )
-            )
-        ),
+        defects=tuple(defects),
         cutoffs=Cutoffs(
             production=None
             if snapshot.production is None
@@ -844,14 +879,7 @@ def voting_input(
             if snapshot.private is None
             else Cutoff(id=snapshot.private.cutoff, votes=len(snapshot.private.votes)),
         ),
-        declared_categories=tuple(
-            dict.fromkeys(
-                (
-                    *snapshot.category_order,
-                    *(row.category for row in ordinary if row.category is not None),
-                )
-            )
-        ),
+        declared_categories=tuple(categories),
         categories=tuple((case.key, case.category) for case in cases),
         ordinary=ordinary,
         settlements=_settlements(outputs),

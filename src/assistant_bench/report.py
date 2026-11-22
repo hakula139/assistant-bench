@@ -137,7 +137,7 @@ class Cutoff(_Model):
     id: Annotated[int, Field(strict=True, ge=0)]
     """The largest vote ID older than the undo window, or 0 when the store held none."""
     votes: Annotated[int, Field(strict=True, ge=0)]
-    """The store's votes with IDs up to `id` that no exclusion removed."""
+    """Votes old enough to count that no exclusion removed, before combining stores."""
 
 
 class Cutoffs(_Model):
@@ -278,7 +278,7 @@ class VotesResults(_Model):
     effective_votes: Annotated[float, Field(ge=0)]
     """Total weight of eligible recorded votes across every component."""
     dropped_votes: int
-    """Excluded votes plus votes on outputs the publication no longer admits."""
+    """Votes omitted by a moderator or by the rules for this round."""
     voters: int
     """Distinct voter identities with at least one eligible recorded vote."""
 

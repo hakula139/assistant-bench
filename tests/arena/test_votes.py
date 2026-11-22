@@ -183,6 +183,8 @@ class TestReadCut:
 
         def mutate_after_read(sql: str, params: Sequence[Param] = ()) -> Result:
             nonlocal interposed
+            assert params[1] == 1
+            assert not isinstance(params[1], bool)
             result = execute(sql, params)
             if not interposed:
                 interposed = True
@@ -1033,6 +1035,67 @@ class TestSnapshots:
         }
         assert votes.system_names(restored)['acme-pro'] == ARENA_NAMES['acme-pro']
         assert votes.fingerprints(restored)['acme-pro'] == 'fp-acme-pro'
+
+    def test_keeps_shared_cases_out_of_the_independent_split_comparison(
+        self, private_store: SQLiteDatabase
+    ) -> None:
+        family = make_votes_family(public_voting=False)
+        shared = make_case('shared')
+        old_public = make_case('old-public')
+        for cases, actor in (
+            ([shared, old_public], 'old'),
+            (
+                [make_case('shared', 'held-out'), make_case('new-held', 'held-out')],
+                'new',
+            ),
+        ):
+            published = publication.prepare(
+                family,
+                cases,
+                [
+                    make_trial(case.id, system)
+                    for case in cases
+                    for system in ARENA_SYSTEMS
+                ],
+                ARENA_NAMES,
+                target='private',
+            )
+            assert stage_and_activate(private_store, published, NOW)
+            for index in range(len(cases)):
+                record_vote(
+                    private_store,
+                    published,
+                    NOW,
+                    actor=f'{actor}-{index}',
+                    age=timedelta(hours=1),
+                    case=index,
+                )
+        frozen = Snapshot(
+            family=family.name,
+            taken_at=NOW,
+            closed_at=NOW,
+            category_order=('docs',),
+            closing_revision=None,
+            production=None,
+            private=votes.read_cut(private_store, family.name, NOW),
+        )
+
+        identity = votes.save_snapshot(private_store, frozen)
+        restored = votes.read_snapshot(private_store, identity)
+        analysis = votes.voting_input(restored, {})
+        results = report.votes_results(analysis)
+
+        assert results.votes == 4
+        assert results.public_held_out.public_cases == 1
+        assert results.public_held_out.held_out_cases == 1
+        assert {
+            (row.comparison.case, row.split)
+            for row in analysis.ordinary
+            if row.split is not None
+        } == {
+            (publication.case_key(shared), 'public'),
+            (publication.case_key(old_public), 'public'),
+        }
 
     def test_keeps_interrupted_rows_unreadable_until_complete_resumption(
         self, private_store: SQLiteDatabase, monkeypatch: pytest.MonkeyPatch
