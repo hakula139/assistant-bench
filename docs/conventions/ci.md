@@ -25,13 +25,14 @@ Set each project's job timeout to several times its measured successful duration
 
 ## Deploy
 
-Production and PR previews consume Web Check's `site-dist` artifact. `web/wrangler.toml` owns their Worker and database bindings. Deploy secrets are scoped to the steps that run Wrangler.
+PR previews consume Web Check's `site-dist` artifact. Production builds with the latest mature Arena reports. `web/wrangler.toml` owns the Worker and database bindings.
 
-- **Deploy Voting:** runs after CI Result on `main`, in the `production` environment. Its concurrency group retains up to 100 pending deploys and lets a running deploy finish. Before deploying, it compares the commit with the current `main` head and skips a superseded commit. It applies pending D1 migrations before deploying the voting Worker and its site assets.
+- **Deploy Voting:** runs after CI Result on `main`, in the `production` environment. It shares the `production` queue with Arena Release, which lets a running job finish. Before deploying, it compares the commit with the current `main` head and skips a superseded commit. It applies pending D1 migrations before deploying the voting Worker and its site assets.
+- **Arena Release:** runs from `main` when `ARENA_PUBLICATION_ENABLED` is `true`. It captures hourly and checks every 15 minutes for changes at least two hours old. It only runs on a revision whose push CI already deployed. Both jobs confirm reports after a successful deployment.
 - **Deploy Preview:** waits for Node and Web checks on same-repository PRs. It publishes an asset-only Worker Preview named `pr-<number>` and comments the stable preview URL, the commit's deployment URL, and the workflow logs. Its `workers.dev` URL sends `X-Robots-Tag: noindex`. The `preview-<number>` concurrency group is shared with cleanup. A deploy checks that the PR is still open after joining that group, so one starting after cleanup skips deployment.
 - **Preview Cleanup:** runs on PR closure through `pull_request_target`, deletes the preview, deactivates its deployments, and updates the comment. It uses the trusted default-branch workflow and checkout because the event carries secrets, including for PRs with merge conflicts. Changes to cleanup take effect once merged.
 
-All three jobs use `CLOUDFLARE_API_TOKEN`, with the account configured in Wrangler. The token needs Workers Scripts Edit and D1 Edit. Applying migrations can create the `d1_migrations` table even when no migration is pending. Worker secrets configured through [Running](../guide/running.md#setting-up-a-vote-store) persist across deploys. Static previews have no voting bindings.
+Production uses the `production` environment's `CLOUDFLARE_API_TOKEN` for Wrangler and both official D1 stores. Apply the private migrations and verify access to both stores before deploying. Preview jobs use the repository token. The production token needs Workers Scripts Edit and D1 Edit. Applying migrations can create the `d1_migrations` table even when no migration is pending. Worker secrets configured through [Running](../guide/running.md#setting-up-a-vote-store) persist across deploys. Static previews have no voting bindings.
 
 ### GitLab Pages
 
