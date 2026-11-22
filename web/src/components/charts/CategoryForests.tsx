@@ -12,12 +12,16 @@ interface CategoryForestsProps {
   /** Systems from top to bottom, in the leaderboard's order. */
   systems: string[];
   names: SystemNames;
-  anchorScore: number;
+  anchorScore?: number;
+  domain?: [number, number];
 }
 
 /** Returns the marks the category forests draw, for their legend. */
-export function categoryMarks(categories: CategoryBoard[], anchorScore: number): LegendMark[] {
-  const domain = sharedDomain(categories.map((board) => board.standings));
+export function categoryMarks(
+  categories: CategoryBoard[],
+  anchorScore?: number,
+  domain = sharedDomain(categories.map((board) => board.standings)),
+): LegendMark[] {
   const rows = categories.flatMap((board) =>
     board.standings.map((refit) => ({
       system: refit.system,
@@ -30,10 +34,16 @@ export function categoryMarks(categories: CategoryBoard[], anchorScore: number):
 }
 
 /** One forest plot per category, on an axis every category shares. */
-export function CategoryForests({ categories, systems, names, anchorScore }: CategoryForestsProps) {
+export function CategoryForests({
+  categories,
+  systems,
+  names,
+  anchorScore,
+  domain: fixedDomain,
+}: CategoryForestsProps) {
   const domain = useMemo(
-    () => sharedDomain(categories.map((board) => board.standings)),
-    [categories],
+    () => fixedDomain ?? sharedDomain(categories.map((board) => board.standings)),
+    [categories, fixedDomain],
   );
   const labels = useMemo(
     () => systems.map((system) => systemName(names, system)),

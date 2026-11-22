@@ -95,8 +95,8 @@ describe('methodSteps', () => {
     );
     expect(steps.slice(1).map(({ hint }) => hint)).toEqual([
       gateRule(family),
-      'One rater votes on two outputs for a case without seeing which systems wrote them.',
-      "Elo-like point scores from a Bradley-Terry fit. Each round records its anchor and fitting settings. Each score's interval covers new cases like the round's, judged by the same voters, and does not extend to new voters.",
+      'Voters compare two outputs for a case without seeing which systems wrote them.',
+      'Expected net points per 100 comparisons against the reference system.',
     ]);
   });
 
@@ -120,7 +120,7 @@ describe('methodSteps', () => {
       [
         'pairs',
         'system names hidden',
-        'One rater votes on the diffs of two passing solutions to a task without seeing which systems wrote them.',
+        'Voters compare the diffs of two passing solutions to a task without seeing which systems wrote them.',
       ],
     ]);
   });

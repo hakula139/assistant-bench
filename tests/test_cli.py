@@ -2380,6 +2380,7 @@ class TestClose:
         cut = saved.production if target == 'production' else saved.private
         assert cut is not None and cut.output_generation == store.generation
         assert saved.closed_at == saved.taken_at
+        assert saved.method == 'expected_net'
         (path,) = (reports_dir / 'f').iterdir()
         closed = report.Report.model_validate_json(path.read_text())
         assert closed.results.scorer == 'votes'
@@ -2388,12 +2389,16 @@ class TestClose:
             display_name='Public Large', fingerprint='fp-large'
         )
         assert closed.results.standings[0].mean_cost_usd == 0.5
-        assert (closed.results.cutoffs.production is not None) == (
-            target == 'production'
-        )
-        assert (closed.results.cutoffs.private is not None) == (target == 'private')
+        assert closed.results.method == report.NET_METHOD
+        assert closed.results.cutoffs is None
         prepare.assert_not_called()
         probe.assert_not_called()
+
+        before = path.read_bytes()
+        result = invoke('close', 'f', '--snapshot', str(header['id']))
+
+        assert result.exit_code == 0, result.output
+        assert path.read_bytes() == before
 
     def test_replays_pinned_metrics_and_closing_time_without_current_inputs(
         self,

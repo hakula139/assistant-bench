@@ -5,6 +5,7 @@ import {
   unmeasuredRows,
   type ForestRow,
 } from '@/lib/forest';
+import { displayVoteScores, fixedAnchor, NET_DOMAIN } from '@/lib/ranking';
 import { systemPath, type VotesFamily } from '@/lib/reports';
 import { reportNames } from '@/lib/systems';
 
@@ -22,7 +23,7 @@ export function panelForest(family: VotesFamily): {
     };
   }
 
-  const { results } = report;
+  const results = displayVoteScores(report.results);
   return {
     rows: roundRows(
       (system) => systemPath(family, system),
@@ -30,7 +31,7 @@ export function panelForest(family: VotesFamily): {
       reportNames(report.systems),
       results.rules,
     ),
-    domain: forestDomain(results.standings),
-    anchorScore: results.method.anchor_score,
+    domain: 'kind' in results.method ? NET_DOMAIN : forestDomain(results.standings),
+    anchorScore: fixedAnchor(results.method),
   };
 }

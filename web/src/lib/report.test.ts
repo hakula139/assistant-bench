@@ -1,6 +1,7 @@
 import { z } from 'astro/zod';
 import { describe, expect, test } from 'vitest';
 
+import { displayVoteScores, fixedAnchor } from '@/lib/ranking';
 import { reportSchema } from '@/lib/report';
 import { readFixture, readReport } from '@/test/fixture';
 import { schemaShape } from '@/test/json-schema';
@@ -231,7 +232,7 @@ describe('reportSchema', () => {
       actor_cap: 50,
       interval_level: 0.9,
     });
-    Object.assign(payload.results.rules, { preliminary_half_width: 75 });
+    payload.results.rules = { preliminary_half_width: 75 };
 
     const parsed = reportSchema.parse(payload);
 
@@ -246,10 +247,38 @@ describe('reportSchema', () => {
     expect(shape).toEqual(schemaShape(committed));
   });
 
+  test('reads net scores without historical cutoffs and displays points per 100', async () => {
+    const payload = await readReport('report', 'votes');
+    const { results } = payload;
+    results.anchor = results.reference;
+    results.method = { kind: 'expected_net', l2_penalty: 0.01 };
+    results.decision = null;
+    for (const row of results.standings) {
+      row.score = -0.25;
+      row.interval = null;
+    }
+    for (const board of results.categories) {
+      for (const row of board.standings) row.score = -0.25;
+    }
+    delete results.rules;
+    delete results.cutoffs;
+    delete results.public_held_out;
+
+    expect(reportSchema.parse(payload)).toEqual(payload);
+    expect(displayVoteScores(results).standings[0]?.score).toBe(-25);
+    expect(fixedAnchor(results.method)).toBeUndefined();
+
+    replaceField(payload, ['results', 'cutoffs'], {
+      production: { id: 1, votes: 1 },
+      private: null,
+    });
+    expect(reportSchema.safeParse(payload).success).toBe(false);
+  });
+
   test('preserves capped voter weights on the wire', async () => {
     const { results } = await readReport('report', 'votes');
 
-    expect(results.method.actor_cap).toBe(100);
+    expect(results.method).toMatchObject({ actor_cap: 100 });
     expect(results.votes).toBe(315);
     expect(results.dropped_votes).toBe(42);
     expect(results.effective_votes).toBeCloseTo(286);

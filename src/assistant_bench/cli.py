@@ -459,6 +459,7 @@ def _capture_snapshot(family: Family, revision: str) -> str:
                 closed_at=taken_at,
                 category_order=tuple(family.settings.categories),
                 closing_revision=revision,
+                method='expected_net',
                 production=production,
                 private=private,
             ),
@@ -498,6 +499,7 @@ def _close_votes(family: str, identity: str) -> report.Report:
             snapshot.closed_at,
             fingerprints=votes.fingerprints(snapshot),
             system_names=votes.system_names(snapshot),
+            net=snapshot.method == 'expected_net',
         )
 
 

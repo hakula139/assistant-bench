@@ -41,15 +41,17 @@ export function SystemStats({
   standing,
   round,
   roundHref,
+  net = false,
 }: {
   standing: Standing;
   round: string;
   roundHref: string;
+  net?: boolean;
 }) {
   return (
     <dl className={statList}>
       <Stat
-        label="Score"
+        label={net ? 'Net points per 100' : 'Score'}
         detail={standing.interval ? `(${formatScoreRange(standing.interval)})` : undefined}
       >
         {formatScore(standing.score)}
@@ -208,7 +210,7 @@ export function RoundsTable({
     anchor: string;
     systems: Record<string, PublicSystem>;
     method: VotesMethod;
-    rules: VotesRules;
+    rules?: VotesRules | null;
     standing: Standing;
   }[];
 }) {
@@ -263,6 +265,7 @@ export function RoundsTable({
                     }}
                   >
                     {formatScore(past.score)}
+                    {'kind' in method && ' net / 100'}
                   </Hint>
                 </TableCell>
                 <TableCell numeric>{formatCount(past.votes)}</TableCell>

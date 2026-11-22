@@ -398,6 +398,27 @@
       "title": "Distribution",
       "type": "object"
     },
+    "ExpectedNetMethod": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "expected_net",
+          "title": "Kind",
+          "type": "string"
+        },
+        "l2_penalty": {
+          "exclusiveMinimum": 0,
+          "title": "L2 Penalty",
+          "type": "number"
+        }
+      },
+      "required": [
+        "kind",
+        "l2_penalty"
+      ],
+      "title": "ExpectedNetMethod",
+      "type": "object"
+    },
     "FamilyName": {
       "maxLength": 256,
       "pattern": "^[a-z0-9][a-z0-9-]*(?![\\s\\S])",
@@ -1081,13 +1102,37 @@
           "type": "string"
         },
         "method": {
-          "$ref": "#/$defs/VotesMethod"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/VotesMethod"
+            },
+            {
+              "$ref": "#/$defs/ExpectedNetMethod"
+            }
+          ],
+          "title": "Method"
         },
         "rules": {
-          "$ref": "#/$defs/VotesRules"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/VotesRules"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "cutoffs": {
-          "$ref": "#/$defs/Cutoffs"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Cutoffs"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "reference": {
           "description": "Configured reference, whether or not comparisons connect it.",
@@ -1192,14 +1237,20 @@
           "title": "Split Half Tau"
         },
         "public_held_out": {
-          "$ref": "#/$defs/SplitDiagnostic"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SplitDiagnostic"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
         "scorer",
         "method",
-        "rules",
-        "cutoffs",
         "reference",
         "anchor",
         "cases",
@@ -1213,8 +1264,7 @@
         "head_to_head",
         "categories",
         "length",
-        "split_half_tau",
-        "public_held_out"
+        "split_half_tau"
       ],
       "title": "VotesResults",
       "type": "object"

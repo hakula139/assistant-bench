@@ -8,6 +8,7 @@ import { VotesBoard } from '@/components/boards/VotesBoard';
 import { Forest } from '@/components/site/Forest';
 import { forestDomain, roundRows } from '@/lib/forest';
 import { boardLabels } from '@/lib/method';
+import { fixedAnchor } from '@/lib/ranking';
 import type { PassRate } from '@/lib/report';
 import type { VotesReport } from '@/lib/reports';
 import { reportNames } from '@/lib/systems';
@@ -116,7 +117,8 @@ describe('VotesBoard', () => {
     const current = await load();
     earlier.systems['acme-pro'].display_name = 'Historical Pro';
     current.systems['acme-pro'].display_name = 'Current Pro';
-    earlier.results.rules.preliminary_half_width = 75;
+    earlier.results.rules = { preliminary_half_width: 75 };
+    if (!('anchor_score' in earlier.results.method)) throw new Error('Expected an Elo round');
     earlier.results.method.anchor_score = 1234;
     for (const row of earlier.results.standings) {
       row.score += 234;
@@ -699,7 +701,7 @@ describe('VotesBoard', () => {
         <Forest
           caption="Example"
           domain={forestDomain(results.standings)}
-          anchorScore={results.method.anchor_score}
+          anchorScore={fixedAnchor(results.method)}
           rows={roundRows(() => '/', results, reportNames(round.systems), results.rules)}
         />,
       );

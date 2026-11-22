@@ -27,7 +27,7 @@ import { aspects } from '@/lib/aspects';
 import { sharedDomain } from '@/lib/forest';
 import { categoryTerms, preliminaryTerm } from '@/lib/glossary';
 import { boardLabels } from '@/lib/method';
-import { isPreliminary } from '@/lib/ranking';
+import { displayVoteScores, fixedAnchor, isPreliminary, NET_DOMAIN } from '@/lib/ranking';
 import type { Distribution, Standing } from '@/lib/report';
 import {
   boardPath,
@@ -53,7 +53,8 @@ interface Props {
 const { family, system, boards } = Astro.props;
 const { rounds } = family;
 const { usage } = boardLabels(family.config);
-const appearances = rounds.flatMap(({ round, systems, results }) => {
+const appearances = rounds.flatMap(({ round, systems, results: canonical }) => {
+  const results = displayVoteScores(canonical);
   const standing = results.standings.find((item) => item.system === system);
   const { reference, anchor, method, rules } = results;
   return standing ? [{ round, systems, reference, anchor, method, rules, standing }] : [];
@@ -65,7 +66,9 @@ const last = appearances.at(-1);
 if (latest === undefined || last === undefined) {
   throw new Error(`${system} has no standing on ${family.config.display_name}`);
 }
-const { round, systems, results } = latest;
+const { round, systems } = latest;
+const results = displayVoteScores(latest.results);
+const net = 'kind' in results.method;
 const { standing } = last;
 const names = reportNames(systems);
 const name = (item: string) => systemName(names, item);
@@ -80,7 +83,9 @@ const categoryRows = results.categories.flatMap(
     return refit ? [{ label: categoryTerms[category].term, refit }] : [];
   },
 );
-const categoryDomain = sharedDomain(results.categories.map((board) => board.standings));
+const categoryDomain = net
+  ? NET_DOMAIN
+  : sharedDomain(results.categories.map((board) => board.standings));
 const distributionRows = (pick: (item: Standing) => Distribution | null) =>
   standings.flatMap((item): DotRange[] => {
     const distribution = pick(item);
@@ -127,6 +132,7 @@ const latencyRows = distributionRows((item) => item.latency_sec);
       standing={standing}
       round={round}
       roundHref={roundPath(family, round)}
+      net={net}
     />
   </PageHeader>
 
@@ -134,8 +140,9 @@ const latencyRows = distributionRows((item) => item.latency_sec);
     {headToHead.length > 0 && (
       <Section title="Head to head">
         <p class={note}>
-          Win rate against each opponent, where ties and both-bad votes count half. Counts show raw
-          votes, while win rates use each voter's weight.
+          {net
+            ? 'Win rate against each opponent, with half credit for ties. Each vote counts once.'
+            : "Win rate against each opponent, where ties and both-bad votes count half. Counts show raw votes, while win rates use each voter's weight."}
         </p>
         <DotRangePlot
           client:visible
@@ -157,7 +164,7 @@ const latencyRows = distributionRows((item) => item.latency_sec);
           rows={categoryRows}
           labels={categoryRows.map((row) => row.label)}
           domain={categoryDomain}
-          anchorScore={results.method.anchor_score}
+          anchorScore={fixedAnchor(results.method)}
           label="Category point scores"
         />
         <TableTwin>

@@ -71,13 +71,18 @@ const categoryBoard = z.strictObject({
   unranked: z.array(z.string()),
 });
 
-const votesMethod = z.strictObject({
+const eloMethod = z.strictObject({
   l2_penalty: z.number().positive(),
   points_per_logit: z.number().positive(),
   anchor_score: z.number(),
   actor_cap: z.int().positive(),
   interval_level: z.number().gt(0).lt(1),
 });
+
+const votesMethod = z.union([
+  eloMethod,
+  z.strictObject({ kind: z.literal('expected_net'), l2_penalty: z.number().positive() }),
+]);
 
 const votesRules = z.strictObject({
   preliminary_half_width: z.number().positive(),
@@ -91,8 +96,8 @@ const cutoffs = z
 const votesResults = z.strictObject({
   scorer: z.literal('votes'),
   method: votesMethod,
-  rules: votesRules,
-  cutoffs,
+  rules: votesRules.nullish(),
+  cutoffs: cutoffs.nullish(),
   reference: z.string(),
   anchor: z.string(),
   cases: z.int().nonnegative(),
@@ -107,26 +112,28 @@ const votesResults = z.strictObject({
   categories: z.array(categoryBoard),
   length: z.number().nullable(),
   split_half_tau: z.number().nullable(),
-  public_held_out: z.strictObject({
-    public_cases: z.int().nonnegative(),
-    held_out_cases: z.int().nonnegative(),
-    unavailable: z
-      .enum([
-        'insufficient_cases',
-        'no_common_field',
-        'disconnected_field',
-        'unidentifiable_field',
-        'separated_fit',
-      ])
-      .nullable(),
-    scores: z.array(
-      z.strictObject({
-        system: z.string(),
-        difference: z.number(),
-        interval: scoreInterval,
-      }),
-    ),
-  }),
+  public_held_out: z
+    .strictObject({
+      public_cases: z.int().nonnegative(),
+      held_out_cases: z.int().nonnegative(),
+      unavailable: z
+        .enum([
+          'insufficient_cases',
+          'no_common_field',
+          'disconnected_field',
+          'unidentifiable_field',
+          'separated_fit',
+        ])
+        .nullable(),
+      scores: z.array(
+        z.strictObject({
+          system: z.string(),
+          difference: z.number(),
+          interval: scoreInterval,
+        }),
+      ),
+    })
+    .nullish(),
 });
 
 // ── Tests Results ──
@@ -256,21 +263,45 @@ export const reportSchema = z
     if (results.scorer === 'votes') {
       referenced.add(results.reference);
       referenced.add(results.anchor);
-      results.public_held_out.scores.forEach(({ system }) => referenced.add(system));
+      results.public_held_out?.scores.forEach(({ system }) => referenced.add(system));
 
       if (results.standings.some((row) => row.cost_gap !== null && row.mean_cost_usd !== null)) {
         reject('A cost gap is present only without a mean cost');
       }
 
-      if (!standing.has(results.anchor)) {
-        reject('The anchor must have an overall standing');
-      }
-
-      if (
-        (results.decision === null) !==
-        results.standings.some(({ interval }) => interval === null)
-      ) {
-        reject('A decision is present exactly when every standing has an interval');
+      if ('kind' in results.method) {
+        if (
+          results.anchor !== results.reference ||
+          results.rules ||
+          results.cutoffs ||
+          results.public_held_out
+        ) {
+          reject('Net scores require the configured reference');
+        }
+        const points = [
+          ...results.standings,
+          ...results.categories.flatMap((board) => board.standings),
+        ];
+        if (
+          results.decision !== null ||
+          results.standings.some(({ interval }) => interval !== null) ||
+          points.some(({ score }) => score < -1 || score > 1)
+        ) {
+          reject('Net scores require point estimates from -1 to 1');
+        }
+      } else {
+        if (!standing.has(results.anchor)) {
+          reject('The anchor must have an overall standing');
+        }
+        if (
+          !results.rules ||
+          !results.cutoffs ||
+          !results.public_held_out ||
+          (results.decision === null) !==
+            results.standings.some(({ interval }) => interval === null)
+        ) {
+          reject('Elo rounds require rules and a decision when all intervals are present');
+        }
       }
 
       if (results.decision !== null) {

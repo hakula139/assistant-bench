@@ -7,7 +7,7 @@ instruction, output text, route, or request ID.
 import statistics
 from collections import Counter, defaultdict
 from collections.abc import Collection, Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Literal, assert_never
@@ -41,7 +41,7 @@ from assistant_bench.outputs import (
     tests_pass,
 )
 from assistant_bench.paths import REPORTS_DIR, write_atomically
-from assistant_bench.scoring import pass_rates, ranking, weighting
+from assistant_bench.scoring import expected_net, pass_rates, ranking, weighting
 from assistant_bench.scoring.checkers import REVISION
 
 
@@ -117,6 +117,11 @@ class VotesRules(_Model):
     """Score interval half-width above which a standing is preliminary."""
 
 
+class ExpectedNetMethod(_Model):
+    kind: Literal['expected_net']
+    l2_penalty: Annotated[float, Field(gt=0)]
+
+
 METHOD = VotesMethod(
     l2_penalty=ranking.L2_PENALTY,
     points_per_logit=ranking.ELO_PER_LOGIT,
@@ -126,6 +131,8 @@ METHOD = VotesMethod(
 )
 
 RULES = VotesRules(preliminary_half_width=50.0)
+
+NET_METHOD = ExpectedNetMethod(kind='expected_net', l2_penalty=ranking.L2_PENALTY)
 
 
 # ── Votes Schema ──
@@ -260,9 +267,13 @@ class VotesResults(_Model):
     """Point estimates, their intervals and leader decision, and diagnostics."""
 
     scorer: Literal['votes']
-    method: VotesMethod
-    rules: VotesRules
-    cutoffs: Cutoffs
+    method: VotesMethod | ExpectedNetMethod
+    rules: VotesRules | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    cutoffs: Cutoffs | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     reference: str
     """Configured reference, whether or not comparisons connect it."""
@@ -297,16 +308,49 @@ class VotesResults(_Model):
     split_half_tau: float | None
     """Order agreement between alternating eligible votes, when measurable."""
 
-    public_held_out: SplitDiagnostic
+    public_held_out: SplitDiagnostic | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode='after')
     def validate_decision(self) -> VotesResults:
-        if (self.decision is None) != any(
-            row.interval is None for row in self.standings
-        ):
-            raise ValueError(
-                'A decision is present exactly when every standing has an interval.'
-            )
+        match self.method:
+            case ExpectedNetMethod():
+                if (
+                    self.anchor != self.reference
+                    or self.rules is not None
+                    or self.cutoffs is not None
+                    or self.public_held_out is not None
+                ):
+                    raise ValueError('Net scores require the configured reference.')
+                if (
+                    self.decision is not None
+                    or any(
+                        not -1 <= row.score <= 1 or row.interval is not None
+                        for row in self.standings
+                    )
+                    or any(
+                        not -1 <= row.score <= 1
+                        for board in self.categories
+                        for row in board.standings
+                    )
+                ):
+                    raise ValueError('Net scores require point estimates from -1 to 1.')
+            case VotesMethod():
+                if (
+                    self.rules is None
+                    or self.cutoffs is None
+                    or self.public_held_out is None
+                    or (
+                        (self.decision is None)
+                        != any(row.interval is None for row in self.standings)
+                    )
+                ):
+                    raise ValueError(
+                        'Elo rounds require metadata and consistent intervals.'
+                    )
+            case _:
+                assert_never(self.method)
         if self.decision is not None:
             _validate_decision(self.decision, self.standings)
         return self
@@ -506,7 +550,9 @@ class Report(_Model):
                     _validate_memberships(
                         [row.system for row in board.standings], board.unranked
                     )
-                if results.anchor not in {row.system for row in results.standings}:
+                if isinstance(results.method, VotesMethod) and results.anchor not in {
+                    row.system for row in results.standings
+                }:
                     raise ValueError('The anchor must have an overall standing.')
             case TestsResults() | CheckersResults():
                 unranked = []
@@ -543,7 +589,8 @@ def _referenced_systems(results: Results) -> set[str]:
         case VotesResults():
             systems.update((results.reference, results.anchor))
             systems.update(results.unranked)
-            systems.update(row.system for row in results.public_held_out.scores)
+            if results.public_held_out is not None:
+                systems.update(row.system for row in results.public_held_out.scores)
             for row in results.head_to_head:
                 systems.update((row.system, row.opponent))
             for board in results.categories:
@@ -758,6 +805,7 @@ def close_votes(
     *,
     fingerprints: Mapping[str, str],
     system_names: Mapping[str, str],
+    net: bool = False,
 ) -> Report:
     """Close a round's votes under the fingerprints and names its publication records.
 
@@ -766,7 +814,7 @@ def close_votes(
     return _report(
         analysis.family,
         closed_at,
-        votes_results(analysis),
+        votes_results(analysis, net=net),
         fingerprints,
         system_names,
     )
@@ -804,6 +852,14 @@ def _report(
 
 def write_report(report: Report) -> Path:
     path = REPORTS_DIR / report.family / f'{report.round}.json'
+    if path.exists() and isinstance(report.results, VotesResults):
+        previous = Report.model_validate_json(path.read_text()).results
+        if isinstance(previous, VotesResults) and type(previous.method) is not type(
+            report.results.method
+        ):
+            raise InputError(
+                f'Round `{report.round}` already records a different voting method.'
+            )
     write_atomically(path, f'{report.model_dump_json(indent=2)}\n')
     return path
 
@@ -914,22 +970,46 @@ class AnalysisInput:
 # ── Votes Results ──
 
 
-def votes_results(analysis: AnalysisInput) -> VotesResults:
+def votes_results(analysis: AnalysisInput, *, net: bool = False) -> VotesResults:
     """Fit one complete frozen evaluation without reading current source files."""
-    votes = list(analysis.ordinary)
+    votes = (
+        [
+            replace(
+                row,
+                comparison=row.comparison._replace(
+                    weight=1.0, both_bad=row.choice == 'both_bad'
+                ),
+            )
+            for row in analysis.ordinary
+        ]
+        if net
+        else list(analysis.ordinary)
+    )
     outputs = list(analysis.outputs)
     comparisons = [row.comparison for row in votes] + list(analysis.settlements)
     if not comparisons:
         raise InputError(f'Family `{analysis.family}` has no eligible comparisons.')
 
-    board = ranking.rate_root(comparisons, analysis.systems, analysis.reference)
-    ratings = board.ratings
+    board = (
+        None
+        if net
+        else ranking.rate_root(comparisons, analysis.systems, analysis.reference)
+    )
+    if board is None:
+        fitted = expected_net.rate(comparisons, analysis.reference)
+        ratings = ranking.PointRatings(
+            tuple(fitted.points), np.array(list(fitted.points.values()))
+        )
+        cases = fitted.cases
+        anchor = analysis.reference
+    else:
+        ratings, cases, anchor = board.ratings, board.cases, board.anchor
     ranked = set(ratings.systems)
     connected = [row for row in votes if set(row.systems) <= ranked]
     measured = [
         (row, row.length_a, row.length_b)
         for row in connected
-        if row.length_a is not None and row.length_b is not None
+        if not net and row.length_a is not None and row.length_b is not None
     ]
     feature = ranking.length_feature(
         [(a, b) for _, a, b in measured],
@@ -944,7 +1024,7 @@ def votes_results(analysis: AnalysisInput) -> VotesResults:
         ).covariate
     )
 
-    uncertainty = board.uncertainty
+    uncertainty = None if board is None else board.uncertainty
     widths = None if uncertainty is None else uncertainty.half_widths()
     standings = [
         _standing(
@@ -959,27 +1039,27 @@ def votes_results(analysis: AnalysisInput) -> VotesResults:
         for i, system in enumerate(ratings.systems)
     ]
     standings.sort(key=lambda standing: (standing.rank, standing.system))
-    leader = standings[0].system
+    leader = standings[0].system if standings else analysis.reference
+    entrants = {output.system for output in outputs} | {
+        system for row in votes for system in row.systems
+    }
+    if net:
+        entrants |= {system for row in comparisons for system in (row.left, row.right)}
+        entrants.add(analysis.reference)
     return VotesResults(
         scorer='votes',
-        method=METHOD,
-        rules=RULES,
-        cutoffs=analysis.cutoffs,
+        method=NET_METHOD if net else METHOD,
+        rules=None if net else RULES,
+        cutoffs=None if net else analysis.cutoffs,
         reference=analysis.reference,
-        anchor=board.anchor,
-        cases=board.cases,
+        anchor=anchor,
+        cases=cases,
         votes=len(votes),
         effective_votes=sum(row.comparison.weight for row in votes),
         dropped_votes=analysis.dropped,
         voters=len({row.actor for row in votes}),
         standings=standings,
-        unranked=sorted(
-            (
-                {output.system for output in outputs}
-                | {system for row in votes for system in row.systems}
-            )
-            - ranked
-        ),
+        unranked=sorted(entrants - ranked),
         decision=(
             None
             if uncertainty is None
@@ -992,22 +1072,23 @@ def votes_results(analysis: AnalysisInput) -> VotesResults:
                 ],
             )
         ),
-        head_to_head=_head_to_head(votes),
+        head_to_head=_head_to_head(votes, net=net),
         categories=_categories(
             dict(analysis.categories),
             analysis.declared_categories,
-            board.anchor,
+            anchor,
             votes,
             analysis.settlements,
             outputs,
+            net=net,
         ),
         length=None if length is None else ranking.ELO_PER_LOGIT * length,
-        split_half_tau=ranking.split_half_tau(
-            [row.comparison for row in votes], board.root
-        ),
-        public_held_out=_split_diagnostic(
-            votes, analysis.settlements, dict(analysis.splits)
-        ),
+        split_half_tau=None
+        if board is None
+        else ranking.split_half_tau([row.comparison for row in votes], board.root),
+        public_held_out=None
+        if net
+        else _split_diagnostic(votes, analysis.settlements, dict(analysis.splits)),
     )
 
 
@@ -1113,7 +1194,7 @@ def _standing(
     )
 
 
-def _head_to_head(votes: list[HumanEvidence]) -> list[HeadToHead]:
+def _head_to_head(votes: list[HumanEvidence], *, net: bool) -> list[HeadToHead]:
     tallies: defaultdict[tuple[str, str], Counter[Choice]] = defaultdict(Counter)
     weighted: defaultdict[tuple[str, str], defaultdict[Choice, float]] = defaultdict(
         lambda: defaultdict(float)
@@ -1135,7 +1216,8 @@ def _head_to_head(votes: list[HumanEvidence]) -> list[HeadToHead]:
             ties=tally['tie'],
             both_bad=tally['both_bad'],
             win_rate=sum(
-                ranking.LEFT_SCORE[choice] * weight
+                (0 if net and choice == 'both_bad' else ranking.LEFT_SCORE[choice])
+                * weight
                 for choice, weight in weighted[system, opponent].items()
             )
             / sum(weighted[system, opponent].values()),
@@ -1151,6 +1233,8 @@ def _categories(
     votes: list[HumanEvidence],
     settlements: Sequence[ranking.Comparison],
     outputs: list[OutputMeasurement],
+    *,
+    net: bool,
 ) -> list[CategoryBoard]:
     """Refit each category in the anchor's component, anchored there too."""
     category_votes: defaultdict[Category, list[HumanEvidence]] = defaultdict(list)
@@ -1173,19 +1257,23 @@ def _categories(
         if name not in by_category:
             continue
 
-        matchups = ranking.Matchups.build(by_category[name])
-        if anchor not in matchups.systems:
-            continue
-
-        ratings = ranking.rate_point(matchups.component(anchor), anchor)
+        if net:
+            points = expected_net.rate(by_category[name], anchor).points
+            entrants[name].update(
+                system for row in by_category[name] for system in (row.left, row.right)
+            )
+        else:
+            matchups = ranking.Matchups.build(by_category[name])
+            if anchor not in matchups.systems:
+                continue
+            ratings = ranking.rate_point(matchups.component(anchor), anchor)
+            points = dict(zip(ratings.systems, map(float, ratings.score), strict=True))
 
         standings: list[CategoryStanding] = []
-        for i, system in enumerate(ratings.systems):
+        for system, point in points.items():
             mine = [row for row in category_votes[name] if system in row.systems]
             standings.append(
-                CategoryStanding(
-                    system=system, score=float(ratings.score[i]), votes=len(mine)
-                )
+                CategoryStanding(system=system, score=point, votes=len(mine))
             )
 
         boards.append(
@@ -1196,7 +1284,7 @@ def _categories(
                     row.comparison.weight for row in category_votes[name]
                 ),
                 standings=standings,
-                unranked=sorted(entrants[name] - set(ratings.systems)),
+                unranked=sorted(entrants[name] - points.keys()),
             )
         )
 
