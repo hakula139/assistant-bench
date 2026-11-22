@@ -132,6 +132,10 @@ test('uses released reports across the site and keeps the same-day round', async
     'Acme Current',
   );
   expect(archived.querySelector('main time')?.getAttribute('datetime')).toBe(archivedAt);
+  const currentLink = [...archived.querySelectorAll('main a')].find(
+    (link) => link.textContent === 'View the current board',
+  );
+  expect(currentLink?.getAttribute('href')).toBe(`/${board}/`);
   expect(archived.querySelector('a[href="/writing/zh/acme-large/"]')?.textContent).toBe(
     'Acme Large',
   );
