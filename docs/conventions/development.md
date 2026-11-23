@@ -26,7 +26,7 @@ Review lock updates for their behavioral effects. A changed fingerprint needs th
 
 ## The nixos-config Input
 
-The flake reads the model catalog and the rendered assistant instructions from [nixos-config](https://github.com/hakula139/nixos-config), as [Systems](../design/systems.md#the-nixos-config-export) describes:
+The flake reads the model catalog and the rendered assistant instructions from [nixos-config](https://github.com/hakulab/nixos-config), as [Systems](../design/systems.md#the-nixos-config-export) describes:
 
 ```bash
 nix build .#nixos-config                    # Build the export on its own
