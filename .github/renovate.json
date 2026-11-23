@@ -15,11 +15,6 @@
         "families/coding-repo/shared/environment/Dockerfile"
       ],
       "enabled": false
-    },
-    {
-      "description": "typescript-eslint and @astrojs/check do not yet accept TypeScript 7",
-      "matchPackageNames": ["typescript"],
-      "allowedVersions": "<7"
     }
   ]
 }
