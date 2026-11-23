@@ -56,7 +56,7 @@ Harbor records each trial's agent and environment import paths in the job's `con
 
 ## The nixos-config Export
 
-The flake takes [nixos-config](https://github.com/hakula139/nixos-config) as a `flake = false` input and imports only pure Nix files from it, which evaluate without Nixpkgs or a host. Its `nixos-config` package writes one JSON file, which the dev shell exports as `BENCH_NIXOS_CONFIG`:
+The flake takes [nixos-config](https://github.com/hakulab/nixos-config) as a `flake = false` input and imports only pure Nix files from it, which evaluate without Nixpkgs or a host. Its `nixos-config` package writes one JSON file, which the dev shell exports as `BENCH_NIXOS_CONFIG`:
 
 | Field          | Content                                                                                   |
 | -------------- | ----------------------------------------------------------------------------------------- |
