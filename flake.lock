@@ -9,11 +9,11 @@
         "nixpkgs-unstable": "nixpkgs-unstable"
       },
       "locked": {
-        "lastModified": 1795334326,
-        "narHash": "sha256-B+OC59S/fQUGrG8nQDS2cy0k9s6zyr2iuN3jB8O/gPM=",
+        "lastModified": 1795435768,
+        "narHash": "sha256-YXeVtd1Iu+Oh2RJjVTvHqSV28U38Xu9XjlC+k5KMTu8=",
         "owner": "hakulab",
         "repo": "devkit",
-        "rev": "8b4177174bebcbea35eb98007ba7931c563de950",
+        "rev": "1f704d503b555068ab1033045a1deaa967fab13f",
         "type": "github"
       },
       "original": {
