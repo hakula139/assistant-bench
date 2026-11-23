@@ -18,7 +18,7 @@
 
     # Only pure data and prompt files are imported, so the input skips nixos-config's own inputs.
     nixos-config = {
-      url = "github:hakula139/nixos-config";
+      url = "github:hakulab/nixos-config";
       flake = false;
     };
   };
