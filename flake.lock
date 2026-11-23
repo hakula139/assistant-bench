@@ -66,13 +66,13 @@
       "locked": {
         "lastModified": 1795329792,
         "narHash": "sha256-FkYxmY/ETW+kPPIlX+IXSH2jCFxt37jgRLJuI++5zuY=",
-        "owner": "hakula139",
+        "owner": "hakulab",
         "repo": "nixos-config",
         "rev": "efaa4c3b487778e0ea8d5f39835bb1465d11c292",
         "type": "github"
       },
       "original": {
-        "owner": "hakula139",
+        "owner": "hakulab",
         "repo": "nixos-config",
         "type": "github"
       }
