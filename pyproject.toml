@@ -10,7 +10,7 @@ dependencies = [
   "anthropic>=2.3.0",
   "filelock>=3.32.7",
   "h11>=0.16.0",
-  "harbor==0.26.0",
+  "harbor==0.27.0",
   "httpx>=0.28.1",
   "httpx2>=2.16.0",
   "justhtml>=3.16.0",
