@@ -56,7 +56,8 @@ src/assistant_bench/
 ├── git.py               # Repository-local environment isolation for Git subprocesses
 ├── runtime.py           # Command-owned materialization of pinned private sources
 ├── execution.py         # Harbor lifecycle claims, audited archives and settlement
-├── database.py          # The SQL protocol, SQLite adapter and D1 REST client
+├── database.py          # The SQL protocol, Core compiler, typed helpers, SQLite adapter and D1 REST client
+├── schema.py            # SQLAlchemy metadata declarations mirroring the SQL schemas
 ├── generation.py        # Revision-owned generation protocol and locked native agent version
 ├── messages.py          # The style of author-facing messages: code spans and validation errors
 ├── paths.py             # Repo and data directory locations, and atomic file writes
@@ -77,7 +78,7 @@ Imports point downward through these layers, so a module never imports one above
 7. `report`
 8. `outputs`, `harnesses`, and `scoring`
 9. `families`, `catalog`, and `state`
-10. `artifacts`, `database`, `generation`, `git`, `messages`, `paths`, `diffs`, and `html`
+10. `artifacts`, `database`, `generation`, `git`, `messages`, `paths`, `diffs`, `html`, and `schema`
 
 `families` and `outputs` are separated from `collection`, `tasks`, and `jobs` so that the arena and the reports read family settings and output records without the Harbor job code. `report` sits below the arena modules because it owns the report inputs and scoring dispatch, which the arena builds from vote cuts. A module becomes a subpackage only once it holds several members along one axis, as `harnesses/` does for agents and the environment single-call agents run in, and `scoring/` does for the ways outputs are scored.
 

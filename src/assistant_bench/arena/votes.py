@@ -18,14 +18,33 @@ from pydantic import (
     ValidationError,
     model_validator,
 )
+from sqlalchemy import (
+    ColumnElement,
+    and_,
+    case as sql_case,
+    func,
+    literal,
+    select,
+    union,
+    union_all,
+    update,
+)
+from sqlalchemy.dialects import sqlite
 
+from assistant_bench import schema
 from assistant_bench.arena.publication import (
     CaseFacts,
     Inventory,
     OutputFacts,
     output_key,
 )
-from assistant_bench.database import Database, Param, insert_missing
+from assistant_bench.database import (
+    Database,
+    execute,
+    fetch_all,
+    fetch_scalar,
+    insert_missing,
+)
 from assistant_bench.families import Category, Choice, Defect, FamilyName
 from assistant_bench.messages import InputError, error_lines
 from assistant_bench.outputs import Output
@@ -214,89 +233,251 @@ def read_cut(
     Each result value holds one fact, keeping it below D1's value size limit.
     A result exceeding the REST response limit fails through the database API.
     """
-    rows = database.execute(
-        """WITH active_publication AS (
-            SELECT publication_id AS id FROM active WHERE family = ? AND ?
-        ), selected_votes AS (
-            SELECT * FROM votes WHERE family = ? AND recorded_at <= ?
-        ), policy AS (
-            SELECT * FROM publications WHERE id = coalesce(
-                (SELECT id FROM active_publication),
-                (SELECT publication_id FROM selected_votes ORDER BY id DESC LIMIT 1)
+    active = schema.Active
+    votes_table = schema.Votes
+    publications = schema.Publications
+    outputs_table = schema.Outputs
+    cases_table = schema.Cases
+
+    cutoff_ms = int(now.timestamp() * 1000) - UNDO_WINDOW_MS
+    active_publication = (
+        select(active.publication_id.label('id'))
+        .where(active.family == family, literal(int(include_active)) != 0)
+        .cte('active_publication')
+    )
+    selected_votes = (
+        select(votes_table)
+        .where(votes_table.family == family, votes_table.recorded_at <= cutoff_ms)
+        .cte('selected_votes')
+    )
+    policy = (
+        select(publications)
+        .where(
+            publications.id
+            == func.coalesce(
+                select(active_publication.c.id).scalar_subquery(),
+                select(selected_votes.c.publication_id)
+                .order_by(selected_votes.c.id.desc())
+                .limit(1)
+                .scalar_subquery(),
             )
-        ), output_keys AS (
-            SELECT o.publication_id, o.output_key FROM outputs AS o
-            JOIN active_publication AS p ON p.id = o.publication_id
-            UNION
-            SELECT publication_id, a_output FROM selected_votes WHERE exclusion IS NULL
-            UNION
-            SELECT publication_id, b_output FROM selected_votes WHERE exclusion IS NULL
-        ), output_facts AS (
-            SELECT o.publication_id, o.output_key, o.case_key, json_object(
-                'key', o.output_key, 'case_key', o.case_key, 'system', o.system,
-                'fingerprint', o.fingerprint, 'verdict', o.verdict,
-                'errored', json(CASE WHEN o.errored THEN 'true' ELSE 'false' END),
-                'length', o.length, 'content_digest', o.content_digest
-            ) AS facts FROM outputs AS o JOIN output_keys USING (
-                publication_id, output_key
-            )
-        ), case_keys AS (
-            SELECT c.publication_id, c.case_key FROM cases AS c
-            JOIN active_publication AS p ON p.id = c.publication_id
-            UNION
-            SELECT publication_id, case_key FROM output_facts
-        ), case_facts AS (
-            SELECT c.publication_id, c.case_key, json_object(
-                'key', c.case_key, 'category', c.category, 'split', c.split
-            ) AS facts FROM cases AS c JOIN case_keys USING (publication_id, case_key)
         )
-        SELECT 'header' AS record_kind, 0 AS sort_rank, '' AS sort_key,
-            0 AS sort_id, json_object(
-                'id', p.id, 'family', p.family, 'reference', p.reference,
-                'systems', json(p.systems), 'defects', json(p.defects),
-                'cutoff', (SELECT coalesce(max(id), 0) FROM selected_votes),
-                'excluded', (
-                    SELECT count(*) FROM selected_votes WHERE exclusion IS NOT NULL
-                )
-            ) AS payload_json FROM policy AS p
-        UNION ALL
-        SELECT 'case', 1, c.case_key, 0, c.facts
-        FROM case_facts AS c JOIN active_publication AS p ON p.id = c.publication_id
-        UNION ALL
-        SELECT 'output', 2, o.output_key, 0, o.facts
-        FROM output_facts AS o JOIN active_publication AS p ON p.id = o.publication_id
-        UNION ALL
-        SELECT 'vote', 3, '', v.id, json_object(
-            'id', v.id, 'actor', v.actor_id, 'case_key', v.case_key,
-            'a_output', v.a_output, 'b_output', v.b_output,
-            'a_system', v.a_system, 'b_system', v.b_system, 'choice', v.choice,
-            'defects', json(v.defects), 'elapsed_ms', v.elapsed_ms,
-            'pair_id', v.pair_id,
-            'publication', CASE
-                WHEN v.publication_id IS NOT (SELECT id FROM active_publication)
-                THEN json_object(
-                    'id', p.id, 'case', json(c.facts),
-                    'a', json(a.facts), 'b', json(b.facts),
-                    'a_name', (
-                        SELECT value FROM json_each(p.systems) WHERE key = v.a_system
-                    ),
-                    'b_name', (
-                        SELECT value FROM json_each(p.systems) WHERE key = v.b_system
+        .cte('policy')
+    )
+    output_keys = union(
+        select(outputs_table.publication_id, outputs_table.output_key).join(
+            active_publication, active_publication.c.id == outputs_table.publication_id
+        ),
+        select(selected_votes.c.publication_id, selected_votes.c.a_output).where(
+            selected_votes.c.exclusion.is_(None)
+        ),
+        select(selected_votes.c.publication_id, selected_votes.c.b_output).where(
+            selected_votes.c.exclusion.is_(None)
+        ),
+    ).cte('output_keys')
+    output_facts = (
+        select(
+            outputs_table.publication_id,
+            outputs_table.output_key,
+            outputs_table.case_key,
+            func.json_object(
+                'key',
+                outputs_table.output_key,
+                'case_key',
+                outputs_table.case_key,
+                'system',
+                outputs_table.system,
+                'fingerprint',
+                outputs_table.fingerprint,
+                'verdict',
+                outputs_table.verdict,
+                'errored',
+                func.json(
+                    sql_case((outputs_table.errored != 0, 'true'), else_='false')
+                ),
+                'length',
+                outputs_table.length,
+                'content_digest',
+                outputs_table.content_digest,
+            ).label('facts'),
+        )
+        .join(
+            output_keys,
+            and_(
+                outputs_table.publication_id == output_keys.c.publication_id,
+                outputs_table.output_key == output_keys.c.output_key,
+            ),
+        )
+        .cte('output_facts')
+    )
+    case_keys = union(
+        select(cases_table.publication_id, cases_table.case_key).join(
+            active_publication, active_publication.c.id == cases_table.publication_id
+        ),
+        select(output_facts.c.publication_id, output_facts.c.case_key),
+    ).cte('case_keys')
+    case_facts = (
+        select(
+            cases_table.publication_id,
+            cases_table.case_key,
+            func.json_object(
+                'key',
+                cases_table.case_key,
+                'category',
+                cases_table.category,
+                'split',
+                cases_table.split,
+            ).label('facts'),
+        )
+        .join(
+            case_keys,
+            and_(
+                cases_table.publication_id == case_keys.c.publication_id,
+                cases_table.case_key == case_keys.c.case_key,
+            ),
+        )
+        .cte('case_facts')
+    )
+
+    header_rows = select(
+        literal('header').label('record_kind'),
+        literal(0).label('sort_rank'),
+        literal('').label('sort_key'),
+        literal(0).label('sort_id'),
+        func.json_object(
+            'id',
+            policy.c.id,
+            'family',
+            policy.c.family,
+            'reference',
+            policy.c.reference,
+            'systems',
+            func.json(policy.c.systems),
+            'defects',
+            func.json(policy.c.defects),
+            'cutoff',
+            select(func.coalesce(func.max(selected_votes.c.id), 0)).scalar_subquery(),
+            'excluded',
+            select(func.count())
+            .select_from(selected_votes)
+            .where(selected_votes.c.exclusion.is_not(None))
+            .scalar_subquery(),
+        ).label('payload_json'),
+    ).select_from(policy)
+
+    case_rows = select(
+        literal('case'),
+        literal(1),
+        case_facts.c.case_key,
+        literal(0),
+        case_facts.c.facts,
+    ).join(active_publication, active_publication.c.id == case_facts.c.publication_id)
+
+    output_rows = select(
+        literal('output'),
+        literal(2),
+        output_facts.c.output_key,
+        literal(0),
+        output_facts.c.facts,
+    ).join(active_publication, active_publication.c.id == output_facts.c.publication_id)
+
+    a_facts = output_facts.alias('a')
+    b_facts = output_facts.alias('b')
+    a_systems = func.json_each(publications.systems).table_valued('key', 'value')
+    b_systems = func.json_each(publications.systems).table_valued('key', 'value')
+    vote_rows = (
+        select(
+            literal('vote'),
+            literal(3),
+            literal(''),
+            selected_votes.c.id,
+            func.json_object(
+                'id',
+                selected_votes.c.id,
+                'actor',
+                selected_votes.c.actor_id,
+                'case_key',
+                selected_votes.c.case_key,
+                'a_output',
+                selected_votes.c.a_output,
+                'b_output',
+                selected_votes.c.b_output,
+                'a_system',
+                selected_votes.c.a_system,
+                'b_system',
+                selected_votes.c.b_system,
+                'choice',
+                selected_votes.c.choice,
+                'defects',
+                func.json(selected_votes.c.defects),
+                'elapsed_ms',
+                selected_votes.c.elapsed_ms,
+                'pair_id',
+                selected_votes.c.pair_id,
+                'publication',
+                sql_case(
+                    (
+                        selected_votes.c.publication_id.is_distinct_from(
+                            select(active_publication.c.id).scalar_subquery()
+                        ),
+                        func.json_object(
+                            'id',
+                            publications.id,
+                            'case',
+                            func.json(case_facts.c.facts),
+                            'a',
+                            func.json(a_facts.c.facts),
+                            'b',
+                            func.json(b_facts.c.facts),
+                            'a_name',
+                            select(a_systems.c.value)
+                            .where(a_systems.c.key == selected_votes.c.a_system)
+                            .correlate(publications, selected_votes)
+                            .scalar_subquery(),
+                            'b_name',
+                            select(b_systems.c.value)
+                            .where(b_systems.c.key == selected_votes.c.b_system)
+                            .correlate(publications, selected_votes)
+                            .scalar_subquery(),
+                        ),
                     )
-                ) END
-        ) FROM selected_votes AS v
-        JOIN publications AS p ON p.id = v.publication_id
-        JOIN output_facts AS a ON a.publication_id = p.id AND a.output_key = v.a_output
-        JOIN output_facts AS b ON b.publication_id = p.id AND b.output_key = v.b_output
-        JOIN case_facts AS c ON c.publication_id = p.id AND c.case_key = a.case_key
-        WHERE v.exclusion IS NULL
-        ORDER BY sort_rank, sort_key, sort_id""",
-        [
-            family,
-            int(include_active),
-            family,
-            int(now.timestamp() * 1000) - UNDO_WINDOW_MS,
-        ],
+                ),
+            ),
+        )
+        .select_from(selected_votes)
+        .join(publications, publications.id == selected_votes.c.publication_id)
+        .join(
+            a_facts,
+            and_(
+                a_facts.c.publication_id == publications.id,
+                a_facts.c.output_key == selected_votes.c.a_output,
+            ),
+        )
+        .join(
+            b_facts,
+            and_(
+                b_facts.c.publication_id == publications.id,
+                b_facts.c.output_key == selected_votes.c.b_output,
+            ),
+        )
+        .join(
+            case_facts,
+            and_(
+                case_facts.c.publication_id == publications.id,
+                case_facts.c.case_key == a_facts.c.case_key,
+            ),
+        )
+        .where(selected_votes.c.exclusion.is_(None))
+    )
+
+    combined = union_all(header_rows, case_rows, output_rows, vote_rows)
+    rows = execute(
+        database,
+        combined.order_by(
+            combined.selected_columns.sort_rank,
+            combined.selected_columns.sort_key,
+            combined.selected_columns.sort_id,
+        ),
     ).rows
     if not rows:
         return None
@@ -350,22 +531,48 @@ class FamilyStatus(_Model):
 
 def status(database: Database, family: str | None) -> list[FamilyStatus]:
     """Summarize each active family, or only the named one, in name order."""
-    rows = database.execute(
-        'SELECT active.family, active.publication_id, active.activated_at, '
-        'publications.case_count, publications.output_count, '
-        '(SELECT count(*) FROM votes WHERE votes.family = active.family '
-        'AND exclusion IS NULL) AS votes, '
-        '(SELECT count(*) FROM votes WHERE votes.family = active.family '
-        'AND exclusion IS NOT NULL) AS excluded, '
-        '(SELECT count(DISTINCT actor_id) FROM votes '
-        'WHERE votes.family = active.family AND exclusion IS NULL) AS voters, '
-        '(SELECT max(recorded_at) FROM votes '
-        'WHERE votes.family = active.family) AS latest_vote_at '
-        'FROM active JOIN publications ON publications.id = active.publication_id '
-        'WHERE ? IS NULL OR active.family = ? ORDER BY active.family',
-        [family, family],
-    ).rows
-    return [FamilyStatus.model_validate(row) for row in rows]
+    active = schema.Active
+    publications = schema.Publications
+    votes_table = schema.Votes
+    stmt = (
+        select(
+            active.family,
+            active.publication_id,
+            active.activated_at,
+            publications.case_count,
+            publications.output_count,
+            select(func.count())
+            .select_from(votes_table)
+            .where(votes_table.family == active.family, votes_table.exclusion.is_(None))
+            .correlate(active)
+            .scalar_subquery()
+            .label('votes'),
+            select(func.count())
+            .select_from(votes_table)
+            .where(
+                votes_table.family == active.family,
+                votes_table.exclusion.is_not(None),
+            )
+            .correlate(active)
+            .scalar_subquery()
+            .label('excluded'),
+            select(func.count(votes_table.actor_id.distinct()))
+            .where(votes_table.family == active.family, votes_table.exclusion.is_(None))
+            .correlate(active)
+            .scalar_subquery()
+            .label('voters'),
+            select(func.max(votes_table.recorded_at))
+            .where(votes_table.family == active.family)
+            .correlate(active)
+            .scalar_subquery()
+            .label('latest_vote_at'),
+        )
+        .join(publications, publications.id == active.publication_id)
+        .order_by(active.family)
+    )
+    if family is not None:
+        stmt = stmt.where(active.family == family)
+    return fetch_all(database, stmt, FamilyStatus)
 
 
 # ── Moderation ──
@@ -382,12 +589,17 @@ class Selector(_Model):
     column: Literal['ip_tag', 'actor_id', 'id']
     values: tuple[str, ...] | tuple[int, ...]
 
-    def condition(self) -> tuple[str, Param]:
-        """Return the SQL condition and its one parameter, which binds any count."""
-        return (
-            f'{self.column} IN (SELECT value FROM json_each(?))',  # noqa: S608
-            json.dumps(self.values),
-        )
+    def condition(self) -> ColumnElement[bool]:
+        """Return the SQL condition, binding any count in one parameter."""
+        values = func.json_each(json.dumps(self.values)).table_valued('value')
+        subquery = select(values.c.value)
+        match self.column:
+            case 'ip_tag':
+                return schema.Votes.ip_tag.in_(subquery)
+            case 'actor_id':
+                return schema.Votes.actor_id.in_(subquery)
+            case 'id':
+                return schema.Votes.id.in_(subquery)
 
 
 class ListedVote(_Model):
@@ -427,22 +639,32 @@ def listed(
     database: Database, family: str, selector: Selector | None
 ) -> list[ListedVote]:
     """Return the family's votes, or only the selected ones, in ID order."""
-    where = 'family = ?'
-    params: list[Param] = [family]
+    votes_table = schema.Votes
+    filters: list[ColumnElement[bool]] = [votes_table.family == family]
     if selector is not None:
-        condition, param = selector.condition()
-        where = f'{where} AND {condition}'
-        params.append(param)
+        filters.append(selector.condition())
 
     rows: list[ListedVote] = []
     while True:
-        page = database.execute(
-            'SELECT id, actor_id AS actor, ip_tag, a_system, b_system, choice, '  # noqa: S608
-            'elapsed_ms, recorded_at, exclusion FROM votes '
-            f'WHERE {where} AND id > ? ORDER BY id LIMIT ?',
-            [*params, rows[-1].id if rows else 0, PAGE_ROWS],
-        ).rows
-        rows.extend(map(ListedVote.model_validate, page))
+        page = fetch_all(
+            database,
+            select(
+                votes_table.id,
+                votes_table.actor_id.label('actor'),
+                votes_table.ip_tag,
+                votes_table.a_system,
+                votes_table.b_system,
+                votes_table.choice,
+                votes_table.elapsed_ms,
+                votes_table.recorded_at,
+                votes_table.exclusion,
+            )
+            .where(*filters, votes_table.id > (rows[-1].id if rows else 0))
+            .order_by(votes_table.id)
+            .limit(PAGE_ROWS),
+            ListedVote,
+        )
+        rows.extend(page)
         if len(page) < PAGE_ROWS:
             return rows
 
@@ -495,24 +717,34 @@ def exclude(database: Database, family: str, selector: Selector, reason: str) ->
         The reason is blank.
     """
     check_reason(reason)
-    condition, param = selector.condition()
-    result = database.execute(
-        'UPDATE votes SET exclusion = ? WHERE family = ? AND exclusion IS NULL '  # noqa: S608
-        f'AND {condition} RETURNING id',
-        [reason, family, param],
+    votes_table = schema.Votes
+    result = execute(
+        database,
+        update(votes_table)
+        .values(exclusion=reason)
+        .where(
+            votes_table.family == family,
+            votes_table.exclusion.is_(None),
+            selector.condition(),
+        )
+        .returning(votes_table.id),
     )
     return len(result.rows)
 
 
 def restore(database: Database, family: str, selector: Selector) -> int:
     """Count the selected excluded votes again, returning how many changed."""
-    condition, param = selector.condition()
-    result = database.execute(
-        # `condition` is built from a literal column name.
-        'UPDATE votes SET exclusion = NULL WHERE family = ? '  # noqa: S608
-        'AND exclusion IS NOT NULL '
-        f'AND {condition} RETURNING id',
-        [family, param],
+    votes_table = schema.Votes
+    result = execute(
+        database,
+        update(votes_table)
+        .values(exclusion=None)
+        .where(
+            votes_table.family == family,
+            votes_table.exclusion.is_not(None),
+            selector.condition(),
+        )
+        .returning(votes_table.id),
     )
     return len(result.rows)
 
@@ -564,102 +796,130 @@ def save_snapshot(database: Database, snapshot: Snapshot) -> str:
     readable by its content ID, and no row can be added or changed after sealing.
     """
     identity = _snapshot_digest(snapshot)
-    existing = database.execute(
-        'SELECT sealed FROM vote_snapshots WHERE id = ?', [identity]
-    ).rows
-    if existing and existing[0]['sealed']:
+    snapshots = schema.VoteSnapshots
+    if fetch_scalar(
+        database,
+        select(snapshots.sealed).where(snapshots.id == identity),
+        bool,
+    ):
         if read_snapshot(database, identity) != snapshot:
             raise InputError(f'Snapshot `{identity}` conflicts with its stored facts.')
         return identity
+
     cuts = snapshot.cuts()
-    counts = (
-        len(cuts),
-        sum(len(cut.inventory.cases) for _, cut in cuts),
-        sum(len(cut.inventory.outputs) for _, cut in cuts),
-        sum(len(cut.votes) for _, cut in cuts),
-    )
-    database.execute(
-        'INSERT INTO vote_snapshots '
-        '(id, family, taken_at, closed_at, category_order_json, closing_revision, '
-        'method, expected_store_count, expected_case_count, expected_output_count, '
-        'expected_vote_count, manifest_digest) '
-        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) '
-        'ON CONFLICT (id) DO NOTHING',
-        [
-            identity,
-            snapshot.family,
-            snapshot.taken_at.isoformat(),
-            snapshot.closed_at.isoformat(),
-            json.dumps(snapshot.category_order),
-            snapshot.closing_revision,
-            snapshot.method,
-            *counts,
-            identity,
-        ],
+    execute(
+        database,
+        sqlite.insert(snapshots)
+        .values(
+            id=identity,
+            family=snapshot.family,
+            taken_at=snapshot.taken_at.isoformat(),
+            closed_at=snapshot.closed_at.isoformat(),
+            category_order_json=json.dumps(snapshot.category_order),
+            closing_revision=snapshot.closing_revision,
+            method=snapshot.method,
+            expected_store_count=len(cuts),
+            expected_case_count=sum(len(cut.inventory.cases) for _, cut in cuts),
+            expected_output_count=sum(len(cut.inventory.outputs) for _, cut in cuts),
+            expected_vote_count=sum(len(cut.votes) for _, cut in cuts),
+            manifest_digest=identity,
+        )
+        .on_conflict_do_nothing(index_elements=[snapshots.id]),
     )
 
+    stores = schema.VoteSnapshotStores
     for target, cut in cuts:
         inventory = cut.inventory
-        database.execute(
-            'INSERT INTO vote_snapshot_stores '
-            '(snapshot_id, target, publication_id, reference, systems_json, '
-            'defects_json, cutoff, excluded, output_generation_id) '
-            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) '
-            'ON CONFLICT (snapshot_id, target) DO NOTHING',
-            [
-                identity,
-                target,
-                inventory.id,
-                inventory.reference,
-                json.dumps(inventory.systems),
-                json.dumps(inventory.defects),
-                cut.cutoff,
-                cut.excluded,
-                cut.output_generation,
-            ],
+        execute(
+            database,
+            sqlite.insert(stores)
+            .values(
+                snapshot_id=identity,
+                target=target,
+                publication_id=inventory.id,
+                reference=inventory.reference,
+                systems_json=json.dumps(inventory.systems),
+                defects_json=json.dumps(inventory.defects),
+                cutoff=cut.cutoff,
+                excluded=cut.excluded,
+                output_generation_id=cut.output_generation,
+            )
+            .on_conflict_do_nothing(index_elements=[stores.snapshot_id, stores.target]),
         )
 
         insert_missing(
             database,
-            'vote_snapshot_cases',
-            ('snapshot_id', 'target', 'case_key', 'facts_json'),
+            schema.VoteSnapshotCases,
             (
-                (identity, target, case.key, case.model_dump_json())
-                for case in inventory.cases
+                {
+                    'snapshot_id': identity,
+                    'target': target,
+                    'case_key': case_row.key,
+                    'facts_json': case_row.model_dump_json(),
+                }
+                for case_row in inventory.cases
             ),
         )
 
         insert_missing(
             database,
-            'vote_snapshot_outputs',
-            ('snapshot_id', 'target', 'output_key', 'facts_json'),
+            schema.VoteSnapshotOutputs,
             (
-                (identity, target, output.key, output.model_dump_json())
+                {
+                    'snapshot_id': identity,
+                    'target': target,
+                    'output_key': output.key,
+                    'facts_json': output.model_dump_json(),
+                }
                 for output in inventory.outputs
             ),
         )
 
         insert_missing(
             database,
-            'vote_snapshot_votes',
-            ('snapshot_id', 'target', 'vote_id', 'vote_json'),
-            ((identity, target, vote.id, vote.model_dump_json()) for vote in cut.votes),
+            schema.VoteSnapshotVotes,
+            (
+                {
+                    'snapshot_id': identity,
+                    'target': target,
+                    'vote_id': vote.id,
+                    'vote_json': vote.model_dump_json(),
+                }
+                for vote in cut.votes
+            ),
         )
 
     if _read_snapshot(database, identity, sealed=False) != snapshot:
         raise InputError(f'Snapshot `{identity}` conflicts with its stored facts.')
 
-    database.execute(
-        'UPDATE vote_snapshots SET sealed = 1 WHERE id = ? AND sealed = 0 '
-        'AND expected_store_count = '
-        '(SELECT count(*) FROM vote_snapshot_stores WHERE snapshot_id = ?) '
-        'AND expected_case_count = '
-        '(SELECT count(*) FROM vote_snapshot_cases WHERE snapshot_id = ?) '
-        'AND expected_output_count = '
-        '(SELECT count(*) FROM vote_snapshot_outputs WHERE snapshot_id = ?) '
-        'AND expected_vote_count = '
-        '(SELECT count(*) FROM vote_snapshot_votes WHERE snapshot_id = ?)',
-        [identity] * 5,
+    execute(
+        database,
+        update(snapshots)
+        .values(sealed=1)
+        .where(
+            snapshots.id == identity,
+            snapshots.sealed == 0,
+            snapshots.expected_store_count
+            == select(func.count())
+            .select_from(stores)
+            .where(stores.snapshot_id == identity)
+            .scalar_subquery(),
+            snapshots.expected_case_count
+            == select(func.count())
+            .select_from(schema.VoteSnapshotCases)
+            .where(schema.VoteSnapshotCases.snapshot_id == identity)
+            .scalar_subquery(),
+            snapshots.expected_output_count
+            == select(func.count())
+            .select_from(schema.VoteSnapshotOutputs)
+            .where(schema.VoteSnapshotOutputs.snapshot_id == identity)
+            .scalar_subquery(),
+            snapshots.expected_vote_count
+            == select(func.count())
+            .select_from(schema.VoteSnapshotVotes)
+            .where(schema.VoteSnapshotVotes.snapshot_id == identity)
+            .scalar_subquery(),
+        ),
     )
     read_snapshot(database, identity)
     return identity
@@ -671,47 +931,71 @@ def read_snapshot(database: Database, identity: str) -> Snapshot:
 
 
 def _read_snapshot(database: Database, identity: str, *, sealed: bool) -> Snapshot:
-    headers = database.execute(
-        'SELECT * FROM vote_snapshots WHERE id = ?', [identity]
+    snapshots = schema.VoteSnapshots
+    headers = execute(
+        database,
+        select(snapshots).where(snapshots.id == identity),
     ).rows
     if not headers or (sealed and not headers[0]['sealed']):
         raise InputError(f'Snapshot `{identity}` is not sealed in the private store.')
     try:
         header = _SnapshotHeader.model_validate(headers[0])
-        stores = [
-            _SnapshotStore.model_validate(row)
-            for row in database.execute(
-                'SELECT target, publication_id, reference, systems_json, '
-                'defects_json, cutoff, excluded, output_generation_id '
-                'FROM vote_snapshot_stores WHERE snapshot_id = ? ORDER BY target',
-                [identity],
-            ).rows
-        ]
+        store_table = schema.VoteSnapshotStores
+        stores = fetch_all(
+            database,
+            select(
+                store_table.target,
+                store_table.publication_id,
+                store_table.reference,
+                store_table.systems_json,
+                store_table.defects_json,
+                store_table.cutoff,
+                store_table.excluded,
+                store_table.output_generation_id,
+            )
+            .where(store_table.snapshot_id == identity)
+            .order_by(store_table.target),
+            _SnapshotStore,
+        )
+        case_table = schema.VoteSnapshotCases
+        output_table = schema.VoteSnapshotOutputs
+        vote_table = schema.VoteSnapshotVotes
         cuts: dict[Literal['production', 'private'], Cut] = {}
         for store in stores:
-            parameters = [identity, store.target]
             cases = tuple(
                 CaseFacts.model_validate_json(str(row['facts_json']))
-                for row in database.execute(
-                    'SELECT facts_json FROM vote_snapshot_cases '
-                    'WHERE snapshot_id = ? AND target = ? ORDER BY case_key',
-                    parameters,
+                for row in execute(
+                    database,
+                    select(case_table.facts_json)
+                    .where(
+                        case_table.snapshot_id == identity,
+                        case_table.target == store.target,
+                    )
+                    .order_by(case_table.case_key),
                 ).rows
             )
             outputs = tuple(
                 OutputFacts.model_validate_json(str(row['facts_json']))
-                for row in database.execute(
-                    'SELECT facts_json FROM vote_snapshot_outputs '
-                    'WHERE snapshot_id = ? AND target = ? ORDER BY output_key',
-                    parameters,
+                for row in execute(
+                    database,
+                    select(output_table.facts_json)
+                    .where(
+                        output_table.snapshot_id == identity,
+                        output_table.target == store.target,
+                    )
+                    .order_by(output_table.output_key),
                 ).rows
             )
             votes = tuple(
                 Vote.model_validate_json(str(row['vote_json']))
-                for row in database.execute(
-                    'SELECT vote_json FROM vote_snapshot_votes '
-                    'WHERE snapshot_id = ? AND target = ? ORDER BY vote_id',
-                    parameters,
+                for row in execute(
+                    database,
+                    select(vote_table.vote_json)
+                    .where(
+                        vote_table.snapshot_id == identity,
+                        vote_table.target == store.target,
+                    )
+                    .order_by(vote_table.vote_id),
                 ).rows
             )
             cuts[store.target] = Cut(

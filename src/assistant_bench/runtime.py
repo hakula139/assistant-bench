@@ -12,10 +12,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from harbor.models.job.config import SourceJobConfig
+from sqlalchemy import literal, select
 
 from assistant_bench import jobs, tasks
 from assistant_bench.arena.d1 import connect
 from assistant_bench.artifacts import ArtifactRepository, Publication, StagedArtifact
+from assistant_bench.database import execute as execute_sql
 from assistant_bench.families import Case, Family, load_cases, load_family
 from assistant_bench.git import git_environment
 from assistant_bench.messages import InputError
@@ -169,7 +171,7 @@ def open_context() -> Generator[RunContext]:
         public = root / 'public'
         materialize_implementation(revision, public)
         with open_sources() as sources, connect('private') as database:
-            database.execute('SELECT 1')
+            execute_sql(database, select(literal(1)))
             yield RunContext(
                 root=root,
                 public_root=public,

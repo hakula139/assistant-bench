@@ -1,13 +1,17 @@
 """SQL statements through SQLite or Cloudflare's D1 REST API."""
 
 import sqlite3
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from itertools import batched
+from itertools import batched, chain
 from typing import Protocol
 
 import httpx
-from pydantic import BaseModel, JsonValue, ValidationError
+from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
+from sqlalchemy.dialects import sqlite
+from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.sql import ClauseElement
+from sqlalchemy.sql.compiler import SQLCompiler
 
 from assistant_bench.messages import sentence
 
@@ -18,6 +22,8 @@ TIMEOUT_SEC = 120.0
 
 _MAX_PARAMS = 100
 """D1's limit on the parameters one statement binds."""
+
+_DIALECT = sqlite.dialect(paramstyle='qmark')
 
 type Param = str | int | float | None
 type Row = dict[str, JsonValue]
@@ -38,22 +44,82 @@ class Database(Protocol):
         ...
 
 
+def compile_statement(statement: ClauseElement) -> tuple[str, list[Param]]:
+    """Compile a SQLAlchemy Core statement to qmark SQL and D1-safe parameters."""
+    compiled = statement.compile(
+        dialect=_DIALECT,
+        compile_kwargs={'render_postcompile': True},
+    )
+    if not isinstance(compiled, SQLCompiler):
+        raise TypeError(f'Expected a SQLCompiler, got {type(compiled).__name__}.')
+    raw_params = compiled.params or {}
+    params: list[Param] = []
+    for key in compiled.positiontup or ():
+        value: object = raw_params[key]
+        bind = compiled.binds.get(key)
+        if bind is not None:
+            processor = bind.type.bind_processor(_DIALECT)
+            if processor is not None:
+                value = processor(value)
+        if isinstance(value, bool):
+            value = int(value)
+        if value is not None and not isinstance(value, (str, int, float)):
+            raise TypeError(
+                f'Unsupported SQL parameter type {type(value).__name__} for {key!r}.'
+            )
+        params.append(value)
+    return str(compiled), params
+
+
+def execute(database: Database, statement: ClauseElement) -> Result:
+    """Compile and execute one SQLAlchemy Core statement."""
+    sql, params = compile_statement(statement)
+    return database.execute(sql, params)
+
+
+def fetch_all[T: BaseModel](
+    database: Database, statement: ClauseElement, model: type[T]
+) -> list[T]:
+    """Execute a statement and validate every returned row with `model`."""
+    return [model.model_validate(row) for row in execute(database, statement).rows]
+
+
+def fetch_one[T: BaseModel](
+    database: Database, statement: ClauseElement, model: type[T]
+) -> T | None:
+    """Execute a statement and validate its first row, or None when empty."""
+    rows = execute(database, statement).rows
+    return model.model_validate(rows[0]) if rows else None
+
+
+def fetch_scalar[T](
+    database: Database, statement: ClauseElement, scalar_type: type[T]
+) -> T | None:
+    """Validate the first column of the first row, or None when empty or NULL."""
+    rows = execute(database, statement).rows
+    if not rows:
+        return None
+    value = next(iter(rows[0].values()))
+    if value is None:
+        return None
+    return TypeAdapter(scalar_type).validate_python(value)
+
+
 def insert_missing(
     database: Database,
-    table: str,
-    columns: Sequence[str],
-    rows: Iterable[Sequence[Param]],
+    table: type[DeclarativeBase],
+    rows: Iterable[Mapping[str, Param]],
 ) -> None:
     """Insert rows missing from the table in statements within D1's parameter limit."""
-    per_statement = _MAX_PARAMS // len(columns)
-    placeholders = f'({", ".join("?" * len(columns))})'
-
-    for chunk in batched(rows, per_statement, strict=False):
-        database.execute(
-            # `table` and `columns` are constants from callers.
-            f'INSERT INTO {table} ({", ".join(columns)}) VALUES '  # noqa: S608
-            f'{", ".join([placeholders] * len(chunk))} ON CONFLICT DO NOTHING',
-            [value for row in chunk for value in row],
+    iterator = iter(rows)
+    first = next(iterator, None)
+    if first is None:
+        return
+    per_statement = _MAX_PARAMS // len(first)
+    for chunk in batched(chain((first,), iterator), per_statement, strict=False):
+        execute(
+            database,
+            sqlite.insert(table).values(list(chunk)).on_conflict_do_nothing(),
         )
 
 

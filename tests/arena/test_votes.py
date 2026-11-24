@@ -183,8 +183,7 @@ class TestReadCut:
 
         def mutate_after_read(sql: str, params: Sequence[Param] = ()) -> Result:
             nonlocal interposed
-            assert params[1] == 1
-            assert not isinstance(params[1], bool)
+            assert all(not isinstance(param, bool) for param in params)
             result = execute(sql, params)
             if not interposed:
                 interposed = True

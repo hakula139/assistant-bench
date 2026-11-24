@@ -3,12 +3,38 @@
 import hashlib
 import json
 from collections.abc import Sequence
-from dataclasses import dataclass, replace
 from typing import Literal, cast
 
-from pydantic import JsonValue
+from pydantic import BaseModel, ConfigDict, JsonValue
+from sqlalchemy import (
+    Integer,
+    Text,
+    and_,
+    column,
+    delete,
+    exists,
+    func,
+    literal,
+    literal_column,
+    null,
+    or_,
+    select,
+    union_all,
+    update,
+    values,
+)
+from sqlalchemy.dialects import sqlite
+from sqlalchemy.orm import aliased
 
-from assistant_bench.database import Database, Param, Row
+from assistant_bench import schema
+from assistant_bench.database import (
+    Database,
+    Row,
+    execute,
+    fetch_all,
+    fetch_one,
+    fetch_scalar,
+)
 from assistant_bench.messages import InputError
 
 
@@ -19,8 +45,11 @@ OUTPUTS_PER_STATEMENT = 25
 """Four parameters per output fit D1's 100-bound-parameter limit."""
 
 
-@dataclass(frozen=True)
-class Run:
+class _Model(BaseModel):
+    model_config = ConfigDict(extra='forbid', frozen=True)
+
+
+class Run(_Model):
     """Revision fields are None only for unknown historical execution provenance."""
 
     id: str
@@ -32,8 +61,7 @@ class Run:
     max_requests: int | None = None
 
 
-@dataclass(frozen=True)
-class Claim:
+class Claim(_Model):
     id: str
     run_id: str
     scope: str
@@ -46,8 +74,7 @@ class Claim:
     created_at: str
 
 
-@dataclass(frozen=True)
-class AttemptStart:
+class AttemptStart(_Model):
     """Use the owning Entry's canonical JSON timestamp for started_at."""
 
     id: str
@@ -55,15 +82,13 @@ class AttemptStart:
     started_at: str
 
 
-@dataclass(frozen=True)
-class RequestAdmission:
+class RequestAdmission(_Model):
     id: str
     attempt_id: str
     created_at: str
 
 
-@dataclass(frozen=True)
-class Collection:
+class Collection(_Model):
     id: str
     family: str
     expected_count: int
@@ -74,14 +99,12 @@ class Collection:
     system_names_json: str | None
 
 
-@dataclass(frozen=True)
-class OutputGeneration:
+class OutputGeneration(_Model):
     id: str | None
     outputs: tuple[str, ...]
 
 
-@dataclass(frozen=True)
-class TrialArtifact:
+class TrialArtifact(_Model):
     run_id: str
     trial_id: str
     source_trial_id: str
@@ -90,8 +113,7 @@ class TrialArtifact:
     manifest_digest: str
 
 
-@dataclass(frozen=True)
-class PendingArtifact:
+class PendingArtifact(_Model):
     run_id: str
     trial_id: str
     source_trial_id: str
@@ -103,10 +125,52 @@ class PendingArtifact:
     canonical_commit_sha: str | None
 
 
-@dataclass(frozen=True)
-class ArtifactGeneration:
+class ArtifactGeneration(_Model):
     revision: int
     artifacts: tuple[TrialArtifact, ...]
+
+
+class _StoredRun(Run):
+    status: RunStatus
+
+
+class _StoredClaim(Claim):
+    state: ClaimState
+
+
+class _StoredCollection(Collection):
+    sealed: bool
+
+
+class _StagedOutput(_Model):
+    position: int
+    output_key: str
+    output_json: str
+
+
+class _PositionOutput(_Model):
+    position: int
+    output_json: str
+
+
+class _EntryMatch(_Model):
+    claim_id: str | None
+    entry_json: str
+
+
+class _GenerationRow(_Model):
+    collection_id: str
+    output_json: str | None
+
+
+class _ArtifactGenerationRow(_Model):
+    revision: int
+    run_id: str | None
+    trial_id: str | None
+    source_trial_id: str | None
+    commit_sha: str | None
+    path: str | None
+    manifest_digest: str | None
 
 
 class State:
@@ -122,31 +186,33 @@ class State:
     # ── Runs and Paid Claims ──
 
     def create_run(self, run: Run) -> None:
-        self._database.execute(
-            """
-            INSERT INTO runs (
-                id, scope, job, code_revision, case_revision, created_at, max_requests
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT (id) DO NOTHING
-            """,
-            (
-                run.id,
-                run.scope,
-                run.job,
-                run.code_revision,
-                run.case_revision,
-                run.created_at,
-                run.max_requests,
-            ),
+        runs = schema.Runs
+        execute(
+            self._database,
+            sqlite.insert(runs)
+            .values(
+                id=run.id,
+                scope=run.scope,
+                job=run.job,
+                code_revision=run.code_revision,
+                case_revision=run.case_revision,
+                created_at=run.created_at,
+                max_requests=run.max_requests,
+            )
+            .on_conflict_do_nothing(index_elements=[runs.id]),
         )
         if self._run(run.id) != run:
             raise InputError(f'Run `{run.id}` already has different metadata.')
 
     def source_revision(self, scope: str) -> int:
-        rows = self._database.execute(
-            'SELECT revision FROM source_heads WHERE scope = ?', (scope,)
-        ).rows
-        return cast(int, rows[0]['revision']) if rows else 0
+        revision = fetch_scalar(
+            self._database,
+            select(schema.SourceHeads.revision).where(
+                schema.SourceHeads.scope == scope
+            ),
+            int,
+        )
+        return revision if revision is not None else 0
 
     def claim_attempt(self, claim: Claim) -> bool:
         """Claim a slot only at the source revision used to plan its generation.
@@ -157,98 +223,134 @@ class State:
         """
         if _object(claim.accounting_json)['system'] != claim.system:
             raise InputError(f'Claim `{claim.id}` has a different accounting system.')
-        rows = self._database.execute(
-            """
-            INSERT INTO attempt_claims (
-                id, run_id, scope, slot_key, trial, system, fingerprint,
-                accounting_json, expected_source_revision, created_at
+        claims = schema.AttemptClaims
+        runs = schema.Runs
+        source_heads = schema.SourceHeads
+        rows = execute(
+            self._database,
+            sqlite.insert(claims)
+            .from_select(
+                [
+                    claims.id,
+                    claims.run_id,
+                    claims.scope,
+                    claims.slot_key,
+                    claims.trial,
+                    claims.system,
+                    claims.fingerprint,
+                    claims.accounting_json,
+                    claims.expected_source_revision,
+                    claims.created_at,
+                ],
+                select(
+                    literal(claim.id),
+                    literal(claim.run_id),
+                    literal(claim.scope),
+                    literal(claim.slot_key),
+                    literal(claim.trial),
+                    literal(claim.system),
+                    literal(claim.fingerprint),
+                    literal(claim.accounting_json),
+                    literal(claim.expected_source_revision),
+                    literal(claim.created_at),
+                ).where(
+                    exists(
+                        select(literal(1)).where(
+                            runs.id == claim.run_id,
+                            runs.scope == claim.scope,
+                            runs.status.in_(['prepared', 'running']),
+                        )
+                    ),
+                    func.coalesce(
+                        select(source_heads.revision)
+                        .where(source_heads.scope == claim.scope)
+                        .scalar_subquery(),
+                        0,
+                    )
+                    == claim.expected_source_revision,
+                ),
             )
-            SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-            WHERE EXISTS (
-                SELECT 1 FROM runs
-                WHERE id = ? AND scope = ? AND status IN ('prepared', 'running')
-            ) AND COALESCE((SELECT revision FROM source_heads WHERE scope = ?), 0) = ?
-            ON CONFLICT DO NOTHING
-            RETURNING id
-            """,
-            (
-                claim.id,
-                claim.run_id,
-                claim.scope,
-                claim.slot_key,
-                claim.trial,
-                claim.system,
-                claim.fingerprint,
-                claim.accounting_json,
-                claim.expected_source_revision,
-                claim.created_at,
-                claim.run_id,
-                claim.scope,
-                claim.scope,
-                claim.expected_source_revision,
-            ),
+            .on_conflict_do_nothing()
+            .returning(claims.id),
         ).rows
         if rows:
             return True
 
-        existing = self._database.execute(
-            'SELECT * FROM attempt_claims WHERE id = ?', (claim.id,)
-        ).rows
-        if existing:
-            previous = _claim(existing[0])
-            if replace(
-                previous, accounting_json=claim.accounting_json
-            ) != claim or not _same_json(
-                previous.accounting_json, claim.accounting_json
-            ):
-                raise InputError(f'Claim `{claim.id}` already has different metadata.')
+        previous = fetch_one(
+            self._database,
+            select(
+                claims.id,
+                claims.run_id,
+                claims.scope,
+                claims.slot_key,
+                claims.trial,
+                claims.system,
+                claims.fingerprint,
+                claims.accounting_json,
+                claims.expected_source_revision,
+                claims.created_at,
+            ).where(claims.id == claim.id),
+            Claim,
+        )
+        if previous is not None and (
+            previous.model_copy(update={'accounting_json': claim.accounting_json})
+            != claim
+            or not _same_json(previous.accounting_json, claim.accounting_json)
+        ):
+            raise InputError(f'Claim `{claim.id}` already has different metadata.')
         return False
 
     def get_claim(self, claim_id: str) -> Claim:
-        return _claim(self._claim_row(claim_id))
+        stored = self._stored_claim(claim_id)
+        return Claim.model_validate(stored.model_dump(exclude={'state'}))
 
     def claim_state(self, claim_id: str) -> ClaimState:
-        return cast(ClaimState, self._claim_row(claim_id)['state'])
+        return self._stored_claim(claim_id).state
 
     def mark_uncertain(self, claim_id: str) -> None:
-        self._claim_row(claim_id)
-        self._database.execute(
-            "UPDATE attempt_claims SET state = 'uncertain' "
-            "WHERE id = ? AND state = 'claimed'",
-            (claim_id,),
+        self._stored_claim(claim_id)
+        claims = schema.AttemptClaims
+        execute(
+            self._database,
+            update(claims)
+            .values(state='uncertain')
+            .where(claims.id == claim_id, claims.state == 'claimed'),
         )
 
     def cancel_claim(self, claim_id: str) -> bool:
         """Close a claim only when no attempt has crossed its start fence."""
-        self._claim_row(claim_id)
+        self._stored_claim(claim_id)
+        claims = schema.AttemptClaims
+        starts = schema.AttemptStarts
         return bool(
-            self._database.execute(
-                """
-                UPDATE attempt_claims SET state = 'cancelled'
-                WHERE id = ? AND state IN ('claimed', 'uncertain')
-                    AND NOT EXISTS (
-                        SELECT 1 FROM attempt_starts
-                        WHERE claim_id = attempt_claims.id
-                    )
-                RETURNING id
-                """,
-                (claim_id,),
+            execute(
+                self._database,
+                update(claims)
+                .values(state='cancelled')
+                .where(
+                    claims.id == claim_id,
+                    claims.state.in_(['claimed', 'uncertain']),
+                    ~exists(select(literal(1)).where(starts.claim_id == claims.id)),
+                )
+                .returning(claims.id),
             ).rows
         )
 
     def cancel_unstarted(self, run_id: str) -> int:
         """Release only this run's claimed slots that never crossed a start fence."""
+        claims = schema.AttemptClaims
+        starts = schema.AttemptStarts
         return len(
-            self._database.execute(
-                """
-                UPDATE attempt_claims SET state = 'cancelled'
-                WHERE run_id = ? AND state = 'claimed' AND NOT EXISTS (
-                    SELECT 1 FROM attempt_starts
-                    WHERE claim_id = attempt_claims.id
+            execute(
+                self._database,
+                update(claims)
+                .values(state='cancelled')
+                .where(
+                    claims.run_id == run_id,
+                    claims.state == 'claimed',
+                    ~exists(select(literal(1)).where(starts.claim_id == claims.id)),
                 )
-                RETURNING id
-                """,
-                (run_id,),
+                .returning(claims.id),
             ).rows
         )
 
@@ -258,25 +360,31 @@ class State:
         Only a true result grants a new start. Repeated identities return false
         and cannot authorize another attempt or another paid request.
         """
-        self._claim_row(attempt.claim_id)
-        rows = self._database.execute(
-            """
-            INSERT INTO attempt_starts (id, claim_id, started_at)
-            SELECT ?, id, ? FROM attempt_claims WHERE id = ? AND state = 'claimed'
-            ON CONFLICT DO NOTHING RETURNING id
-            """,
-            (attempt.id, attempt.started_at, attempt.claim_id),
+        self._stored_claim(attempt.claim_id)
+        starts = schema.AttemptStarts
+        claims = schema.AttemptClaims
+        rows = execute(
+            self._database,
+            sqlite.insert(starts)
+            .from_select(
+                [starts.id, starts.claim_id, starts.started_at],
+                select(
+                    literal(attempt.id),
+                    claims.id,
+                    literal(attempt.started_at),
+                ).where(claims.id == attempt.claim_id, claims.state == 'claimed'),
+            )
+            .on_conflict_do_nothing()
+            .returning(starts.id),
         ).rows
         if rows:
             return True
-        previous = self._database.execute(
-            'SELECT * FROM attempt_starts WHERE id = ?', (attempt.id,)
-        ).rows
-        if previous and previous[0] != {
-            'id': attempt.id,
-            'claim_id': attempt.claim_id,
-            'started_at': attempt.started_at,
-        }:
+        previous = fetch_one(
+            self._database,
+            select(starts).where(starts.id == attempt.id),
+            AttemptStart,
+        )
+        if previous is not None and previous != attempt:
             raise InputError(f'Attempt `{attempt.id}` already has different metadata.')
         return False
 
@@ -286,55 +394,75 @@ class State:
         False never permits I/O, including after an uncertain response to the
         admission itself. A request ID is never reused to resend a paid request.
         """
-        rows = self._database.execute(
-            """
-            INSERT INTO request_admissions (id, attempt_id, created_at)
-            SELECT ?, starts.id, ? FROM attempt_starts AS starts
-            JOIN attempt_claims AS claims ON claims.id = starts.claim_id
-            JOIN runs ON runs.id = claims.run_id
-            WHERE starts.id = ? AND claims.state = 'claimed'
-                AND (runs.max_requests IS NULL OR (
-                    SELECT COUNT(*) FROM request_admissions AS admissions
-                    JOIN attempt_starts AS admitted_starts
-                        ON admitted_starts.id = admissions.attempt_id
-                    JOIN attempt_claims AS admitted_claims
-                        ON admitted_claims.id = admitted_starts.claim_id
-                    WHERE admitted_claims.run_id = runs.id
-                ) < runs.max_requests)
-                AND NOT EXISTS (
-                    SELECT 1 FROM attempt_entries WHERE attempt_id = starts.id
+        requests = schema.RequestAdmissions
+        starts = aliased(schema.AttemptStarts, name='starts')
+        claims = aliased(schema.AttemptClaims, name='claims')
+        runs = schema.Runs
+        admissions = aliased(schema.RequestAdmissions, name='admissions')
+        admitted_starts = aliased(schema.AttemptStarts, name='admitted_starts')
+        admitted_claims = aliased(schema.AttemptClaims, name='admitted_claims')
+        entries = schema.AttemptEntries
+        admitted_count = (
+            select(func.count())
+            .select_from(admissions)
+            .join(admitted_starts, admitted_starts.id == admissions.attempt_id)
+            .join(admitted_claims, admitted_claims.id == admitted_starts.claim_id)
+            .where(admitted_claims.run_id == runs.id)
+            .correlate(runs)
+            .scalar_subquery()
+        )
+        rows = execute(
+            self._database,
+            sqlite.insert(requests)
+            .from_select(
+                [requests.id, requests.attempt_id, requests.created_at],
+                select(
+                    literal(request.id),
+                    starts.id,
+                    literal(request.created_at),
                 )
-            ON CONFLICT (id) DO NOTHING RETURNING id
-            """,
-            (request.id, request.created_at, request.attempt_id),
+                .select_from(starts)
+                .join(claims, claims.id == starts.claim_id)
+                .join(runs, runs.id == claims.run_id)
+                .where(
+                    starts.id == request.attempt_id,
+                    claims.state == 'claimed',
+                    or_(
+                        runs.max_requests.is_(None),
+                        admitted_count < runs.max_requests,
+                    ),
+                    ~exists(select(literal(1)).where(entries.attempt_id == starts.id)),
+                ),
+            )
+            .on_conflict_do_nothing(index_elements=[requests.id])
+            .returning(requests.id),
         ).rows
         if rows:
             return True
-        previous = self._database.execute(
-            'SELECT * FROM request_admissions WHERE id = ?', (request.id,)
-        ).rows
-        if previous and previous[0] != {
-            'id': request.id,
-            'attempt_id': request.attempt_id,
-            'created_at': request.created_at,
-        }:
+        previous = fetch_one(
+            self._database,
+            select(requests).where(requests.id == request.id),
+            RequestAdmission,
+        )
+        if previous is not None and previous != request:
             raise InputError(f'Request `{request.id}` already has different metadata.')
         return False
 
     def record_receipt(self, request_id: str, receipt_json: str) -> None:
         """Append a domain-validated terminal receipt, preserving unknown usage."""
-        self._database.execute(
-            """
-            INSERT INTO request_receipts (request_id, receipt_json) VALUES (?, ?)
-            ON CONFLICT (request_id) DO NOTHING
-            """,
-            (request_id, receipt_json),
+        receipts = schema.RequestReceipts
+        execute(
+            self._database,
+            sqlite.insert(receipts)
+            .values(request_id=request_id, receipt_json=receipt_json)
+            .on_conflict_do_nothing(index_elements=[receipts.request_id]),
         )
-        rows = self._database.execute(
-            'SELECT receipt_json FROM request_receipts WHERE request_id = ?',
-            (request_id,),
-        ).rows
-        if not _same_json(cast(str, rows[0]['receipt_json']), receipt_json):
+        stored = fetch_scalar(
+            self._database,
+            select(receipts.receipt_json).where(receipts.request_id == request_id),
+            str,
+        )
+        if stored is None or not _same_json(stored, receipt_json):
             raise InputError(f'Request `{request_id}` already has a different receipt.')
 
     def requests(self, scope: str, *, unrecorded_only: bool = False) -> list[Row]:
@@ -343,35 +471,48 @@ class State:
         A missing receipt is None and means unknown usage.
         Unrecorded requests exclude every attempt covered by a final Entry.
         """
-        return self._database.execute(
-            """
-            SELECT requests.id AS request_id, requests.attempt_id, starts.claim_id,
-                requests.created_at, claims.accounting_json, receipts.receipt_json
-            FROM request_admissions AS requests
-            LEFT JOIN request_receipts AS receipts ON receipts.request_id = requests.id
-            JOIN attempt_starts AS starts ON starts.id = requests.attempt_id
-            JOIN attempt_claims AS claims ON claims.id = starts.claim_id
-            WHERE claims.scope = ? AND (? = 0 OR NOT EXISTS (
-                SELECT 1 FROM attempt_entries WHERE attempt_id = starts.id
-            ))
-            ORDER BY requests.created_at, requests.id
-            """,
-            (scope, int(unrecorded_only)),
-        ).rows
+        requests = schema.RequestAdmissions
+        receipts = schema.RequestReceipts
+        starts = schema.AttemptStarts
+        claims = schema.AttemptClaims
+        entries = schema.AttemptEntries
+        stmt = (
+            select(
+                requests.id.label('request_id'),
+                requests.attempt_id,
+                starts.claim_id,
+                requests.created_at,
+                claims.accounting_json,
+                receipts.receipt_json,
+            )
+            .select_from(requests)
+            .outerjoin(receipts, receipts.request_id == requests.id)
+            .join(starts, starts.id == requests.attempt_id)
+            .join(claims, claims.id == starts.claim_id)
+            .where(claims.scope == scope)
+            .order_by(requests.created_at, requests.id)
+        )
+        if unrecorded_only:
+            stmt = stmt.where(
+                ~exists(select(literal(1)).where(entries.attempt_id == starts.id))
+            )
+        return execute(self._database, stmt).rows
 
     def trial_requests(self, run_id: str, trial_id: str) -> list[Row]:
         """Read canonical receipts for admissions belonging to one exact trial."""
-        return self._database.execute(
-            """
-            SELECT requests.id AS request_id, receipts.receipt_json
-            FROM request_admissions AS requests
-            JOIN attempt_starts AS starts ON starts.id = requests.attempt_id
-            JOIN attempt_claims AS claims ON claims.id = starts.claim_id
-            LEFT JOIN request_receipts AS receipts ON receipts.request_id = requests.id
-            WHERE claims.run_id = ? AND claims.trial = ?
-            ORDER BY requests.created_at, requests.id
-            """,
-            (run_id, trial_id),
+        requests = schema.RequestAdmissions
+        starts = schema.AttemptStarts
+        claims = schema.AttemptClaims
+        receipts = schema.RequestReceipts
+        return execute(
+            self._database,
+            select(requests.id.label('request_id'), receipts.receipt_json)
+            .select_from(requests)
+            .join(starts, starts.id == requests.attempt_id)
+            .join(claims, claims.id == starts.claim_id)
+            .outerjoin(receipts, receipts.request_id == requests.id)
+            .where(claims.run_id == run_id, claims.trial == trial_id)
+            .order_by(requests.created_at, requests.id),
         ).rows
 
     def record_entry(self, claim_id: str, entry_json: str) -> None:
@@ -395,72 +536,139 @@ class State:
             )
 
         started_at = cast(str, entry['started_at'])
-        self._database.execute(
-            """
-            INSERT INTO attempt_entries (
-                scope, job, trial, started_at, claim_id, attempt_id, entry_json
+        entries = schema.AttemptEntries
+        claims = schema.AttemptClaims
+        starts = schema.AttemptStarts
+        runs = schema.Runs
+        execute(
+            self._database,
+            sqlite.insert(entries)
+            .from_select(
+                [
+                    entries.scope,
+                    entries.job,
+                    entries.trial,
+                    entries.started_at,
+                    entries.claim_id,
+                    entries.attempt_id,
+                    entries.entry_json,
+                ],
+                select(
+                    claims.scope,
+                    runs.job,
+                    claims.trial,
+                    starts.started_at,
+                    claims.id,
+                    starts.id,
+                    literal(entry_json),
+                )
+                .select_from(claims)
+                .join(runs, runs.id == claims.run_id)
+                .join(starts, starts.claim_id == claims.id)
+                .where(
+                    claims.id == claim_id,
+                    claims.state.in_(['claimed', 'uncertain']),
+                    starts.started_at == started_at,
+                ),
             )
-            SELECT claims.scope, runs.job, claims.trial, starts.started_at,
-                claims.id, starts.id, ?
-            FROM attempt_claims AS claims JOIN runs ON runs.id = claims.run_id
-            JOIN attempt_starts AS starts ON starts.claim_id = claims.id
-            WHERE claims.id = ? AND claims.state IN ('claimed', 'uncertain')
-                AND starts.started_at = ?
-            ON CONFLICT (scope, job, trial, started_at) DO NOTHING
-            """,
-            (entry_json, claim_id, started_at),
+            .on_conflict_do_nothing(
+                index_elements=[
+                    entries.scope,
+                    entries.job,
+                    entries.trial,
+                    entries.started_at,
+                ]
+            ),
         )
-        rows = self._database.execute(
-            """
-            SELECT claim_id, entry_json FROM attempt_entries
-            WHERE scope = ? AND job = ? AND trial = ? AND started_at = ?
-            """,
-            (claim.scope, run.job, claim.trial, started_at),
-        ).rows
+        matched = fetch_one(
+            self._database,
+            select(entries.claim_id, entries.entry_json).where(
+                entries.scope == claim.scope,
+                entries.job == run.job,
+                entries.trial == claim.trial,
+                entries.started_at == started_at,
+            ),
+            _EntryMatch,
+        )
         if (
-            not rows
-            or rows[0]['claim_id'] != claim_id
-            or not _same_json(cast(str, rows[0]['entry_json']), entry_json)
+            matched is None
+            or matched.claim_id != claim_id
+            or not _same_json(matched.entry_json, entry_json)
         ):
             raise InputError(
                 f'Claim `{claim_id}` needs a matching live start or identical Entry.'
             )
 
     def entries(self, scope: str) -> list[str]:
+        entries = schema.AttemptEntries
         return [
-            cast(str, row['entry_json'])
-            for row in self._database.execute(
-                'SELECT entry_json FROM attempt_entries WHERE scope = ? ORDER BY rowid',
-                (scope,),
+            str(row['entry_json'])
+            for row in execute(
+                self._database,
+                select(entries.entry_json)
+                .where(entries.scope == scope)
+                .order_by(literal_column('rowid')),
             ).rows
         ]
 
     def accounting(self, scope: str) -> list[Row]:
         """Read final entries and uncovered admitted requests in one snapshot."""
-        return self._database.execute(
-            """
-            SELECT 'entry' AS kind, entries.entry_json, NULL AS attempt_id,
-                entries.job, entries.trial, NULL AS accounting_json,
-                NULL AS receipt_json, entries.started_at AS started_at,
-                '' AS request_id
-            FROM attempt_entries AS entries WHERE entries.scope = ?
-            UNION ALL
-            SELECT 'request', NULL, starts.id, runs.job, claims.trial,
-                claims.accounting_json, receipts.receipt_json, starts.started_at,
-                requests.id
-            FROM request_admissions AS requests
-            JOIN attempt_starts AS starts ON starts.id = requests.attempt_id
-            JOIN attempt_claims AS claims ON claims.id = starts.claim_id
-            JOIN runs ON runs.id = claims.run_id
-            LEFT JOIN request_receipts AS receipts ON receipts.request_id = requests.id
-            WHERE claims.scope = ? AND NOT EXISTS (
-                SELECT 1 FROM attempt_entries AS entries
-                WHERE entries.attempt_id = starts.id
-                    AND entries.started_at = starts.started_at
+        entries = schema.AttemptEntries
+        requests = schema.RequestAdmissions
+        starts = schema.AttemptStarts
+        claims = schema.AttemptClaims
+        runs = schema.Runs
+        receipts = schema.RequestReceipts
+        covering = aliased(schema.AttemptEntries, name='covering')
+
+        entry_rows = select(
+            literal('entry').label('kind'),
+            entries.entry_json,
+            null().cast(Text).label('attempt_id'),
+            entries.job,
+            entries.trial,
+            null().cast(Text).label('accounting_json'),
+            null().cast(Text).label('receipt_json'),
+            entries.started_at.label('started_at'),
+            literal('').label('request_id'),
+        ).where(entries.scope == scope)
+
+        request_rows = (
+            select(
+                literal('request'),
+                null().cast(Text),
+                starts.id,
+                runs.job,
+                claims.trial,
+                claims.accounting_json,
+                receipts.receipt_json,
+                starts.started_at,
+                requests.id,
             )
-            ORDER BY started_at, job, trial, request_id
-            """,
-            (scope, scope),
+            .select_from(requests)
+            .join(starts, starts.id == requests.attempt_id)
+            .join(claims, claims.id == starts.claim_id)
+            .join(runs, runs.id == claims.run_id)
+            .outerjoin(receipts, receipts.request_id == requests.id)
+            .where(
+                claims.scope == scope,
+                ~exists(
+                    select(literal(1)).where(
+                        covering.attempt_id == starts.id,
+                        covering.started_at == starts.started_at,
+                    )
+                ),
+            )
+        )
+        combined = union_all(entry_rows, request_rows)
+        return execute(
+            self._database,
+            combined.order_by(
+                combined.selected_columns.started_at,
+                combined.selected_columns.job,
+                combined.selected_columns.trial,
+                combined.selected_columns.request_id,
+            ),
         ).rows
 
     def record_pending_artifact(
@@ -485,15 +693,21 @@ class State:
             None,
         )
         if existing is None:
-            self._database.execute(
-                """
-                INSERT INTO pending_trial_artifacts (
-                    run_id, trial_id, source_trial_id, staged_commit_sha,
-                    path, manifest_digest
-                ) VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT (run_id, trial_id) DO NOTHING
-                """,
-                expected,
+            pending = schema.PendingTrialArtifacts
+            execute(
+                self._database,
+                sqlite.insert(pending)
+                .values(
+                    run_id=run_id,
+                    trial_id=trial_id,
+                    source_trial_id=source_trial_id,
+                    staged_commit_sha=staged_commit_sha,
+                    path=path,
+                    manifest_digest=manifest_digest,
+                )
+                .on_conflict_do_nothing(
+                    index_elements=[pending.run_id, pending.trial_id]
+                ),
             )
         row = next(
             row for row in self.pending_artifacts(run_id) if row.trial_id == trial_id
@@ -511,59 +725,61 @@ class State:
             )
 
     def pending_artifacts(self, run_id: str) -> tuple[PendingArtifact, ...]:
-        rows = self._database.execute(
-            'SELECT * FROM pending_trial_artifacts WHERE run_id = ? ORDER BY trial_id',
-            (run_id,),
-        ).rows
+        pending = schema.PendingTrialArtifacts
         return tuple(
-            PendingArtifact(
-                run_id=cast(str, row['run_id']),
-                trial_id=cast(str, row['trial_id']),
-                source_trial_id=cast(str, row['source_trial_id']),
-                staged_commit_sha=cast(str, row['staged_commit_sha']),
-                path=cast(str, row['path']),
-                manifest_digest=cast(str, row['manifest_digest']),
-                authorized_claim_id=cast(str | None, row['authorized_claim_id']),
-                publication_ready=bool(row['publication_ready']),
-                canonical_commit_sha=cast(str | None, row['canonical_commit_sha']),
+            fetch_all(
+                self._database,
+                select(pending)
+                .where(pending.run_id == run_id)
+                .order_by(pending.trial_id),
+                PendingArtifact,
             )
-            for row in rows
         )
 
     def pending_runs(self) -> tuple[Run, ...]:
-        rows = self._database.execute(
-            """
-            SELECT DISTINCT pending.run_id FROM pending_trial_artifacts AS pending
-            JOIN runs ON runs.id = pending.run_id
-            WHERE pending.canonical_commit_sha IS NULL OR runs.status != 'complete'
-            ORDER BY pending.run_id
-            """
+        pending = schema.PendingTrialArtifacts
+        runs = schema.Runs
+        rows = execute(
+            self._database,
+            select(pending.run_id)
+            .distinct()
+            .join(runs, runs.id == pending.run_id)
+            .where(
+                or_(
+                    pending.canonical_commit_sha.is_(None),
+                    runs.status != 'complete',
+                )
+            )
+            .order_by(pending.run_id),
         ).rows
-        return tuple(self.run(cast(str, row['run_id'])) for row in rows)
+        return tuple(self.run(str(row['run_id'])) for row in rows)
 
     def run_systems(self, run_id: str) -> tuple[str, ...]:
-        rows = self._database.execute(
-            'SELECT DISTINCT system FROM attempt_claims WHERE run_id = ?', (run_id,)
+        claims = schema.AttemptClaims
+        rows = execute(
+            self._database,
+            select(claims.system).distinct().where(claims.run_id == run_id),
         ).rows
-        return tuple(cast(str, row['system']) for row in rows)
+        return tuple(str(row['system']) for row in rows)
 
     def authorize_pending_claim(self, claim_id: str) -> None:
         claim = self.get_claim(claim_id)
-        rows = self._database.execute(
-            """
-            UPDATE pending_trial_artifacts SET authorized_claim_id = ?
-            WHERE run_id = ? AND trial_id = ?
-            RETURNING authorized_claim_id
-            """,
-            (claim_id, claim.run_id, claim.trial),
+        pending = schema.PendingTrialArtifacts
+        rows = execute(
+            self._database,
+            update(pending)
+            .values(authorized_claim_id=claim_id)
+            .where(pending.run_id == claim.run_id, pending.trial_id == claim.trial)
+            .returning(pending.authorized_claim_id),
         ).rows
         if not rows:
             raise InputError(f'Claim `{claim_id}` has no pending artifact.')
 
     def seal_publication(self, run_id: str) -> None:
-        self._database.execute(
-            'UPDATE pending_trial_artifacts SET publication_ready = 1 WHERE run_id = ?',
-            (run_id,),
+        pending = schema.PendingTrialArtifacts
+        execute(
+            self._database,
+            update(pending).values(publication_ready=1).where(pending.run_id == run_id),
         )
 
     def finalize_publication(self, run_id: str, canonical_commit_sha: str) -> None:
@@ -572,31 +788,48 @@ class State:
             for row in self.pending_artifacts(run_id)
         ):
             raise InputError('The publication already names another canonical commit.')
-        self._database.execute(
-            """
-            UPDATE pending_trial_artifacts SET canonical_commit_sha = ?
-            WHERE run_id = ? AND canonical_commit_sha IS NOT ?
-            """,
-            (canonical_commit_sha, run_id, canonical_commit_sha),
+        pending = schema.PendingTrialArtifacts
+        execute(
+            self._database,
+            update(pending)
+            .values(canonical_commit_sha=canonical_commit_sha)
+            .where(
+                pending.run_id == run_id,
+                pending.canonical_commit_sha.is_distinct_from(canonical_commit_sha),
+            ),
         )
 
     def pending_claims_authorized(self, run_id: str) -> bool:
-        return not self._database.execute(
-            """
-            SELECT 1 FROM attempt_claims AS claims
-            LEFT JOIN pending_trial_artifacts AS pending
-                ON pending.run_id = claims.run_id AND pending.trial_id = claims.trial
-            WHERE claims.run_id = ? AND claims.state NOT IN ('settled', 'cancelled')
-                AND (pending.authorized_claim_id IS NOT claims.id
-                    OR pending.publication_ready != 1)
-            """,
-            (run_id,),
+        claims = schema.AttemptClaims
+        pending = schema.PendingTrialArtifacts
+        return not execute(
+            self._database,
+            select(literal(1))
+            .select_from(claims)
+            .outerjoin(
+                pending,
+                and_(
+                    pending.run_id == claims.run_id,
+                    pending.trial_id == claims.trial,
+                ),
+            )
+            .where(
+                claims.run_id == run_id,
+                claims.state.not_in(['settled', 'cancelled']),
+                or_(
+                    pending.authorized_claim_id.is_distinct_from(claims.id),
+                    pending.publication_ready != 1,
+                ),
+            ),
         ).rows
 
     def trial_artifact(self, run_id: str, trial_id: str) -> Row:
-        rows = self._database.execute(
-            'SELECT * FROM trial_artifacts WHERE run_id = ? AND trial_id = ?',
-            (run_id, trial_id),
+        artifacts = schema.TrialArtifacts
+        rows = execute(
+            self._database,
+            select(artifacts).where(
+                artifacts.run_id == run_id, artifacts.trial_id == trial_id
+            ),
         ).rows
         if not rows:
             raise InputError(f'Trial `{trial_id}` has no registered artifacts.')
@@ -606,46 +839,66 @@ class State:
         self, run_id: str, trial_id: str, source_trial_id: str
     ) -> bool:
         """Confirm an audited archive for the exact Harbor execution UUID."""
+        artifacts = schema.TrialArtifacts
         return bool(
-            self._database.execute(
-                """
-                SELECT 1 FROM trial_artifacts
-                WHERE run_id = ? AND trial_id = ? AND source_trial_id = ?
-                """,
-                (run_id, trial_id, source_trial_id),
+            execute(
+                self._database,
+                select(literal(1)).where(
+                    artifacts.run_id == run_id,
+                    artifacts.trial_id == trial_id,
+                    artifacts.source_trial_id == source_trial_id,
+                ),
             ).rows
         )
 
     def artifact_generation(self, scope: str) -> ArtifactGeneration:
         """Read the registry and its admission fence in one statement snapshot."""
-        rows = self._database.execute(
-            """
-            WITH head AS (
-                SELECT COALESCE((
-                    SELECT revision FROM source_heads WHERE scope = ?
-                ), 0) AS revision
-            ), selected AS (
-                SELECT artifacts.*, runs.created_at FROM trial_artifacts AS artifacts
-                JOIN runs ON runs.id = artifacts.run_id WHERE runs.scope = ?
+        source_heads = schema.SourceHeads
+        artifacts = schema.TrialArtifacts
+        runs = schema.Runs
+        head = select(
+            func.coalesce(
+                select(source_heads.revision)
+                .where(source_heads.scope == scope)
+                .scalar_subquery(),
+                0,
+            ).label('revision')
+        ).cte('head')
+        selected = (
+            select(
+                artifacts.run_id,
+                artifacts.trial_id,
+                artifacts.source_trial_id,
+                artifacts.commit_sha,
+                artifacts.path,
+                artifacts.manifest_digest,
+                runs.created_at,
             )
-            SELECT head.revision, selected.* FROM head LEFT JOIN selected ON 1 = 1
-            ORDER BY selected.created_at, selected.run_id, selected.trial_id
-            """,
-            (scope, scope),
-        ).rows
+            .join(runs, runs.id == artifacts.run_id)
+            .where(runs.scope == scope)
+            .cte('selected')
+        )
+        rows = fetch_all(
+            self._database,
+            select(
+                head.c.revision,
+                selected.c.run_id,
+                selected.c.trial_id,
+                selected.c.source_trial_id,
+                selected.c.commit_sha,
+                selected.c.path,
+                selected.c.manifest_digest,
+            )
+            .select_from(head.outerjoin(selected, literal(True)))
+            .order_by(selected.c.created_at, selected.c.run_id, selected.c.trial_id),
+            _ArtifactGenerationRow,
+        )
         return ArtifactGeneration(
-            revision=cast(int, rows[0]['revision']),
+            revision=rows[0].revision,
             artifacts=tuple(
-                TrialArtifact(
-                    run_id=cast(str, row['run_id']),
-                    trial_id=cast(str, row['trial_id']),
-                    source_trial_id=cast(str, row['source_trial_id']),
-                    commit_sha=cast(str, row['commit_sha']),
-                    path=cast(str, row['path']),
-                    manifest_digest=cast(str, row['manifest_digest']),
-                )
+                TrialArtifact.model_validate(row.model_dump(exclude={'revision'}))
                 for row in rows
-                if row['run_id'] is not None
+                if row.run_id is not None
             ),
         )
 
@@ -656,27 +909,38 @@ class State:
         whether a complete set of trial outputs has been published.
         """
         self._run(run_id)
+        runs = schema.Runs
+        claims = schema.AttemptClaims
+        artifacts = schema.ClaimArtifacts
         return bool(
-            self._database.execute(
-                """
-            UPDATE runs SET status = 'complete'
-            WHERE id = ? AND NOT EXISTS (
-                SELECT 1 FROM attempt_claims AS claims
-                LEFT JOIN claim_artifacts AS artifacts ON artifacts.claim_id = claims.id
-                WHERE claims.run_id = runs.id
-                    AND (
-                        claims.state NOT IN ('settled', 'cancelled')
-                        OR (claims.state = 'settled' AND artifacts.claim_id IS NULL)
-                    )
-            )
-            RETURNING id
-            """,
-                (run_id,),
+            execute(
+                self._database,
+                update(runs)
+                .values(status='complete')
+                .where(
+                    runs.id == run_id,
+                    ~exists(
+                        select(literal(1))
+                        .select_from(claims)
+                        .outerjoin(artifacts, artifacts.claim_id == claims.id)
+                        .where(
+                            claims.run_id == runs.id,
+                            or_(
+                                claims.state.not_in(['settled', 'cancelled']),
+                                and_(
+                                    claims.state == 'settled',
+                                    artifacts.claim_id.is_(None),
+                                ),
+                            ),
+                        )
+                    ),
+                )
+                .returning(runs.id),
             ).rows
         )
 
     def run_status(self, run_id: str) -> RunStatus:
-        return cast(RunStatus, self._run_row(run_id)['status'])
+        return self._stored_run(run_id).status
 
     def run(self, run_id: str) -> Run:
         return self._run(run_id)
@@ -684,30 +948,27 @@ class State:
     # ── Output Generations ──
 
     def collection(self, collection_id: str) -> Collection:
-        return _collection(self._collection_row(collection_id))
+        stored = self._stored_collection(collection_id)
+        return Collection.model_validate(stored.model_dump(exclude={'sealed'}))
 
     def begin_collection(self, collection: Collection) -> None:
-        self._database.execute(
-            """
-            INSERT INTO collections (
-                id, family, expected_count, manifest_digest, created_at,
-                code_revision, case_revision, system_names_json
+        collections = schema.Collections
+        execute(
+            self._database,
+            sqlite.insert(collections)
+            .values(
+                id=collection.id,
+                family=collection.family,
+                expected_count=collection.expected_count,
+                manifest_digest=collection.manifest_digest,
+                created_at=collection.created_at,
+                code_revision=collection.code_revision,
+                case_revision=collection.case_revision,
+                system_names_json=collection.system_names_json,
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT (id) DO NOTHING
-            """,
-            (
-                collection.id,
-                collection.family,
-                collection.expected_count,
-                collection.manifest_digest,
-                collection.created_at,
-                collection.code_revision,
-                collection.case_revision,
-                collection.system_names_json,
-            ),
+            .on_conflict_do_nothing(index_elements=[collections.id]),
         )
-        if _collection(self._collection_row(collection.id)) != collection:
+        if self.collection(collection.id) != collection:
             raise InputError(
                 f'Collection `{collection.id}` already has different metadata.'
             )
@@ -715,6 +976,7 @@ class State:
     def stage_outputs(
         self, collection: str, outputs: Sequence[tuple[int, str]]
     ) -> None:
+        table = schema.CollectionOutputs
         for start in range(0, len(outputs), OUTPUTS_PER_STATEMENT):
             batch: list[tuple[int, str, str]] = []
             for position, output_json in outputs[start : start + OUTPUTS_PER_STATEMENT]:
@@ -725,41 +987,60 @@ class State:
                     separators=(',', ':'),
                 )
                 batch.append((position, key, output_json))
-            values = ', '.join('(?, ?, ?, ?)' for _ in batch)
-            params: list[Param] = [
-                value
-                for position, key, output_json in batch
-                for value in (collection, position, key, output_json)
-            ]
-            self._database.execute(
-                f"""
-                WITH incoming(collection_id, position, output_key, output_json)
-                AS (VALUES {values})
-                INSERT INTO collection_outputs (
-                    collection_id, position, output_key, output_json
+            incoming = (
+                values(
+                    column('collection_id', Text),
+                    column('position', Integer),
+                    column('output_key', Text),
+                    column('output_json', Text),
+                    name='incoming',
                 )
-                SELECT collection_id, position, output_key, output_json FROM incoming
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM collection_outputs AS existing
-                    WHERE existing.collection_id = incoming.collection_id
-                        AND existing.position = incoming.position
+                .data(
+                    [
+                        (collection, position, key, output_json)
+                        for position, key, output_json in batch
+                    ]
                 )
-                """,  # noqa: S608
-                params,
+                .cte('incoming')
             )
-            positions = ', '.join('?' for _ in batch)
-            rows = self._database.execute(
-                f"""
-                SELECT position, output_key, output_json FROM collection_outputs
-                WHERE collection_id = ? AND position IN ({positions})
-                """,  # noqa: S608
-                (collection, *(position for position, _, _ in batch)),
-            ).rows
-            existing = {cast(int, row['position']): row for row in rows}
+            existing_rows = aliased(table, name='existing')
+            execute(
+                self._database,
+                sqlite.insert(table).from_select(
+                    [
+                        table.collection_id,
+                        table.position,
+                        table.output_key,
+                        table.output_json,
+                    ],
+                    select(
+                        incoming.c.collection_id,
+                        incoming.c.position,
+                        incoming.c.output_key,
+                        incoming.c.output_json,
+                    ).where(
+                        ~exists(
+                            select(existing_rows.position).where(
+                                existing_rows.collection_id == incoming.c.collection_id,
+                                existing_rows.position == incoming.c.position,
+                            )
+                        )
+                    ),
+                ),
+            )
+            rows = fetch_all(
+                self._database,
+                select(table.position, table.output_key, table.output_json).where(
+                    table.collection_id == collection,
+                    table.position.in_([position for position, _, _ in batch]),
+                ),
+                _StagedOutput,
+            )
+            existing = {row.position: row for row in rows}
             for position, key, output_json in batch:
                 row = existing[position]
-                if row['output_key'] != key or not _same_json(
-                    cast(str, row['output_json']), output_json
+                if row.output_key != key or not _same_json(
+                    row.output_json, output_json
                 ):
                     raise InputError(
                         f'Collection `{collection}` already has '
@@ -767,41 +1048,46 @@ class State:
                     )
 
     def seal_collection(self, collection: str) -> None:
-        row = self._collection_row(collection)
-        if row['sealed'] == 1:
+        stored = self._stored_collection(collection)
+        if stored.sealed:
             return
-        outputs = self._database.execute(
-            """
-            SELECT position, output_json FROM collection_outputs
-            WHERE collection_id = ? ORDER BY position
-            """,
-            (collection,),
-        ).rows
+        table = schema.CollectionOutputs
+        outputs = fetch_all(
+            self._database,
+            select(table.position, table.output_json)
+            .where(table.collection_id == collection)
+            .order_by(table.position),
+            _PositionOutput,
+        )
         digest = hashlib.sha256()
         for output in outputs:
-            digest.update((cast(str, output['output_json']) + '\n').encode())
-        count = cast(int, row['expected_count'])
+            digest.update((output.output_json + '\n').encode())
         if (
-            len(outputs) != count
-            or [item['position'] for item in outputs] != list(range(count))
-            or digest.hexdigest() != row['manifest_digest']
+            len(outputs) != stored.expected_count
+            or [item.position for item in outputs] != list(range(stored.expected_count))
+            or digest.hexdigest() != stored.manifest_digest
         ):
             raise InputError(
                 f'Collection `{collection}` does not match its complete manifest.'
             )
 
-        sealed = self._database.execute(
-            """
-            UPDATE collections SET sealed = 1
-            WHERE id = ? AND sealed = 0
-                AND (
-                    SELECT count(*) FROM collection_outputs WHERE collection_id = ?
-                ) = expected_count
-            RETURNING id
-            """,
-            (collection, collection),
+        collections = schema.Collections
+        sealed = execute(
+            self._database,
+            update(collections)
+            .values(sealed=1)
+            .where(
+                collections.id == collection,
+                collections.sealed == 0,
+                select(func.count())
+                .select_from(table)
+                .where(table.collection_id == collection)
+                .scalar_subquery()
+                == collections.expected_count,
+            )
+            .returning(collections.id),
         ).rows
-        if not sealed and self._collection_row(collection)['sealed'] != 1:
+        if not sealed and not self._stored_collection(collection).sealed:
             raise InputError(
                 f'Collection `{collection}` changed before it could be sealed.'
             )
@@ -809,61 +1095,68 @@ class State:
     def activate_collection(
         self, collection: str, expected_previous: str | None
     ) -> bool:
-        row = self._collection_row(collection)
-        if row['sealed'] != 1:
+        stored = self._stored_collection(collection)
+        if not stored.sealed:
             raise InputError(
                 f'Collection `{collection}` must be sealed before activation.'
             )
-        family = cast(str, row['family'])
+        active = schema.ActiveCollections
         if expected_previous is None:
-            changed = self._database.execute(
-                """
-                INSERT INTO active_collections (family, collection_id) VALUES (?, ?)
-                ON CONFLICT (family) DO NOTHING RETURNING collection_id
-                """,
-                (family, collection),
+            changed = execute(
+                self._database,
+                sqlite.insert(active)
+                .values(family=stored.family, collection_id=collection)
+                .on_conflict_do_nothing(index_elements=[active.family])
+                .returning(active.collection_id),
             ).rows
         else:
-            changed = self._database.execute(
-                """
-                UPDATE active_collections SET collection_id = ?
-                WHERE family = ? AND collection_id = ? RETURNING collection_id
-                """,
-                (collection, family, expected_previous),
+            changed = execute(
+                self._database,
+                update(active)
+                .values(collection_id=collection)
+                .where(
+                    active.family == stored.family,
+                    active.collection_id == expected_previous,
+                )
+                .returning(active.collection_id),
             ).rows
         if changed:
             return True
-        current = self._database.execute(
-            'SELECT collection_id FROM active_collections WHERE family = ?', (family,)
-        ).rows
-        return bool(current and current[0]['collection_id'] == collection)
+        current = fetch_scalar(
+            self._database,
+            select(active.collection_id).where(active.family == stored.family),
+            str,
+        )
+        return current == collection
 
     def output_generation(self, family: str) -> OutputGeneration:
         """Read the active generation and its ordered outputs in one SQL snapshot."""
-        rows = self._database.execute(
-            """
-            SELECT active.collection_id, outputs.output_json
-            FROM active_collections AS active
-            LEFT JOIN collection_outputs AS outputs
-                ON outputs.collection_id = active.collection_id
-            WHERE active.family = ? ORDER BY outputs.position
-            """,
-            (family,),
-        ).rows
+        active = schema.ActiveCollections
+        outputs = schema.CollectionOutputs
+        rows = fetch_all(
+            self._database,
+            select(active.collection_id, outputs.output_json)
+            .select_from(active)
+            .outerjoin(outputs, outputs.collection_id == active.collection_id)
+            .where(active.family == family)
+            .order_by(outputs.position),
+            _GenerationRow,
+        )
         return _generation(rows)
 
     def collection_generation(self, collection: str) -> OutputGeneration:
         """Read one complete immutable generation, refusing an unsealed import."""
-        rows = self._database.execute(
-            """
-            SELECT collections.id AS collection_id, outputs.output_json
-            FROM collections LEFT JOIN collection_outputs AS outputs
-                ON outputs.collection_id = collections.id
-            WHERE collections.id = ? AND collections.sealed = 1
-            ORDER BY outputs.position
-            """,
-            (collection,),
-        ).rows
+        collections = schema.Collections
+        outputs = schema.CollectionOutputs
+        rows = fetch_all(
+            self._database,
+            select(collections.id.label('collection_id'), outputs.output_json)
+            .select_from(collections)
+            .outerjoin(outputs, outputs.collection_id == collections.id)
+            .where(collections.id == collection, collections.sealed == 1)
+            .order_by(outputs.position),
+            _GenerationRow,
+        )
         if not rows:
             raise InputError(f'Collection `{collection}` is not sealed.')
         return _generation(rows)
@@ -872,136 +1165,130 @@ class State:
 
     def append_canary(self, run: str, record_json: str) -> None:
         record = _object(record_json)
-        self._database.execute(
-            """
-            INSERT INTO canary_records (run_id, system, record_json) VALUES (?, ?, ?)
-            ON CONFLICT (run_id) DO NOTHING
-            """,
-            (run, cast(str, record['system']), record_json),
+        records = schema.CanaryRecords
+        execute(
+            self._database,
+            sqlite.insert(records)
+            .values(
+                run_id=run,
+                system=cast(str, record['system']),
+                record_json=record_json,
+            )
+            .on_conflict_do_nothing(index_elements=[records.run_id]),
         )
-        rows = self._database.execute(
-            'SELECT record_json FROM canary_records WHERE run_id = ?', (run,)
-        ).rows
-        if not _same_json(cast(str, rows[0]['record_json']), record_json):
+        stored = fetch_scalar(
+            self._database,
+            select(records.record_json).where(records.run_id == run),
+            str,
+        )
+        if stored is None or not _same_json(stored, record_json):
             raise InputError(f'Canary run `{run}` already has a different outcome.')
 
     def records(self, system: str) -> list[str]:
+        records = schema.CanaryRecords
         return [
-            cast(str, row['record_json'])
-            for row in self._database.execute(
-                """
-                SELECT record_json FROM canary_records WHERE system = ?
-                ORDER BY json_extract(record_json, '$.time'), run_id
-                """,
-                (system,),
+            str(row['record_json'])
+            for row in execute(
+                self._database,
+                select(records.record_json)
+                .where(records.system == system)
+                .order_by(
+                    func.json_extract(records.record_json, '$.time'),
+                    records.run_id,
+                ),
             ).rows
         ]
 
     def baseline(self, system: str, context_key: str) -> str | None:
-        rows = self._database.execute(
-            """
-            SELECT records.record_json FROM canary_records AS records
-            JOIN canary_baselines AS baselines ON baselines.run_id = records.run_id
-            WHERE baselines.system = ? AND baselines.context_key = ?
-            """,
-            (system, context_key),
-        ).rows
-        return cast(str, rows[0]['record_json']) if rows else None
+        records = schema.CanaryRecords
+        baselines = schema.CanaryBaselines
+        return fetch_scalar(
+            self._database,
+            select(records.record_json)
+            .select_from(records)
+            .join(baselines, baselines.run_id == records.run_id)
+            .where(baselines.system == system, baselines.context_key == context_key),
+            str,
+        )
 
     def establish_baseline(self, system: str, context_key: str, run: str) -> bool:
         """Keep the first baseline the caller has accepted as successful."""
+        baselines = schema.CanaryBaselines
+        records = schema.CanaryRecords
         return bool(
-            self._database.execute(
-                """
-            INSERT INTO canary_baselines (system, context_key, run_id)
-            SELECT system, ?, run_id FROM canary_records WHERE system = ? AND run_id = ?
-            ON CONFLICT (system, context_key) DO NOTHING RETURNING run_id
-            """,
-                (context_key, system, run),
+            execute(
+                self._database,
+                sqlite.insert(baselines)
+                .from_select(
+                    [baselines.system, baselines.context_key, baselines.run_id],
+                    select(
+                        records.system,
+                        literal(context_key),
+                        records.run_id,
+                    ).where(records.system == system, records.run_id == run),
+                )
+                .on_conflict_do_nothing(
+                    index_elements=[baselines.system, baselines.context_key]
+                )
+                .returning(baselines.run_id),
             ).rows
         )
 
     def reset_baseline(self, system: str) -> int:
+        baselines = schema.CanaryBaselines
         return len(
-            self._database.execute(
-                'DELETE FROM canary_baselines WHERE system = ? RETURNING context_key',
-                (system,),
+            execute(
+                self._database,
+                delete(baselines)
+                .where(baselines.system == system)
+                .returning(baselines.context_key),
             ).rows
         )
 
     # ── Stored Metadata ──
 
-    def _run_row(self, run_id: str) -> Row:
-        rows = self._database.execute('SELECT * FROM runs WHERE id = ?', (run_id,)).rows
-        if not rows:
+    def _stored_run(self, run_id: str) -> _StoredRun:
+        runs = schema.Runs
+        stored = fetch_one(
+            self._database,
+            select(runs).where(runs.id == run_id),
+            _StoredRun,
+        )
+        if stored is None:
             raise InputError(f'Run `{run_id}` is not recorded.')
-        return rows[0]
+        return stored
 
     def _run(self, run_id: str) -> Run:
-        row = self._run_row(run_id)
-        return Run(
-            id=cast(str, row['id']),
-            scope=cast(str, row['scope']),
-            job=cast(str, row['job']),
-            code_revision=cast(str | None, row['code_revision']),
-            case_revision=cast(str | None, row['case_revision']),
-            created_at=cast(str, row['created_at']),
-            max_requests=cast(int | None, row['max_requests']),
+        stored = self._stored_run(run_id)
+        return Run.model_validate(stored.model_dump(exclude={'status'}))
+
+    def _stored_claim(self, claim_id: str) -> _StoredClaim:
+        claims = schema.AttemptClaims
+        stored = fetch_one(
+            self._database,
+            select(claims).where(claims.id == claim_id),
+            _StoredClaim,
         )
-
-    def _claim_row(self, claim_id: str) -> Row:
-        rows = self._database.execute(
-            'SELECT * FROM attempt_claims WHERE id = ?', (claim_id,)
-        ).rows
-        if not rows:
+        if stored is None:
             raise InputError(f'Claim `{claim_id}` is not recorded.')
-        return rows[0]
+        return stored
 
-    def _collection_row(self, collection: str) -> Row:
-        rows = self._database.execute(
-            'SELECT * FROM collections WHERE id = ?', (collection,)
-        ).rows
-        if not rows:
+    def _stored_collection(self, collection: str) -> _StoredCollection:
+        collections = schema.Collections
+        stored = fetch_one(
+            self._database,
+            select(collections).where(collections.id == collection),
+            _StoredCollection,
+        )
+        if stored is None:
             raise InputError(f'Collection `{collection}` is not recorded.')
-        return rows[0]
+        return stored
 
 
-def _generation(rows: list[Row]) -> OutputGeneration:
+def _generation(rows: Sequence[_GenerationRow]) -> OutputGeneration:
     return OutputGeneration(
-        id=cast(str, rows[0]['collection_id']) if rows else None,
-        outputs=tuple(
-            cast(str, row['output_json'])
-            for row in rows
-            if row['output_json'] is not None
-        ),
-    )
-
-
-def _claim(row: Row) -> Claim:
-    return Claim(
-        id=cast(str, row['id']),
-        run_id=cast(str, row['run_id']),
-        scope=cast(str, row['scope']),
-        slot_key=cast(str, row['slot_key']),
-        trial=cast(str, row['trial']),
-        system=cast(str, row['system']),
-        fingerprint=cast(str, row['fingerprint']),
-        accounting_json=cast(str, row['accounting_json']),
-        expected_source_revision=cast(int, row['expected_source_revision']),
-        created_at=cast(str, row['created_at']),
-    )
-
-
-def _collection(row: Row) -> Collection:
-    return Collection(
-        id=cast(str, row['id']),
-        family=cast(str, row['family']),
-        expected_count=cast(int, row['expected_count']),
-        manifest_digest=cast(str, row['manifest_digest']),
-        created_at=cast(str, row['created_at']),
-        code_revision=cast(str | None, row['code_revision']),
-        case_revision=cast(str | None, row['case_revision']),
-        system_names_json=cast(str | None, row['system_names_json']),
+        id=rows[0].collection_id if rows else None,
+        outputs=tuple(row.output_json for row in rows if row.output_json is not None),
     )
 
 

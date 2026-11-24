@@ -1,7 +1,6 @@
 import asyncio
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
 from threading import Barrier
@@ -107,7 +106,14 @@ class TestAccountingSnapshot:
         ):
             state = State(writer)
             state.create_run(
-                Run('run-a', 'sample', 'job-a', '1' * 40, '2' * 40, START.isoformat())
+                Run(
+                    id='run-a',
+                    scope='sample',
+                    job='job-a',
+                    code_revision='1' * 40,
+                    case_revision='2' * 40,
+                    created_at=START.isoformat(),
+                )
             )
             artifact = TrialArtifact(
                 run_id='run-a',
@@ -162,12 +168,20 @@ class TestBoundedAdmission:
                     )
                 )
                 owner = state.get_claim(recorder.claim_id)
-                second = replace(
-                    owner, id='second-claim', slot_key='second-slot', trial='second'
+                second = owner.model_copy(
+                    update={
+                        'id': 'second-claim',
+                        'slot_key': 'second-slot',
+                        'trial': 'second',
+                    }
                 )
                 assert state.claim_attempt(second)
                 assert state.begin_attempt(
-                    AttemptStart('second-attempt', second.id, START.isoformat())
+                    AttemptStart(
+                        id='second-attempt',
+                        claim_id=second.id,
+                        started_at=START.isoformat(),
+                    )
                 )
                 (initial,) = state.requests('sample')
                 attempts = [cast(str, initial['attempt_id']), 'second-attempt']
@@ -178,7 +192,9 @@ class TestBoundedAdmission:
                         barrier.wait(timeout=5)
                         return State(client).admit_request(
                             RequestAdmission(
-                                f'contender-{index}', attempts[index], START.isoformat()
+                                id=f'contender-{index}',
+                                attempt_id=attempts[index],
+                                created_at=START.isoformat(),
                             )
                         )
 
@@ -191,5 +207,9 @@ class TestBoundedAdmission:
                 }
                 assert admitted == {first, f'contender-{granted.index(True)}'}
                 assert not state.admit_request(
-                    RequestAdmission('later-request', attempts[0], START.isoformat())
+                    RequestAdmission(
+                        id='later-request',
+                        attempt_id=attempts[0],
+                        created_at=START.isoformat(),
+                    )
                 )
