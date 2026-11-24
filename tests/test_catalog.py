@@ -210,17 +210,6 @@ class TestLoadSystems:
             'kimi-k3.1-pro-high-nixos': 'Kimi K3.1 Pro · High · Instructions',
             'opus-5.5-claude-code-high': 'Claude Opus 5.5 · Claude Code · High',
             'gemini-3.8-flash-codex-high': 'Gemini 3.8 Flash · Codex · High',
-            'opus-5.5-high-harbor-0.27.0': 'Claude Opus 5.5 · High · Harbor 0.27.0',
-            'gpt-6.1-sol-high-harbor-0.27.0': 'GPT-6.1 Sol · High · Harbor 0.27.0',
-            'gemini-4-argon-high-harbor-0.27.0': (
-                'Gemini 4 Argon · High · Harbor 0.27.0'
-            ),
-            'gemini-3.8-flash-high-harbor-0.27.0': (
-                'Gemini 3.8 Flash · High · Harbor 0.27.0'
-            ),
-            'deepseek-v4.1-flash-1017-high-harbor-0.27.0': (
-                'DeepSeek V4.1 Flash 1017 · High · Harbor 0.27.0'
-            ),
         }
         assert {system.effort for system in systems.values()} == {'high'}
         assert {
@@ -235,7 +224,6 @@ class TestLoadSystems:
             'gpt-6.2-astra-high-nixos',
             'gpt-6.2-sol-high-nixos',
             'gemini-3.8-flash-codex-high',
-            'gpt-6.1-sol-high-harbor-0.27.0',
         }
         native = systems['opus-5.5-high']
         assert (

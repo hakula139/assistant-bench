@@ -48,7 +48,14 @@ from assistant_bench.catalog import (
 from assistant_bench.cli import app
 from assistant_bench.collection import Collection
 from assistant_bench.database import SQLiteDatabase
-from assistant_bench.families import Category, Family, Gate, load_cases, load_family
+from assistant_bench.families import (
+    Category,
+    Family,
+    Gate,
+    case_task,
+    load_cases,
+    load_family,
+)
 from assistant_bench.harnesses import fingerprint
 from assistant_bench.harnesses.docker import HOST_OVERLAY
 from assistant_bench.harnesses.endpoint import SDK_HEADERS_VAR, SECRET_HEADERS_FILE_VAR
@@ -224,8 +231,14 @@ def archive_trials(
 def archive_stale_job(
     context: RunContext, family: Family, system: System, database: SQLiteDatabase
 ) -> None:
-    tasks = render_tasks(
-        family, load_cases(family, private_root=context.private_root), root=context.root
+    cases = load_cases(family, private_root=context.private_root)
+    tasks = (
+        [
+            case_task(family, case.id, private_root=context.private_root)
+            for case in cases
+        ]
+        if family.source == 'tasks'
+        else render_tasks(family, cases, root=context.root)
     )
     config = jobs.job(
         family,
@@ -253,15 +266,15 @@ def collected_outputs(
     return Collection(outputs, [], generation)
 
 
-def write_closed_report(
-    family: str, frozen: str | None, *, system: str = 'opus-5.5-high'
-) -> Path:
-    """Close a round of the family that froze a system under a fingerprint."""
+def write_closed_report(family: str, frozen: str | None) -> Path:
+    """Close a round of the family that froze `opus-5.5-high` under a fingerprint."""
     closed = report.Report.model_validate_json(
-        REPORT_FIXTURE.read_text().replace('acme-large', system)
+        REPORT_FIXTURE.read_text().replace('acme-large', 'opus-5.5-high')
     )
     systems = closed.systems | {
-        system: closed.systems[system].model_copy(update={'fingerprint': frozen})
+        'opus-5.5-high': closed.systems['opus-5.5-high'].model_copy(
+            update={'fingerprint': frozen}
+        )
     }
     return report.write_report(
         closed.model_copy(update={'family': family, 'systems': systems})
@@ -1358,6 +1371,55 @@ class TestRun:
             HOST_OVERLAY.name
         ]
 
+    def test_reruns_a_task_system_under_the_same_name_after_a_harbor_upgrade(
+        self,
+        families_dir: Path,
+        resolved: dict[str, System],
+        submitted: list[JobConfig],
+        cloud: RunContext,
+        private_store: SQLiteDatabase,
+    ) -> None:
+        name = 'opus-5.5-high'
+        write_task_family(
+            families_dir, 'echo', systems=(name,), author_vendor='anthropic'
+        )
+        current = load_systems(load_export())[name]
+        resolved[name] = current.model_copy(
+            update={
+                'generation': current.generation.model_copy(update={'harbor': '0.24.0'})
+            }
+        )
+        assert invoke('run', 'f').exit_code == 0
+        old_job = archive_job(cloud, submitted.pop(), private_store)
+        (old_artifact,) = cloud.state.artifact_generation('f').artifacts
+        resolved[name] = current
+
+        result = invoke('run', 'f')
+
+        assert result.exit_code == 0, result.output
+        (job,) = submitted
+        assert [source.path.name for source in job.source_jobs if source.path] == [
+            old_job.name
+        ]
+        assert planned_actions(job) == {name: {DiffAction.RERUN}}
+        family = load_family('f')
+        assert collection.collect(family, resolved, cloud).outputs == []
+
+        current_job = archive_job(cloud, submitted.pop(), private_store)
+        (agent,) = job.agents
+        path = write_closed_report('f', agent.kwargs['fingerprint'])
+        destination = cloud.public_root / 'reports' / 'f' / path.name
+        destination.parent.mkdir(parents=True)
+        shutil.copyfile(path, destination)
+
+        result = invoke('run', 'f')
+
+        assert result.exit_code == 0, result.output
+        assert planned_actions(submitted[0]) == {name: {DiffAction.REUSE}}
+        (output,) = collection.collect(family, resolved, cloud).outputs
+        assert (output.system, output.job) == (name, current_job.name)
+        assert old_artifact in cloud.state.artifact_generation('f').artifacts
+
     def test_rejects_a_named_family_without_systems(
         self, submitted: list[JobConfig]
     ) -> None:
@@ -1558,9 +1620,10 @@ class TestRun:
         assert cloud.state.artifact_generation('f').artifacts
 
     @pytest.mark.parametrize(
-        ('reported', 'frozen', 'trial', 'expected'),
+        ('source', 'reported', 'frozen', 'trial', 'expected'),
         [
             pytest.param(
+                'cases',
                 False,
                 None,
                 True,
@@ -1568,6 +1631,7 @@ class TestRun:
                 id='unreported',
             ),
             pytest.param(
+                'cases',
                 True,
                 'fp-old',
                 True,
@@ -1575,6 +1639,7 @@ class TestRun:
                 id='moved',
             ),
             pytest.param(
+                'cases',
                 True,
                 'fp-old',
                 False,
@@ -1582,6 +1647,7 @@ class TestRun:
                 id='moved-without-trials',
             ),
             pytest.param(
+                'cases',
                 True,
                 '{current}',
                 True,
@@ -1589,11 +1655,28 @@ class TestRun:
                 id='restored',
             ),
             pytest.param(
+                'cases',
                 True,
                 None,
                 True,
                 [DRIFTED, REPORTED],
                 id='unrecorded',
+            ),
+            pytest.param(
+                'tasks',
+                True,
+                'fp-old',
+                True,
+                [MOVED, DRIFTED, REPORTED],
+                id='task-moved',
+            ),
+            pytest.param(
+                'tasks',
+                True,
+                None,
+                True,
+                [DRIFTED, REPORTED],
+                id='task-unrecorded',
             ),
         ],
     )
@@ -1604,6 +1687,7 @@ class TestRun:
         data_dir: Path,
         submitted: list[JobConfig],
         monkeypatch: pytest.MonkeyPatch,
+        source: Literal['cases', 'tasks'],
         reported: bool,
         frozen: str | None,
         trial: bool,
@@ -1611,8 +1695,16 @@ class TestRun:
         cloud: RunContext,
         private_store: SQLiteDatabase,
     ) -> None:
-        write_votes_family(families_dir, ['opus-5.5-high'], {'c1': 'message'}, name='f')
-        current = fingerprint(load_systems(load_export())['opus-5.5-high'])
+        name = 'opus-5.5-high'
+        if source == 'tasks':
+            write_task_family(
+                families_dir, 'echo', systems=(name,), author_vendor='anthropic'
+            )
+        else:
+            write_votes_family(families_dir, [name], {'c1': 'message'}, name='f')
+        family = load_family('f')
+        system = load_systems(load_export())[name]
+        current = fingerprint(jobs.family_systems(family, [system])[0])
         if reported:
             path = write_closed_report(
                 'f', None if frozen is None else frozen.format(current=current)
@@ -1621,12 +1713,7 @@ class TestRun:
             destination.parent.mkdir(parents=True)
             shutil.copyfile(path, destination)
         if trial:
-            archive_stale_job(
-                cloud,
-                load_family('f'),
-                load_systems(load_export())['opus-5.5-high'],
-                private_store,
-            )
+            archive_stale_job(cloud, family, system, private_store)
 
         result = invoke('run', 'f')
 
@@ -2730,16 +2817,14 @@ class TestFingerprints:
         ('family', 'frozen', 'failure'),
         [
             pytest.param(None, None, None, id='no-reports'),
-            pytest.param(
-                'writing-en', 'writing-en/gpt-6-astra-high', None, id='restored'
-            ),
+            pytest.param('writing-en', 'writing-en/opus-5.5-high', None, id='restored'),
             pytest.param('writing-en', None, None, id='unrecorded'),
             pytest.param(
                 'writing-en', 'fp-old', 'writing-en', id='moved-after-a-close'
             ),
             pytest.param(
                 'coding-repo',
-                'writing-en/gpt-6-astra-high',
+                'writing-en/opus-5.5-high',
                 'coding-repo',
                 id='frozen-under-another-harness',
             ),
@@ -2751,11 +2836,10 @@ class TestFingerprints:
         frozen: str | None,
         failure: str | None,
     ) -> None:
-        system = 'gpt-6-astra-high'
         head = current_fingerprints(load_systems(load_export()))
         recorded = None if frozen is None else head.get(frozen, frozen)
         if family is not None:
-            write_closed_report(family, recorded, system=system)
+            write_closed_report(family, recorded)
 
         result = invoke('fingerprints')
 
@@ -2766,11 +2850,11 @@ class TestFingerprints:
                 '',
             )
         else:
-            current = head[f'{failure}/{system}']
+            current = head[f'{failure}/opus-5.5-high']
             assert (result.exit_code, result.stdout, result.stderr) == (
                 1,
                 '',
-                f'Closed reports of `{failure}` froze `{system}` under '
+                f'Closed reports of `{failure}` froze `opus-5.5-high` under '
                 f'fingerprint `{recorded}`, but it now resolves to `{current}`.\n'
                 f'{RENAME_GUIDE}\n',
             )

@@ -18,11 +18,11 @@ A system's fingerprint hashes its harness, model name, generation version, and e
 
 Votes and scores pool only within one fingerprint. A nixos-config bump that leaves the resolved generation settings unchanged keeps its pool.
 
-A system name stands for one fingerprint in its family's retained trials and closed reports. Changing that fingerprint needs a new table name, including when the fingerprint code itself changes. The old name keeps its immutable trial history and frozen results.
+A system name identifies the model and its variant. In a task family, a system absent from the family's closed reports can keep its name when its fingerprint changes. Its earlier trials stay in the archive. Their agent configuration carries the old fingerprint, so Harbor excludes them from reuse and regrading and collection excludes them from current outputs. After a report freezes the current fingerprint, the system can continue under that fingerprint while older trials remain archived.
 
 The [fingerprint check](../conventions/ci.md#checks), `bench fingerprints`, fails for each runnable system whose fingerprint differs from the one that the closed reports of its family froze. A report that recorded no fingerprint for a system leaves the check nothing to compare. `fingerprints.json` maps each runnable `<family>/<system>` to its fingerprint, and a test fails when it is stale, so a PR's diff of the manifest lists the systems that change.
 
-A local `bench run` refuses the same mismatch before Harbor starts, even when the system has no trials yet. It also refuses each selected system whose earlier trials recorded another fingerprint under the family's harness, naming both and requiring a new system name. Every output also records the nixos-config rev it ran under.
+A local `bench run` refuses the same mismatch before Harbor starts, even when the system has no trials yet. When retained trials carry a different fingerprint, it also requires a new name for systems in case families and for task systems whose closed reports name them without a fingerprint. Every output also records the nixos-config rev it ran under.
 
 [Reports](reports.md#frozen-identity) owns frozen public identities. A retired system can carry its latest prior identity into a new report only when known fingerprints match. Unknown provenance remains null and cannot prove retired continuity.
 

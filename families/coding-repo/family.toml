@@ -4,19 +4,19 @@ display_name = "Repository Tasks"
 public = false
 public_voting = true
 systems = [
-  "opus-5.5-high-harbor-0.27.0",
+  "opus-5.5-high",
   "gpt-6-astra-high",
-  "gpt-6.1-sol-high-harbor-0.27.0",
+  "gpt-6.1-sol-high",
   "gpt-6.2-astra-high",
   "gpt-6.2-sol-high",
-  "gemini-4-argon-high-harbor-0.27.0",
-  "gemini-3.8-flash-high-harbor-0.27.0",
-  "deepseek-v4.1-flash-1017-high-harbor-0.27.0",
+  "gemini-4-argon-high",
+  "gemini-3.8-flash-high",
+  "deepseek-v4.1-flash-1017-high",
   "kimi-k3.1-pro-high",
   "opus-5.5-claude-code-high",
   "gemini-3.8-flash-codex-high",
 ]
-reference = "gemini-3.8-flash-high-harbor-0.27.0"
+reference = "gemini-3.8-flash-high"
 render = "diff"
 samples = 1
 harness = "terminus-2"
