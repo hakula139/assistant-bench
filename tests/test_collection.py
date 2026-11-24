@@ -1233,6 +1233,36 @@ class TestCollect:
 
         assert outputs == []
 
+    def test_collects_a_default_condition_run_without_the_installed_agent_overlay(
+        self, families_dir: Path, data_dir: Path
+    ) -> None:
+        family = voted_tasks(families_dir, 'echo')
+        default = make_system()
+        installed = make_system(
+            name='acme-installed',
+            api='openai-responses',
+            harness='codex',
+            version='1.2.3',
+        )
+        family = family.model_copy(
+            update={
+                'settings': family.settings.model_copy(
+                    update={'systems': [default.name, installed.name]}
+                )
+            }
+        )
+        (run,) = jobs.family_systems(family, [default])
+        config = jobs.job(
+            family, [run], [case_task(family, 'echo')], root=data_dir, sources=[]
+        )
+        finish_job(config)
+
+        outputs = self.collect(
+            family, {system.name: system for system in (default, installed)}
+        ).outputs
+
+        assert [output.system for output in outputs] == [default.name]
+
     @pytest.mark.parametrize(
         ('metadata', 'timing', 'latency'),
         [

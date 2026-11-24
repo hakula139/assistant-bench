@@ -69,8 +69,7 @@ def prepare_probe(
     system: System, root: Path, *, source_root: Path = REPO_ROOT
 ) -> canaries.Probe:
     (probe,) = canaries.prepare(
-        [benchmark(system, root)],
-        {system.name: system},
+        [(benchmark(system, root), {system.name: system})],
         root=root,
         source_root=source_root,
     )
@@ -166,7 +165,8 @@ class TestPrepare:
         frozen = [config.model_dump_json() for config in configs]
 
         probes = canaries.prepare(
-            iter(configs), {s.name: s for s in (large, small)}, root=tmp_path
+            [(config, {s.name: s for s in (large, small)}) for config in configs],
+            root=tmp_path,
         )
 
         assert [probe.original.name for probe in probes] == ['acme-large', 'acme-small']
@@ -176,13 +176,41 @@ class TestPrepare:
         assert all(probe.config.agents[0].n_concurrent == 1 for probe in probes)
         assert [config.model_dump_json() for config in configs] == frozen
 
+    def test_probes_distinct_family_conditions_with_the_same_key(
+        self, tmp_path: Path
+    ) -> None:
+        family = load_family('smoke-text')
+        other = family.model_copy(update={'name': 'other'})
+        bare = make_system()
+        prompted = bare.model_copy(update={'prompt': 'Keep the order.'})
+        configs = [
+            (
+                jobs.job(
+                    scope,
+                    [system],
+                    render_tasks(scope, load_cases(scope)[:1], root=tmp_path),
+                    root=tmp_path,
+                    sources=[],
+                ),
+                {system.name: system},
+            )
+            for scope, system in ((family, bare), (other, prompted))
+        ]
+
+        probes = canaries.prepare(configs, root=tmp_path)
+
+        assert {probe.source_generate.prompt for probe in probes} == {
+            None,
+            'Keep the order.',
+        }
+
     def test_sends_no_probe_for_reused_trials(self, tmp_path: Path) -> None:
         system = make_system()
         config = benchmark(system, tmp_path)
         finish_job(config)
         current = benchmark(system, tmp_path, previous=config)
 
-        probes = canaries.prepare([current], {system.name: system}, root=tmp_path)
+        probes = canaries.prepare([(current, {system.name: system})], root=tmp_path)
 
         assert probes == []
         assert not (tmp_path / 'canaries').exists()
@@ -206,7 +234,7 @@ class TestPrepare:
             sources=[(SourceJobConfig(action='diff', type='local', path=path), path)],
         )
 
-        probes = canaries.prepare([current], {system.name: system}, root=tmp_path)
+        probes = canaries.prepare([(current, {system.name: system})], root=tmp_path)
 
         assert probes == []
         assert not (tmp_path / 'canaries').exists()

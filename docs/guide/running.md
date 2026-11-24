@@ -55,14 +55,17 @@ pnpm --filter web exec wrangler d1 execute DB --env private --remote --file "../
 ## Running a Family
 
 ```bash
+uv run bench systems instructions-format
 uv run bench run
 uv run bench run smoke-text
-uv run bench run --system <name>
+uv run bench run --system instructions-format/gpt-6.1-sol-high --condition prompted
 ```
 
 `bench run` renders each case into a Harbor task, or checks each task of a task family as `bench check` does without running it, writes a job with one agent for each system listed in `family.toml`, and runs it through the Harbor CLI.
 
-A run without a family sends every family that lists systems, naming families limits it to those, and `--system` alone sends the named systems to every family that lists them, failing only when no family lists one.
+`bench systems` lists each runnable `family/model-effort` ID, its conditions and their display names. Give it one or more families to narrow the list. Use an ID with `--system` to select that model and effort in one family. Where a family compares conditions, omitting `--condition` selects them all. For example, the command above runs only the prompted side of the instruction check. Use `default` for the bare side.
+
+A run without selectors runs every family that lists systems. Naming families limits the run to those families. An unqualified model and effort, such as `--system gpt-6.1-sol-high`, selects it across the chosen families or, when no family is named, wherever it runs. Repeat `--system` to select several IDs.
 
 Each case and system pair runs `samples` times with automatic retries disabled. A reply cut off by the completion allowance remains a recorded incomplete output and fails the completion gate. An HTTP error fails the trial. Case trials start no container and need no Docker.
 
@@ -76,7 +79,7 @@ When Harbor exits, `bench run` stages completed trial artifacts on a private `ar
 
 The same command evaluates its canary's frozen, audited snapshot before family trials start. A PR API failure leaves the branch and receipt recoverable through `bench run` or `bench collect`, without another model call. A closed, unmerged PR needs reopening. A process killed before sealing its receipts leaves an unfinished publication that requires operator inspection, and affected commands stop before paying for new work.
 
-After you add a system to `family.toml`, a full-family rerun sends requests only for the new system if Harbor can [reuse every trial for the existing systems](../design/architecture.md#reruns). Adding the family's first installed agent (or removing its last) changes the family's Docker environment, so a full rerun sends paid requests for existing systems too.
+After you add a system to `family.toml`, a full-family rerun sends requests only for the new system if Harbor can [reuse every trial for the existing systems](../design/architecture.md#reruns). Adding the family's first installed agent (or removing its last) changes the family's Docker environment, so a full rerun sends paid requests for existing systems too. Use `bench spend` with the intended selectors to see which trials would run.
 
 An edited task reruns, regrades, or reuses its trials by its version bump, as [Authoring](authoring.md#tasks) lists, and an edited case [reruns](../design/architecture.md#reruns) on every system. Publication proves the selected source and output identities. Earlier releases and saved evidence retain their frozen content.
 
@@ -86,7 +89,7 @@ Removing a system from the family's `systems` stops new trials and current colle
 
 A run refuses a system that conflicts with its closed reports. [Systems](../design/systems.md#fingerprints) explains when retained trials also require a new name and when a task system keeps its name and starts fresh trials. [Authoring](authoring.md#systems) gives the repair steps.
 
-Add a system's table and list it in each family's `systems`, or add cases to `cases.toml`. Have new or edited cases [reviewed](authoring.md), merge the source changes, then run `uv run bench run --system <name>` or `uv run bench run`.
+To add a model and effort or a family condition, follow [Authoring](authoring.md#systems). Add new cases to `cases.toml` and have new or edited cases reviewed. After the source changes merge, run `uv run bench run --system <family>/<model-effort>` or `uv run bench run`.
 
 ## Collecting Outputs
 
@@ -107,7 +110,7 @@ A graded task keeps its diff and verdict even after an agent error. Measurements
 
 ```bash
 uv run bench spend
-uv run bench spend coding-repo --system <name>
+uv run bench spend --system coding-repo/opus-5.5-high --condition installed
 ```
 
 Private D1 records admissions before dispatch and receipts for terminal outcomes. Collection reconciles receipts with the family's ledger, which outlives local jobs. An interrupted request can leave its final usage unknown and block another paid attempt until inspected.
@@ -134,7 +137,7 @@ A fingerprint hashes a system's route, so an endpoint that starts serving anothe
 
 When the route serves another model, give the system a new name once its route is fixed, as [Authoring](authoring.md#systems) describes.
 
-A canary refusal happens before new family trials start. For a failed probe, correct the reported failure and rerun. After verifying that a route change is benign, run `uv run bench reset-canary <system>` to clear that system's baseline contexts. The command reports how many it cleared, requires only private D1 access and preserves probe records, request receipts and spend. A changed model needs a new system name. Canary baselines and past probe costs remain in private D1.
+A canary refusal happens before new family trials start. For a failed probe, correct the reported failure and rerun. After verifying that a route change is benign, run `uv run bench reset-canary <family>/<model-effort>` to clear baseline contexts for the current configuration. Use `--condition` to limit the reset to one condition. A recorded configuration key selects all its historical contexts. The command reports how many it cleared, requires only private D1 access, and preserves probe records, request receipts and spend. A changed model needs a new system name.
 
 ## Voting
 

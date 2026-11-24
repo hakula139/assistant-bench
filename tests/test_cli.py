@@ -983,7 +983,7 @@ class TestCheck:
             1,
             '',
             'System `opus-5.5-high`: set its `harness` and pinned `version` '
-            'in `systems.toml`.\n',
+            'in `family.toml`.\n',
         )
         assert submitted == []
 
@@ -1074,7 +1074,9 @@ class TestRun:
             families_dir, ['large', 'small'], {'c1': 'message'}, name='g'
         )
         for name in ('large', 'small'):
-            system = make_system(name=name, max_output_tokens=4096)
+            system = make_system(
+                name=name, display_name=f'Acme {name.title()}', max_output_tokens=4096
+            )
             resolved[name] = (
                 system.model_copy(update={'price': None})
                 if scenario == 'unpriced'
@@ -1779,7 +1781,7 @@ class TestRun:
 
         assert (result.exit_code, result.stderr) == (exit_code, stderr)
         assert result.stdout.startswith(
-            'System `large`: 2 pending trials at $6.00 each from its own usage, '
+            'System `f/large`: 2 pending trials at $6.00 each from its own usage, '
             f'$12.00 in all.\nFamily `f`: $18.00 spent and projected, against a '
             f'budget of ${budget:.2f}.\n'
         )
@@ -1798,7 +1800,10 @@ class TestRun:
             file.write('budget_usd = 22\n')
         resolved['large'] = SPENDER
         resolved['small'] = make_system(
-            name='small', context_window=2_000_000, max_output_tokens=200_000
+            name='small',
+            display_name='Acme Small',
+            context_window=2_000_000,
+            max_output_tokens=200_000,
         )
         write_spent_attempt(data_dir / 'jobs' / 'f' / 'job-1', private_store)
         write_spent_attempt(
@@ -1812,7 +1817,7 @@ class TestRun:
 
         assert (result.exit_code, result.stderr) == (0, '')
         assert result.stdout.startswith(
-            "System `small`: 1 pending trial at $6.00 each from another system's "
+            "System `f/small`: 1 pending trial at $6.00 each from another system's "
             'usage, $6.00 in all.\nFamily `f`: $21.00 spent and projected, against '
             'a budget of $22.00.\n'
         )
@@ -1828,13 +1833,13 @@ class TestRun:
         with (families_dir / 'f' / 'family.toml').open('a') as file:
             file.write('budget_usd = 1\n')
         resolved['large'] = SPENDER
-        resolved['small'] = make_system(name='small')
+        resolved['small'] = make_system(name='small', display_name='Acme Small')
 
         result = invoke('run', 'f', '--system', 'large')
 
         assert (result.exit_code, result.stderr) == (0, '')
         assert result.stdout.startswith(
-            'System `large`: 1 pending trial with no usage to estimate a cost from, '
+            'System `f/large`: 1 pending trial with no usage to estimate a cost from, '
             'so this run can exceed the budget.\n'
         )
         assert len(submitted) == 1
@@ -1851,7 +1856,7 @@ class TestRun:
         with (families_dir / 'f' / 'family.toml').open('a') as file:
             file.write('budget_usd = 51\n')
         resolved['large'] = SPENDER
-        resolved['small'] = make_system(name='small')
+        resolved['small'] = make_system(name='small', display_name='Acme Small')
         write_spent_attempt(
             data_dir / 'jobs' / 'f' / 'job-1', private_store, 'large', (None,) * 8
         )
@@ -1873,7 +1878,9 @@ class TestRun:
         with (families_dir / 'f' / 'family.toml').open('a') as file:
             file.write('budget_usd = 1\n')
         resolved['large'] = SPENDER
-        resolved['small'] = make_system(name='small', price=None)
+        resolved['small'] = make_system(
+            name='small', display_name='Acme Small', price=None
+        )
         write_spent_attempt(data_dir / 'jobs' / 'f' / 'job-1', private_store)
 
         result = invoke('run', 'f', '--system', 'small')
@@ -2046,7 +2053,7 @@ class TestSpend:
         assert result.stdout == (
             'System `large`: 1 trial and 2 responses cost $3.00, plus $3.00 for 1 '
             'response without a known cost, imputed from its own usage.\n'
-            'System `large`: 1 pending trial at $6.00 each from its own usage, '
+            'System `f/large`: 1 pending trial at $6.00 each from its own usage, '
             '$6.00 in all.\n'
             'Family `f`: $12.00 spent and projected.\n'
         )
@@ -2064,7 +2071,9 @@ class TestSpend:
         with (families_dir / 'f' / 'family.toml').open('a') as file:
             file.write('budget_usd = 100\n')
         resolved['large'] = SPENDER
-        resolved['small'] = make_system(name='small', price=None)
+        resolved['small'] = make_system(
+            name='small', display_name='Acme Small', price=None
+        )
         write_spent_attempt(
             data_dir / 'jobs' / 'f' / 'job-1',
             private_store,
@@ -2079,9 +2088,9 @@ class TestSpend:
         assert result.stdout == (
             'System `small` is unpriced: 1 trial and 1 response used 0 input and 0 '
             'output tokens, besides 1 unmeasured response.\n'
-            'System `large`: 1 pending trial with no usage to estimate a cost from, '
+            'System `f/large`: 1 pending trial with no usage to estimate a cost from, '
             'so this run can exceed the budget.\n'
-            'System `small`: 1 pending trial with no usage to estimate a cost from.\n'
+            'System `f/small`: 1 pending trial with no usage to estimate a cost from.\n'
             'Family `f`: $0.00 spent and projected, against a budget of $100.00.\n'
         )
         assert submitted == []
@@ -2132,7 +2141,10 @@ class TestSpend:
         write_votes_family(families_dir, ['large', 'small'], {'c1': 'message'})
         resolved['large'] = SPENDER
         resolved['small'] = make_system(
-            name='small', context_window=2_000_000, max_output_tokens=200_000
+            name='small',
+            display_name='Acme Small',
+            context_window=2_000_000,
+            max_output_tokens=200_000,
         )
         for job, system, responses in attempts:
             write_spent_attempt(
@@ -2277,11 +2289,11 @@ class TestCollect:
         assert result.exit_code == 0, result.output
 
         assert (
-            'System `opus-5.5-high`: pass rate on own-vendor tasks 2/2 (100.0%), '
+            'System `f/opus-5.5-high`: pass rate on own-vendor tasks 2/2 (100.0%), '
             'other-vendor tasks 0/2 (0.0%).\n'
         ) in result.output
         assert (
-            'System `gpt-6-astra-high`: pass rate on own-vendor tasks 2/2 (100.0%), '
+            'System `f/gpt-6-astra-high`: pass rate on own-vendor tasks 2/2 (100.0%), '
             'other-vendor tasks 0/2 (0.0%).\n'
         ) in result.output
 
@@ -2319,7 +2331,7 @@ class TestCollect:
         assert result.exit_code == 0, result.output
 
         assert (
-            'System `opus-5.5-high`: pass rate on own-vendor tasks 0/1 (0.0%), '
+            'System `f/opus-5.5-high`: pass rate on own-vendor tasks 0/1 (0.0%), '
             'other-vendor tasks no trials.\n'
         ) in result.output
 

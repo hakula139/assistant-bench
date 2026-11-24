@@ -35,11 +35,12 @@ If you use [direnv](https://direnv.net), run `direnv allow` once so `.envrc` loa
 # Check the reference solution and do-nothing agent, with no endpoint
 uv run bench check smoke
 
-# Generate both sides of a pair
-uv run bench run smoke-text --system <first> --system <second>
+# List the runnable systems and generate both sides of a pair
+uv run bench systems smoke-text
+uv run bench run --system smoke-text/opus-5.5-high --system smoke-text/gpt-6.1-sol-high
 ```
 
-Pick two different names from `systems` in [`families/smoke-text/family.toml`](../../families/smoke-text/family.toml). Each committed system takes its route from the nixos-config catalog, so the endpoint must serve the catalog's model IDs.
+Pick any two IDs from `bench systems smoke-text` for the generation command. The endpoint must serve both models' routes from the nixos-config catalog.
 
 The run makes one request per case and selected system, saves trial artifacts in the private repository, and seals a collected output generation in private D1. Repeating it sends nothing until a case or system is added, and reruns trials with confirmed terminal failures. An uncertain admitted request keeps its trial blocked until inspected.
 

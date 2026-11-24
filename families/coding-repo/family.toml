@@ -23,3 +23,18 @@ harness = "terminus-2"
 budget_usd = 51
 categories = ["bug-fix", "feature", "refactor"]
 defects = ["scope", "conventions", "complexity", "testing", "clarity"]
+
+[system_aliases."opus-5.5-claude-code-high"]
+model_effort = "opus-5.5-high"
+condition = "installed"
+harness = "claude-code"
+version = "2.1.319"
+display_name = "Claude Opus 5.5 · Claude Code · High"
+
+[system_aliases."gemini-3.8-flash-codex-high"]
+model_effort = "gemini-3.8-flash-high"
+condition = "installed"
+api = "openai-responses"
+harness = "codex"
+version = "0.167.0"
+display_name = "Gemini 3.8 Flash · Codex · High"

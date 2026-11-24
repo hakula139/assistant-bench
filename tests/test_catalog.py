@@ -8,9 +8,12 @@ from assistant_bench.catalog import (
     Api,
     NixosConfigExport,
     Price,
+    SystemAlias,
     SystemConfig,
     load_export,
     load_systems,
+    parse_systems,
+    resolve_alias,
     resolve_system,
 )
 from assistant_bench.harnesses import fingerprint
@@ -56,22 +59,46 @@ class TestPrice:
         assert cost == (pytest.approx(expected) if expected is not None else None)
 
 
-class TestSystemConfig:
+class TestSystemAlias:
     @pytest.mark.parametrize(
-        'fields',
+        ('fields', 'reason'),
         [
-            {'harness': 'codex'},
-            {'version': '1.2.3'},
-            {'harness': 'codex', 'version': 'latest'},
-            {'harness': 'codex', 'version': '../1.2.3'},
+            ({'harness': 'codex'}, 'must be set together'),
+            ({'version': '1.2.3'}, 'must be set together'),
+            ({'harness': 'codex', 'version': 'latest'}, 'pattern'),
+            ({'harness': 'codex', 'version': '../1.2.3'}, 'pattern'),
+            ({}, 'exactly one'),
+            (
+                {
+                    'prompt': 'nixos-config:codex',
+                    'harness': 'codex',
+                    'version': '1.2.3',
+                },
+                'exactly one',
+            ),
+            ({'prompt': 'nixos-config:codex', 'condition': 'default'}, 'reserved'),
         ],
-        ids=['missing-version', 'missing-harness', 'unpinned-version', 'path-version'],
+        ids=[
+            'missing-version',
+            'missing-harness',
+            'unpinned-version',
+            'path-version',
+            'empty-variant',
+            'agent-with-prompt',
+            'default-condition',
+        ],
     )
-    def test_requires_a_pinned_version_with_an_installed_harness(
-        self, fields: dict[str, Any]
+    def test_rejects_an_invalid_family_configuration(
+        self, fields: dict[str, Any], reason: str
     ) -> None:
-        with pytest.raises(ValueError):
-            make_config(**fields)
+        required = {
+            'model_effort': 'large',
+            'condition': 'installed',
+            'display_name': 'Acme Installed',
+        }
+
+        with pytest.raises(ValueError, match=reason):
+            SystemAlias.model_validate(required | fields)
 
 
 class TestLoadSystems:
@@ -113,10 +140,9 @@ class TestLoadSystems:
                 effort = "medium"
                 display_name = "Acme Large"
 
-                [large-codex]
+                [large-high]
                 model = "acme-large"
-                effort = "medium"
-                prompt = "nixos-config:codex"
+                effort = "high"
                 display_name = "Acme Large"
                 """
             )
@@ -126,9 +152,29 @@ class TestLoadSystems:
             load_systems(export, path)
 
         assert str(error.value) == (
-            'Systems `large` and `large-codex` share the display name `Acme Large`. '
+            'Systems `large` and `large-high` share the display name `Acme Large`. '
             'Set a distinct `display_name`.'
         )
+
+    def test_rejects_two_keys_for_one_model_and_effort(
+        self, export: NixosConfigExport
+    ) -> None:
+        document = textwrap.dedent(
+            """\
+            [large]
+            model = "acme-large"
+            effort = "medium"
+            display_name = "Acme Large"
+
+            [other]
+            model = "acme-large"
+            effort = "medium"
+            display_name = "Other"
+            """
+        )
+
+        with pytest.raises(ValueError, match='same model and effort'):
+            parse_systems(export, document, GENERATION)
 
     @pytest.mark.parametrize(
         ('document', 'message'),
@@ -161,10 +207,10 @@ class TestLoadSystems:
                 [large]
                 model = "acme-large"
                 display_name = "Large"
-                prompt = 5
+                prompt = "nixos-config:codex"
                 """,
-                '`systems.toml`: `large.prompt`: Input should be a valid string.',
-                id='invalid-field',
+                '`systems.toml`: `large.prompt`: Extra inputs are not permitted.',
+                id='family-prompt',
             ),
             pytest.param(
                 '[large',
@@ -197,19 +243,6 @@ class TestLoadSystems:
             'gemini-3.8-flash-high': 'Gemini 3.8 Flash · High',
             'deepseek-v4.1-flash-1017-high': 'DeepSeek V4.1 Flash 1017 · High',
             'kimi-k3.1-pro-high': 'Kimi K3.1 Pro · High',
-            'opus-5.5-high-nixos': 'Claude Opus 5.5 · High · Instructions',
-            'gpt-6-astra-high-nixos': 'GPT-6 Astra · High · Instructions',
-            'gpt-6.1-sol-high-nixos': 'GPT-6.1 Sol · High · Instructions',
-            'gpt-6.2-astra-high-nixos': 'GPT-6.2 Astra · High · Instructions',
-            'gpt-6.2-sol-high-nixos': 'GPT-6.2 Sol · High · Instructions',
-            'gemini-4-argon-high-nixos': 'Gemini 4 Argon · High · Instructions',
-            'gemini-3.8-flash-high-nixos': 'Gemini 3.8 Flash · High · Instructions',
-            'deepseek-v4.1-flash-1017-high-nixos': (
-                'DeepSeek V4.1 Flash 1017 · High · Instructions'
-            ),
-            'kimi-k3.1-pro-high-nixos': 'Kimi K3.1 Pro · High · Instructions',
-            'opus-5.5-claude-code-high': 'Claude Opus 5.5 · Claude Code · High',
-            'gemini-3.8-flash-codex-high': 'Gemini 3.8 Flash · Codex · High',
         }
         assert {system.effort for system in systems.values()} == {'high'}
         assert {
@@ -219,11 +252,6 @@ class TestLoadSystems:
             'gpt-6.1-sol-high',
             'gpt-6.2-astra-high',
             'gpt-6.2-sol-high',
-            'gpt-6-astra-high-nixos',
-            'gpt-6.1-sol-high-nixos',
-            'gpt-6.2-astra-high-nixos',
-            'gpt-6.2-sol-high-nixos',
-            'gemini-3.8-flash-codex-high',
         }
         native = systems['opus-5.5-high']
         assert (
@@ -245,6 +273,11 @@ class TestResolveSystem:
             name='native',
             api='anthropic-messages',
             effort='high',
+            supported_apis=(
+                'openai-chat-completions',
+                'openai-responses',
+                'anthropic-messages',
+            ),
         )
 
     @pytest.mark.parametrize(
@@ -326,18 +359,6 @@ class TestResolveSystem:
         assert system.vendor == 'other'
         assert system.price is None
 
-    def test_reads_a_nixos_config_system_prompt(
-        self, export: NixosConfigExport
-    ) -> None:
-        system = resolve_system(
-            'large',
-            make_config(prompt='nixos-config:claudeCode'),
-            export,
-            GENERATION,
-        )
-
-        assert system.prompt == '# CLAUDE.md\n\nBe direct.'
-
     @pytest.mark.parametrize(
         ('config', 'message'),
         [
@@ -374,15 +395,6 @@ class TestResolveSystem:
                 'System `x`: catalog model `acme-routed` has channels `acme`, '
                 '`router`. Name a catalog model with one channel.',
             ),
-            (
-                make_config(prompt='nixos-config:omp'),
-                'System `x`: nixos-config has no `omp` instructions. Choose among '
-                '`claudeCode`, `codex`.',
-            ),
-            (
-                make_config(prompt='prompts/brief.md'),
-                'System `x`: prompt `prompts/brief.md` is not `nixos-config:<client>`.',
-            ),
         ],
         ids=[
             'unknown-model-near-a-key',
@@ -392,8 +404,6 @@ class TestResolveSystem:
             'unoffered-effort',
             'no-channel',
             'several-channels',
-            'unknown-prompt-client',
-            'prompt-outside-nixos-config',
         ],
     )
     def test_rejects_what_the_catalog_does_not_offer(
@@ -469,5 +479,75 @@ class TestResolveSystem:
 
         with pytest.raises(ValueError) as error:
             resolve_system('x', config, configured, GENERATION)
+
+        assert str(error.value) == message
+
+
+class TestResolveAlias:
+    def test_checks_the_family_api_against_the_catalog_model(
+        self, export: NixosConfigExport
+    ) -> None:
+        base = resolve_system(
+            'small', make_config(model='acme-small', effort=None), export, GENERATION
+        )
+        alias = SystemAlias(
+            model_effort='small',
+            condition='installed',
+            display_name='Acme Codex',
+            harness='codex',
+            version='1.2.3',
+            api='openai-responses',
+        )
+
+        with pytest.raises(
+            ValueError,
+            match='API `openai-responses` is not one of `openai-chat-completions`',
+        ):
+            resolve_alias('installed', alias, base, export)
+
+    def test_reads_a_nixos_config_system_prompt(
+        self, export: NixosConfigExport
+    ) -> None:
+        base = make_system()
+        alias = SystemAlias(
+            model_effort=base.name,
+            condition='prompted',
+            prompt='nixos-config:claudeCode',
+            display_name='Acme Instructions',
+        )
+
+        system = resolve_alias('instructed', alias, base, export)
+
+        assert system.prompt == '# CLAUDE.md\n\nBe direct.'
+        assert base.prompt is None
+
+    @pytest.mark.parametrize(
+        ('prompt', 'message'),
+        [
+            (
+                'nixos-config:omp',
+                'System `x`: nixos-config has no `omp` instructions. Choose among '
+                '`claudeCode`, `codex`.',
+            ),
+            (
+                'prompts/brief.md',
+                'System `x`: prompt `prompts/brief.md` is not `nixos-config:<client>`.',
+            ),
+        ],
+        ids=['unknown-client', 'unsupported-source'],
+    )
+    def test_rejects_an_unavailable_prompt(
+        self, export: NixosConfigExport, prompt: str, message: str
+    ) -> None:
+        base = make_system()
+        alias = SystemAlias(
+            model_effort=base.name,
+            condition='prompted',
+            prompt=prompt,
+            display_name='Acme Instructions',
+        )
+
+        with pytest.raises(ValueError) as error:
+            resolve_alias('x', alias, base, export)
 
         assert str(error.value) == message

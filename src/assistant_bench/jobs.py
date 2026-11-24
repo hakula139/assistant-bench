@@ -32,7 +32,14 @@ from assistant_bench.artifacts import (
     ArtifactRef,
     ArtifactRepository,
 )
-from assistant_bench.catalog import SYSTEMS_FILE, System
+from assistant_bench.catalog import (
+    SYSTEMS_FILE,
+    NixosConfigExport,
+    System,
+    SystemIdentity,
+    load_export,
+    resolve_alias,
+)
 from assistant_bench.families import (
     CheckersSettings,
     Family,
@@ -98,16 +105,56 @@ def check_harness(family: Family) -> None:
         )
 
 
-def listed_systems(family: Family, systems: Mapping[str, System]) -> list[System]:
-    """Return the systems a family lists, refusing a name `systems.toml` lacks."""
-    unknown = [name for name in family.settings.systems if name not in systems]
+def listed_systems(
+    family: Family,
+    systems: Mapping[str, System],
+    *,
+    export: NixosConfigExport | None = None,
+) -> list[System]:
+    """Resolve the family's listed storage keys against the canonical systems."""
+    aliases = family.settings.system_aliases
+    shadowed = aliases.keys() & systems.keys()
+    if shadowed:
+        raise InputError(
+            f'Family `{family.name}` has system aliases {code(sorted(shadowed))} '
+            f'that shadow canonical keys in `{SYSTEMS_FILE}`.'
+        )
+    unknown = [
+        key
+        for name in family.settings.systems
+        if (key := aliases[name].model_effort if name in aliases else name)
+        not in systems
+    ]
     if unknown:
         raise InputError(
             f'Family `{family.name}` lists {code(unknown)}, which '
             f'`{SYSTEMS_FILE}` does not define. Fix '
             f'`families/{family.name}/family.toml` or add the system table.'
         )
-    return [systems[name] for name in family.settings.systems]
+    listed: list[System] = []
+    conditions: set[tuple[str, str]] = set()
+    labels: set[str] = set()
+    for name in family.settings.systems:
+        if (alias := aliases.get(name)) is None:
+            system = systems[name]
+        else:
+            export = load_export() if export is None else export
+            system = resolve_alias(name, alias, systems[alias.model_effort], export)
+
+        identity = (system.public_id(family.name), system.condition)
+        if identity in conditions:
+            raise InputError(
+                f'System `{identity[0]}` repeats the `{identity[1]}` condition.'
+            )
+        if system.display_name in labels:
+            raise InputError(
+                f'Family `{family.name}` repeats the display name '
+                f'`{system.display_name}`.'
+            )
+        conditions.add(identity)
+        labels.add(system.display_name)
+        listed.append(system)
+    return listed
 
 
 def check_systems(family: Family, systems: list[System]) -> None:
@@ -122,14 +169,14 @@ def check_systems(family: Family, systems: list[System]) -> None:
     check_harness(family)
     if isinstance(family.settings, CheckersSettings):
         by_name = {system.name: system for system in systems}
-        excluded = {'name', 'display_name', 'prompt', 'price', 'vendor'}
+        fields = SystemIdentity.model_fields.keys() - {'prompt'}
         for pair in family.settings.pairs:
             bare, instructed = by_name[pair.bare], by_name[pair.prompted]
             if (
                 bare.prompt is not None
                 or instructed.prompt is None
-                or bare.model_dump(exclude=excluded)
-                != instructed.model_dump(exclude=excluded)
+                or bare.model_dump(include=fields)
+                != instructed.model_dump(include=fields)
             ):
                 raise InputError(
                     f'Family `{family.name}`: `{pair.bare}` and `{pair.prompted}` '
@@ -150,7 +197,7 @@ def check_systems(family: Family, systems: list[System]) -> None:
         if system.harness in ('claude-code', 'codex') and system.version is None:
             raise InputError(
                 f'System `{system.name}`: set its `harness` and pinned `version` '
-                'in `systems.toml`.'
+                'in `family.toml`.'
             )
         if system.prompt is not None and not harness.sends_prompt:
             raise InputError(
@@ -179,7 +226,9 @@ def runnable_systems(systems: Mapping[str, System]) -> dict[str, list[System]]:
     runnable: dict[str, list[System]] = {}
     for name in family_names():
         family = load_family(name)
-        runnable[name] = family_systems(family, listed_systems(family, systems))
+        listed = listed_systems(family, systems)
+        check_systems(family, listed)
+        runnable[name] = family_systems(family, listed)
     return runnable
 
 
@@ -310,6 +359,7 @@ def probe_job(system: System, task: Path, root: Path) -> JobConfig:
 type EnvironmentInputs = tuple[
     trial_config.EnvironmentConfig, tuple[ExtraDockerComposeLock, ...] | None
 ]
+type TrialInputs = tuple[trial_config.AgentConfig, EnvironmentInputs, bool]
 
 
 def environment_inputs(
@@ -325,30 +375,43 @@ def environment_inputs(
 
 def current_inputs(
     family: Family, systems: list[System]
-) -> dict[str, tuple[trial_config.AgentConfig, EnvironmentInputs, bool]]:
-    """Map each system the family lists to the inputs a current trial records.
+) -> dict[str, tuple[TrialInputs, ...]]:
+    """Map each listed system to the trial inputs its job can record.
 
     The inputs are the agent config, the environment config, and whether the
     verifier is disabled.
     """
-    roster = family_systems(
+    resolved = family_systems(
         family, [system for system in systems if system.name in family.settings.systems]
     )
-    environment = _environment(roster, family.source_root.parent)
+    source_root = family.source_root.parent
+    full = _environment_lock(_environment(resolved, source_root))
+    standard_systems = [system for system in resolved if system.version is None]
+    standard = (
+        _environment_lock(_environment(standard_systems, source_root))
+        if 0 < len(standard_systems) < len(resolved)
+        else full
+    )
+    return {
+        system.name: tuple(
+            (_agent_config(system), environment, family.source != 'tasks')
+            for environment in (
+                (full, standard)
+                if system.version is None and full != standard
+                else (full,)
+            )
+        )
+        for system in resolved
+    }
+
+
+def _environment_lock(environment: trial_config.EnvironmentConfig) -> EnvironmentInputs:
     overlays: list[ExtraDockerComposeLock] = []
     for path in environment.extra_docker_compose:
         with path.open('rb') as file:
             digest = hashlib.file_digest(file, 'sha256').hexdigest()
         overlays.append(ExtraDockerComposeLock(path=path, digest=f'sha256:{digest}'))
-    identity = environment_inputs(environment, overlays or None)
-    return {
-        system.name: (
-            _agent_config(system),
-            identity,
-            family.source != 'tasks',
-        )
-        for system in roster
-    }
+    return environment_inputs(environment, overlays or None)
 
 
 def check_job(family: Family, tasks: list[Path], *, root: Path) -> JobConfig:

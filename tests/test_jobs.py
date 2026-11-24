@@ -90,7 +90,7 @@ class TestCheckSystems:
                 'codex',
                 make_system(api='openai-responses'),
                 'System `acme-large`: set its `harness` and pinned `version` '
-                'in `systems.toml`.',
+                'in `family.toml`.',
                 id='installed-missing-version',
             ),
         ],

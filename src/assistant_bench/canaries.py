@@ -93,14 +93,20 @@ class Record(BaseModel):
 
 
 def prepare(
-    configs: Iterable[JobConfig],
-    systems: Mapping[str, System],
+    configs: Iterable[tuple[JobConfig, Mapping[str, System]]],
     *,
     root: Path,
     source_root: Path = REPO_ROOT,
 ) -> list[Probe]:
-    """Prepare one probe for each selected system with at least one pending trial."""
-    pending = {name for config in configs for name in jobs.pending_trials(config)}
+    """Probe each pending system key and resolved single-call configuration once."""
+    pending: dict[tuple[str, str], tuple[System, System]] = {}
+    for config, systems in configs:
+        for name in jobs.pending_trials(config):
+            original = systems[name]
+            source = original.model_copy(
+                update={'harness': 'generate', 'version': None}
+            )
+            pending.setdefault((name, fingerprint(source)), (original, source))
     if not pending:
         return []
 
@@ -113,9 +119,7 @@ def prepare(
     (task / 'task.toml').write_text(task_config.model_dump_toml())
 
     probes: list[Probe] = []
-    for name in sorted(pending):
-        original = systems[name]
-        source = original.model_copy(update={'harness': 'generate', 'version': None})
+    for _, (original, source) in sorted(pending.items()):
         actual = source.model_copy(
             update={
                 'max_output_tokens': min(CANARY_MAX_TOKENS, source.max_output_tokens)

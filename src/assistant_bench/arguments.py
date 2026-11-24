@@ -65,7 +65,15 @@ SystemOptions = Annotated[
     list[str] | None,
     typer.Option(
         '--system',
-        help='Limit `bench run` to this system, in every family that lists it '
-        'unless a family is named. Repeat for several.',
+        help='Select a family/model-effort ID. A bare model-effort selects it '
+        'across families. Repeat for several.',
+    ),
+]
+ConditionOption = Annotated[
+    str | None,
+    typer.Option(
+        '--condition',
+        help='Select one condition of the systems given with --system. '
+        'See `bench systems`.',
     ),
 ]

@@ -4,7 +4,7 @@ import os
 import subprocess
 import sys
 import tempfile
-from collections import Counter
+from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
 from contextlib import nullcontext
 from dataclasses import dataclass
@@ -24,6 +24,7 @@ from assistant_bench.arena import settlement, votes
 from assistant_bench.arena.commands import app as arena_app
 from assistant_bench.arena.d1 import connect
 from assistant_bench.arguments import (
+    ConditionOption,
     FamilyArguments,
     SystemOptions,
     known_names,
@@ -213,7 +214,23 @@ def _check(
 
 
 @app.command()
-def run(families: FamilyArguments = None, names: SystemOptions = None) -> None:
+def systems(families: FamilyArguments = None) -> None:
+    """List runnable system IDs, conditions, and display names by family."""
+    _, catalog = _catalog()
+    for target in _run_targets(families, None, catalog):
+        for system in target.selected:
+            typer.echo(
+                f'{system.public_id(target.family.name)}\t{system.condition}\t'
+                f'{system.display_name}'
+            )
+
+
+@app.command()
+def run(
+    families: FamilyArguments = None,
+    names: SystemOptions = None,
+    condition: ConditionOption = None,
+) -> None:
     """Generate the missing trials of every family, or the named ones, and collect them.
 
     A run without a family sends every family that lists systems. Each trial sends
@@ -223,19 +240,22 @@ def run(families: FamilyArguments = None, names: SystemOptions = None) -> None:
     """
     with open_context() as context:
         export, systems = _catalog(context.public_root)
-        _run_families(families, names, export, systems, context)
+        targets = _run_targets(
+            families,
+            names,
+            systems,
+            condition=condition,
+            root=context.public_root / 'families',
+        )
+        _run_families(targets, export, systems, context)
 
 
 def _run_families(
-    families: list[str] | None,
-    names: list[str] | None,
+    targets: list[_RunTarget],
     export: NixosConfigExport,
     systems: dict[str, System],
     context: RunContext,
 ) -> None:
-    targets = _run_targets(
-        families, names, systems, root=context.public_root / 'families'
-    )
     pending = context.reconcile_publications(
         scopes=[target.family.name for target in targets],
         canary_systems=[
@@ -245,19 +265,24 @@ def _run_families(
     if pending:
         _echo_publications(pending)
         return
-    prepared = _prepare(families, names, export, systems, context)
+    prepared = _prepare(targets, export, context)
     problems: list[str] = []
     for family, selected, job in prepared:
         spent, projections = _projection(family, selected, job, context)
-        _echo_projection(family, spent, projections)
+        _echo_projection(family, selected, spent, projections)
         if (problem := budget_problem(family, spent, projections)) is not None:
             problems.append(problem)
     if problems:
         raise InputError('\n'.join(problems))
 
     probes = canaries.prepare(
-        (job for _, _, job in prepared),
-        systems,
+        (
+            (
+                job,
+                {system.name: systems.get(system.name, system) for system in selected},
+            )
+            for _, selected, job in prepared
+        ),
         root=context.root,
         source_root=context.public_root,
     )
@@ -337,29 +362,71 @@ def _run_canaries(probes: list[canaries.Probe], context: RunContext) -> None:
 
 
 @app.command()
-def spend(families: FamilyArguments = None, names: SystemOptions = None) -> None:
+def spend(
+    families: FamilyArguments = None,
+    names: SystemOptions = None,
+    condition: ConditionOption = None,
+) -> None:
     """Print the spend ledger, and the projection of `bench run` with these arguments.
 
     Nothing runs, and no request reaches the endpoint.
     """
     with open_context() as context:
         export, systems = _catalog(context.public_root)
-        for family, selected, job in _prepare(
-            families, names, export, systems, context
-        ):
+        targets = _run_targets(
+            families,
+            names,
+            systems,
+            condition=condition,
+            root=context.public_root / 'families',
+        )
+        for family, selected, job in _prepare(targets, export, context):
             spent, projections = _projection(family, selected, job, context)
             for entry in spent:
                 typer.echo(_spend_line(entry))
-            _echo_projection(family, spent, projections)
+            _echo_projection(family, selected, spent, projections)
             if (problem := budget_problem(family, spent, projections)) is not None:
                 typer.echo(problem)
 
 
 @app.command()
-def reset_canary(system: str) -> None:
-    """Clear baseline contexts and preserve the system's probe and spend history."""
+def reset_canary(
+    system: str,
+    condition: Annotated[
+        str | None,
+        typer.Option(help='Select one condition of a qualified system ID.'),
+    ] = None,
+) -> None:
+    """Clear baseline contexts and preserve probe and spend history.
+
+    A family/model-effort ID selects the current generation configuration of each
+    matching condition. A historical storage key selects all its contexts.
+    """
+    contexts: list[tuple[str, str | None]] = [(system, None)]
+    if '/' in system:
+        _, catalog = _catalog()
+        contexts = [
+            (
+                member.name,
+                fingerprint(
+                    member.model_copy(update={'harness': 'generate', 'version': None})
+                ),
+            )
+            for target in _run_targets(None, [system], catalog, condition=condition)
+            for member in target.selected
+        ]
+    elif condition is not None:
+        raise typer.BadParameter(
+            'Specify a family/model-effort ID with this option.',
+            param_hint="'--condition'",
+        )
+
     with connect('private') as database:
-        count = State(database).reset_baseline(system)
+        state = State(database)
+        count = sum(
+            state.reset_baseline(key, source_fingerprint=source)
+            for key, source in contexts
+        )
     typer.echo(
         f'System `{system}`: cleared {count_of(count, "canary baseline context")}.'
     )
@@ -572,18 +639,6 @@ def _family_systems(family: Family, systems: Mapping[str, System]) -> list[Syste
     return jobs.family_systems(family, listed)
 
 
-def _named_systems(
-    family: Family, systems: list[System], names: list[str]
-) -> list[System]:
-    known_names(
-        names,
-        [system.name for system in systems],
-        f'Family `{family.name}` does not list',
-        param_hint="'--system'",
-    )
-    return [system for system in systems if system.name in names]
-
-
 def _families_with_jobs(context: RunContext) -> list[str]:
     return [
         name
@@ -593,10 +648,8 @@ def _families_with_jobs(context: RunContext) -> list[str]:
 
 
 def _prepare(
-    families: list[str] | None,
-    names: list[str] | None,
+    targets: list[_RunTarget],
     export: NixosConfigExport,
-    systems: Mapping[str, System],
     context: RunContext,
 ) -> list[tuple[Family, list[System], JobConfig]]:
     """Return each family to run with its systems and its job."""
@@ -605,9 +658,7 @@ def _prepare(
         private_root=context.private_root,
         families_root=context.public_root / 'families',
     )
-    for target in _run_targets(
-        families, names, systems, root=context.public_root / 'families'
-    ):
+    for target in targets:
         family, selected = target.family, target.selected
         if not selected:
             raise InputError(
@@ -667,51 +718,106 @@ def _run_targets(
     names: list[str] | None,
     systems: Mapping[str, System],
     *,
+    condition: str | None = None,
     root: Path | None = None,
 ) -> list[_RunTarget]:
     """Return each family to run with its roster and selected systems."""
+    if condition is not None and not names:
+        raise typer.BadParameter(
+            'Specify a system with `--system`.', param_hint="'--condition'"
+        )
+
+    family_scope = families if families is not None else family_names(root=root)
     targets: list[_RunTarget] = []
-    if families is not None:
-        for name in families:
+    if not names:
+        for name in family_scope:
             family = load_family(name, root=root)
-            roster = _family_systems(family, systems)
-            selected = _named_systems(family, roster, names) if names else roster
-            targets.append(_RunTarget(family, roster, selected))
+            if families is not None or family.settings.systems:
+                roster = _family_systems(family, systems)
+                targets.append(_RunTarget(family, roster, roster))
         return targets
 
-    every = [
-        family
-        for name in family_names(root=root)
-        if (family := load_family(name, root=root)).settings.systems
-    ]
-
-    if names is None:
-        for family in every:
-            roster = _family_systems(family, systems)
-            targets.append(_RunTarget(family, roster, roster))
-        return targets
-
+    bare: list[str] = []
+    qualified: defaultdict[str, list[str]] = defaultdict(list)
+    for name in names:
+        family_name, separator, _ = name.partition('/')
+        if separator:
+            qualified[family_name].append(name)
+        else:
+            bare.append(name)
     known_names(
-        names,
-        systems,
-        'No family lists',
-        f'Check the name against `{SYSTEMS_FILE}`.',
+        (
+            system_id
+            for family_name, system_ids in qualified.items()
+            if family_name not in family_scope
+            for system_id in system_ids
+        ),
+        (),
+        'No selected family lists',
+        'Choose a family and system from `bench systems`.',
         param_hint="'--system'",
     )
-    wanted = known_names(
-        names,
-        {name for family in every for name in family.settings.systems},
+    if families is None:
+        known_names(
+            bare,
+            systems,
+            'No family lists',
+            f'Check the name against `{SYSTEMS_FILE}`.',
+            param_hint="'--system'",
+        )
+
+    listed: set[str] = set()
+    matching: set[str] = set()
+    for family_name in family_scope:
+        local = qualified.get(family_name, [])
+        if not bare and not local:
+            continue
+        family = load_family(family_name, root=root)
+        members = _family_systems(family, systems)
+        short = dict.fromkeys(system.canonical_name for system in members)
+        full = dict.fromkeys(system.public_id(family_name) for system in members)
+        known_names(
+            local,
+            full,
+            f'Family `{family_name}` does not list',
+            param_hint="'--system'",
+        )
+        if families is not None:
+            known_names(
+                bare,
+                short,
+                f'Family `{family_name}` does not list',
+                param_hint="'--system'",
+            )
+        listed.update(short)
+        requested = set(bare) | set(local)
+        chosen: list[System] = []
+        for system in members:
+            matched = requested & {
+                system.canonical_name,
+                system.public_id(family_name),
+            }
+            if matched and (condition is None or condition == system.condition):
+                matching.update(matched)
+                chosen.append(system)
+        if chosen:
+            targets.append(_RunTarget(family, members, chosen))
+
+    known_names(
+        bare,
+        listed,
         'No family lists',
         "Add it to `systems` in a family's `family.toml`.",
         param_hint="'--system'",
     )
-
-    for family in every:
-        if not set(family.settings.systems) & set(wanted):
-            continue
-        roster = _family_systems(family, systems)
-        selected = [system for system in roster if system.name in wanted]
-        targets.append(_RunTarget(family, roster, selected))
+    if condition is not None:
+        known_names(
+            names,
+            matching,
+            f'No system with condition `{condition}` matches',
+            'See the available conditions in `bench systems`.',
+            param_hint="'--condition'",
+        )
     return targets
 
 
@@ -780,7 +886,10 @@ def _collect(
     export: NixosConfigExport,
     context: RunContext,
 ) -> collection.Collection:
-    collected = collection.collect(family, systems, context)
+    resolved = _family_systems(family, systems)
+    collected = collection.collect(
+        family, {system.name: system for system in resolved}, context
+    )
     outputs = collected.outputs
     errors = Counter(output.error for output in outputs if output.error)
     typer.echo(
@@ -817,7 +926,7 @@ def _collect(
         _author_rates(
             family,
             outputs,
-            _family_systems(family, systems),
+            resolved,
             export,
             private_root=context.private_root,
         )
@@ -881,13 +990,24 @@ def _projection(
     return spent, project(jobs.pending_trials(job), spent, selected)
 
 
+def _system_label(family: Family, system: System) -> str:
+    label = f'`{system.public_id(family.name)}`'
+    if system.model_effort is None:
+        return label
+    return f'{label} (condition `{system.condition}`)'
+
+
 def _echo_projection(
-    family: Family, spent: list[Spend], projections: list[Projection]
+    family: Family,
+    systems: list[System],
+    spent: list[Spend],
+    projections: list[Projection],
 ) -> None:
+    labels = {system.name: _system_label(family, system) for system in systems}
     for projection in projections:
         if not projection.pending:
             continue
-        name = f'System `{projection.system}`'
+        name = f'System {labels[projection.system]}'
         trials = count_of(projection.pending, 'pending trial')
         if projection.per_trial_usd is not None and projection.basis is not None:
             typer.echo(
@@ -948,7 +1068,9 @@ def _author_rates(
             )
             rates.append(f'{label} tasks {rate}')
 
-        typer.echo(f'System `{system.name}`: pass rate on {", ".join(rates)}.')
+        typer.echo(
+            f'System {_system_label(family, system)}: pass rate on {", ".join(rates)}.'
+        )
 
 
 def _run(job: JobConfig) -> Path:

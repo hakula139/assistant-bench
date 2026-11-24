@@ -101,10 +101,10 @@ def collect(
     patch bump keeps the trials Harbor reused, while a minor bump keeps only their
     regrades. Each case, system, and fingerprint keeps at most `samples` outputs,
     keeping only trials whose recorded generation, environment, and verifier
-    settings match the current job. A successful trial comes first, then an
-    errored trial its tests graded, then one they never graded, with the oldest
-    first within each tier whatever its reward. Usage and costs come from the
-    originating attempt's confirmed accounting and frozen price.
+    settings match a current job that could run the system. A successful trial
+    comes first, then an errored trial its tests graded, then one they never
+    graded, in chronological order within each tier. Usage and costs come from
+    the originating attempt's confirmed accounting and frozen price.
 
     A regraded trial yields the output of the trial whose agent wrote its
     solution, with the regrade's verdict, so the votes on that output stay. Harbor
@@ -143,7 +143,7 @@ def collect(
             ),
             candidate.trial.lock.verifier.disable,
         )
-        == expected.get(candidate.system)
+        in expected.get(candidate.system, ())
         and candidate.origin.lock.agent == candidate.trial.lock.agent
         and environment_inputs(
             candidate.origin.lock.environment,
