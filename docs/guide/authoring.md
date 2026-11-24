@@ -21,7 +21,7 @@ Choose the scorer for the evidence the family collects: `votes` for blind compar
 
 A public family needs a declared aspect and an ID beginning with that aspect. Its short display name becomes the full name when it has no aspect, and full names must be unique. `public` lists results on the site, while `public_voting` separately permits [production voting](../design/arena.md#publication-and-closing).
 
-List runnable systems and a reference for voted rankings. The reference anchors a round at 1,000 when it ranks. Increasing `samples` runs only the extra attempts. Checker families require one sample and put every listed system in exactly one bare / prompted pair. Task families set a default harness, and changing it replaces the affected trials. [Running](running.md#spend-and-budgets) explains budget admission.
+List runnable systems and a reference for voted rankings. Overall and category rankings estimate [expected net points](../design/ranking.md#expected-net-points) against the configured reference. Increasing `samples` runs only the extra attempts. Checker families require one sample and put every listed system in exactly one bare / prompted pair. Task families set a default harness, and changing it replaces the affected trials. [Running](running.md#spend-and-budgets) explains budget admission.
 
 Keep categories in board order and defects in presentation order. Category IDs appear in reports, with labels supplied by the site glossary. Omitting defects hides issue tagging. [Writing](../design/families/writing.md#gates) defines the optional language, length and script gates.
 
@@ -120,6 +120,6 @@ When a change moves fingerprints:
 
 1. Run `uv run bench fingerprints`, which fails on each changed system whose closed reports froze its earlier fingerprint.
 2. Give each changed system that a closed report names a new table name with a suffix identifying its effort or snapshot and a distinct `display_name`.
-3. Replace the old name in each family's `systems` list and `reference` where applicable. `bench close` anchors the board at the new reference once it ranks, and until then uses the most-voted system as the round's `anchor`.
+3. Replace the old name in each family's `systems` list and `reference` where applicable. A board scored against the replacement reference has no ranked systems if that reference lacks qualifying preference comparisons.
 4. Preserve valid closed reports and task authorship for retired systems, and remove their runnable tables.
 5. Run `uv run pytest tests/test_repository.py -k manifest --update-fixtures` to rewrite `fingerprints.json`, then `uv run bench fingerprints` to confirm that it passes.
