@@ -4,7 +4,7 @@ import json
 import os
 import ssl
 from collections.abc import Callable, Coroutine, Mapping
-from typing import Any, Literal, override
+from typing import Any, Literal, assert_never, override
 
 import h11
 import httpx2
@@ -85,7 +85,6 @@ class HeaderSettings(BaseModel):
 
     @classmethod
     def from_env(cls, env: Callable[[str], str | None]) -> HeaderSettings:
-        """Read header settings without requiring an endpoint or API."""
         values = {
             name: value
             for name in (HEADERS_VAR, SECRET_HEADERS_FILE_VAR)
@@ -94,7 +93,6 @@ class HeaderSettings(BaseModel):
         return cls.model_validate(values)
 
     def resolve(self) -> tuple[dict[str, str], frozenset[str]]:
-        """Read confidential headers and return one normalized configuration."""
         secret_headers: dict[str, str] = {}
         if self.secret_headers_file:
             try:
@@ -145,7 +143,6 @@ class Endpoint(HeaderSettings):
 
     @classmethod
     def read(cls, env: Callable[[str], str | None], api: Api) -> Endpoint:
-        """Validate the value `env` returns for each endpoint variable."""
         names = (
             _base_var(api),
             KEY_FILE_VAR,
@@ -161,13 +158,11 @@ class Endpoint(HeaderSettings):
         return self.key_file.read_text().strip()
 
     def verify(self) -> ssl.SSLContext | bool:
-        """Trust the CA bundle when one is set, else the system's."""
         return ssl.create_default_context(cafile=self.ca_file) if self.ca_file else True
 
     def client(
         self, api: Literal['openai-chat-completions', 'openai-responses']
     ) -> AsyncOpenAI:
-        """Build the native client, bound to the local address if set."""
         client = self.http_client(api)
         return AsyncOpenAI(
             base_url=str(self.base_url),
@@ -181,7 +176,6 @@ class Endpoint(HeaderSettings):
     def http_client(
         self, api: Api, *, recorder: TrialAccounting | None = None
     ) -> _Client:
-        """Use the explicit recorder or the current trial for every HTTP request."""
         verify = self.verify()
         transport = (
             httpx2.AsyncHTTPTransport(
@@ -301,14 +295,7 @@ class _Client(httpx2.AsyncClient):
         request_id = response.request.extensions.get(REQUEST_ID)
         if not isinstance(request_id, str):
             return
-        if (
-            response.is_success
-            and response.headers.get('content-type', '')
-            .split(';', 1)[0]
-            .strip()
-            .lower()
-            == 'text/event-stream'
-        ):
+        if is_event_stream(response):
             return
         await response.aread()
         try:
@@ -375,13 +362,20 @@ def _unique_headers(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return values
 
 
+def is_event_stream(response: httpx2.Response) -> bool:
+    return (
+        response.is_success
+        and response.headers.get('content-type', '').split(';', 1)[0].strip().lower()
+        == 'text/event-stream'
+    )
+
+
 def receipt(
     api: Api,
     payload: object,
     http_status: int,
     provider_request_id: str | None,
 ) -> RequestReceipt:
-    """Validate terminal metadata without retaining response text or headers."""
     outcome: Literal['completed', 'incomplete', 'failed', 'http_error', 'malformed'] = (
         'completed'
     )
@@ -394,25 +388,31 @@ def receipt(
         outcome = 'http_error'
     elif values.get('error') is not None:
         outcome = 'failed'
-    elif api == 'openai-responses':
-        status = values.get('status')
-        outcome = (
-            status if status in ('completed', 'incomplete', 'failed') else 'malformed'
-        )
-    elif api == 'openai-chat-completions':
-        try:
-            choices = _choices.validate_python(values.get('choices'))
-        except ValidationError:
-            choices = []
-        if not choices:
-            outcome = 'malformed'
-        elif any(choice.get('finish_reason') == 'length' for choice in choices):
-            outcome = 'incomplete'
     else:
-        if values.get('stop_reason') == 'max_tokens':
-            outcome = 'incomplete'
-        elif values.get('type') != 'message':
-            outcome = 'malformed'
+        match api:
+            case 'openai-responses':
+                status = values.get('status')
+                outcome = (
+                    status
+                    if status in ('completed', 'incomplete', 'failed')
+                    else 'malformed'
+                )
+            case 'openai-chat-completions':
+                try:
+                    choices = _choices.validate_python(values.get('choices'))
+                except ValidationError:
+                    choices = []
+                if not choices:
+                    outcome = 'malformed'
+                elif any(choice.get('finish_reason') == 'length' for choice in choices):
+                    outcome = 'incomplete'
+            case 'anthropic-messages':
+                if values.get('stop_reason') == 'max_tokens':
+                    outcome = 'incomplete'
+                elif values.get('type') != 'message':
+                    outcome = 'malformed'
+            case _:
+                assert_never(api)
     return RequestReceipt(
         api=api,
         outcome=outcome,

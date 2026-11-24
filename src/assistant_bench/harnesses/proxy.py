@@ -14,7 +14,7 @@ from pydantic import TypeAdapter, ValidationError
 from assistant_bench.catalog import Api
 from assistant_bench.generation import load_generation
 from assistant_bench.harnesses.accounting import REQUEST_ID, TrialAccounting
-from assistant_bench.harnesses.endpoint import Endpoint, receipt
+from assistant_bench.harnesses.endpoint import Endpoint, is_event_stream, receipt
 from assistant_bench.harnesses.usage import measure, merge_messages_usage
 
 
@@ -89,23 +89,22 @@ async def connect(
                 content=body,
                 headers=headers,
             ) as upstream:
+                response_headers = (
+                    {'Content-Type': content_type}
+                    if (content_type := upstream.headers.get('content-type'))
+                    is not None
+                    else None
+                )
                 response = web.StreamResponse(
                     status=upstream.status_code,
-                    headers={'Content-Type': upstream.headers['content-type']},
+                    headers=response_headers,
                 )
                 await response.prepare(request)
 
                 request_id = upstream.request.extensions.get(REQUEST_ID)
                 terminal = False
                 try:
-                    if (
-                        upstream.is_success
-                        and upstream.headers.get('content-type', '')
-                        .split(';', 1)[0]
-                        .strip()
-                        .lower()
-                        == 'text/event-stream'
-                    ):
+                    if is_event_stream(upstream):
                         usage: dict[str, Any] = {}
                         message: dict[str, Any] = {}
                         final_usage = False
@@ -122,9 +121,9 @@ async def connect(
                                     usage = dict(message.get('usage') or {})
                                 elif kind == 'message_delta':
                                     usage = merge_messages_usage(
-                                        usage, data.get('usage', {})
+                                        usage, data.get('usage') or {}
                                     )
-                                    message.update(data.get('delta', {}))
+                                    message.update(data.get('delta') or {})
                                     final_usage = True
                                 elif kind == 'message_stop':
                                     completed = {

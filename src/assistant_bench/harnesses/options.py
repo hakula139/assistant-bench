@@ -10,6 +10,11 @@ from assistant_bench.catalog import Api, SystemIdentity
 ThinkingMode = Literal['anthropic-adaptive']
 
 
+class Labels(BaseModel):
+    system: str
+    fingerprint: str
+
+
 class ApiOptions(BaseModel):
     api: Api
     thinking_mode: ThinkingMode | None = None
