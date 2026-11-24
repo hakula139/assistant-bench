@@ -364,6 +364,6 @@ def _baseline_problem(record: Record, baseline: Record) -> str | None:
         f'`{baseline.time.date()}`. Input tokens: `{old_tokens}` → `{new_tokens}`. '
         f'{model_change}The run was refused. Inspect its canary records. '
         'Give a changed system a new name. After verifying a benign route change, '
-        f'run `bench reset-canary {record.system}` to clear its baseline contexts '
-        'while retaining its probe and spend history.'
+        'find the affected ID and condition in `bench systems` and run '
+        '`bench reset-canary <family>/<model-effort> --condition <condition>`.'
     )

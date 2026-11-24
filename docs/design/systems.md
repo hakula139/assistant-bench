@@ -37,6 +37,8 @@ Harbor records a configuration's family key in the agent kwargs. Collection matc
 | `coding-repo`         | `opus-5.5-claude-code-high`   | `opus-5.5-high`         | `installed` |
 | `coding-repo`         | `gemini-3.8-flash-codex-high` | `gemini-3.8-flash-high` | `installed` |
 
+To migrate an existing condition from a global table to a family alias, keep its recorded family key in `systems`, `reference` or checker `pairs` wherever it already appears. Move its condition settings to `system_aliases` under that key and point `model_effort` at the shared global table. Update scripts that select the old key with `--system` to use the mapped `<family>/<model-effort>` and `--condition`. This change requires no rewrite of trials, closed reports or the fingerprint manifest when the resolved configuration stays the same.
+
 ### Model Swaps
 
 A fingerprint hashes a system's route, so it cannot see an endpoint that serves another model under an unchanged route. Collection therefore checks each pool, the outputs of one system under one fingerprint, for two signals. A pool conflicts when its responses report more than one model, or, in a case family, when its outputs of one case differ by more than the larger of 2 input tokens and 2% of the lower count, a margin that a one-token jitter stays within and another tokenizer exceeds on most cases. Neither signal proves which model answered. A gateway that echoes the requested name hides a backend swap from the model field, and one that recounts tokens with its own tokenizer hides it from the token count. A swap within one tokenizer family, such as a quantized checkpoint or a smaller sibling, passes both signals unless the reported model changes, and so does a provider that recognizes the bench's requests.

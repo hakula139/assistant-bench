@@ -891,6 +891,10 @@ class TestRun:
                 canaries.run([current], run_context)
             assert model not in str(error.value)
             assert 'large-2026' not in str(error.value)
+            assert (
+                '`bench reset-canary <family>/<model-effort> --condition <condition>`'
+                in str(error.value)
+            )
         else:
             canaries.run([current], run_context)
 
