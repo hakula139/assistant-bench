@@ -3,15 +3,18 @@ import json
 import os
 import ssl
 import traceback
+from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import anthropic
 import httpx
 import httpx2
 import openai
 import pytest
+from anyio.streams.tls import TLSStream
 from pydantic import ValidationError
 
 from assistant_bench import jobs
@@ -840,56 +843,87 @@ class TestEndpoint:
                 events.append(name)
 
             async def request() -> bytes:
-                received: asyncio.Future[bytes] = (
-                    asyncio.get_running_loop().create_future()
-                )
+                loop = asyncio.get_running_loop()
+                received: bytes | None = None
+                peer_error: Exception | None = None
+                done = asyncio.Event()
+                tls_timeout = asyncio.timeout(None)
+                wrap_tls = TLSStream.wrap
+
+                async def wrap_until_observed(*args: Any, **kwargs: Any) -> TLSStream:
+                    async with tls_timeout:
+                        return await wrap_tls(*args, **kwargs)
+
+                if not post:
+                    monkeypatch.setattr(TLSStream, 'wrap', wrap_until_observed)
 
                 async def peer(
                     reader: asyncio.StreamReader, writer: asyncio.StreamWriter
                 ) -> None:
+                    nonlocal peer_error, received
                     try:
                         if proxy:
                             headers = await reader.readuntil(b'\r\n\r\n')
                             assert headers.startswith(b'CONNECT 127.0.0.1:443 ')
                             writer.write(b'HTTP/1.1 200 Connection Established\r\n\r\n')
                             await writer.drain()
-                        received.set_result(
-                            await reader.readuntil(b'\r\n\r\n')
-                            if post
-                            else await reader.readexactly(1)
-                        )
-                        if not post:
-                            await reader.read()
+                        if post:
+                            headers = await reader.readuntil(b'\r\n\r\n')
+                            assert await reader.readexactly(2) == b'{}'
+                            received = headers
+                        else:
+                            received = await reader.readexactly(1)
+                            tls_timeout.reschedule(loop.time())
+                            await done.wait()
+                    except Exception as error:
+                        if not done.is_set():
+                            peer_error = error
                     finally:
                         writer.close()
-                        await writer.wait_closed()
+                        with suppress(ConnectionResetError):
+                            await writer.wait_closed()
 
                 server = await asyncio.start_server(peer, '127.0.0.1', 0)
-                async with server:
-                    host, port = server.sockets[0].getsockname()[:2]
-                    scheme = 'http' if post else 'https'
-                    url = f'{scheme}://{host}:{port}/v1/responses'
-                    env = endpoint.env | {BASE_URL_VAR: url}
-                    if proxy:
-                        monkeypatch.setenv('https_proxy', f'http://{host}:{port}')
-                        monkeypatch.setenv('no_proxy', '')
-                        url = env[BASE_URL_VAR] = 'https://127.0.0.1/v1/responses'
-                    else:
-                        env[LOCAL_ADDRESS_VAR] = '127.0.0.1'
-                    configured = Endpoint.read(env.get, 'openai-responses')
-                    async with configured.http_client('openai-responses') as client:
-                        with pytest.raises(
-                            httpx2.RemoteProtocolError
-                            if post
-                            else httpx2.ConnectTimeout
-                        ):
-                            await client.post(
-                                url,
-                                json={},
-                                timeout=httpx2.Timeout(2.0, connect=0.5),
-                                extensions={'trace': trace},
-                            )
-                    return await asyncio.wait_for(received, timeout=2.0)
+                client_error: Exception | None = None
+                try:
+                    async with asyncio.timeout(10), server:
+                        host, port = server.sockets[0].getsockname()[:2]
+                        scheme = 'http' if post else 'https'
+                        url = f'{scheme}://{host}:{port}/v1/responses'
+                        env = endpoint.env | {BASE_URL_VAR: url}
+                        if proxy:
+                            monkeypatch.setenv('https_proxy', f'http://{host}:{port}')
+                            monkeypatch.setenv('no_proxy', '')
+                            url = env[BASE_URL_VAR] = 'https://127.0.0.1/v1/responses'
+                        else:
+                            env[LOCAL_ADDRESS_VAR] = '127.0.0.1'
+                        configured = Endpoint.read(env.get, 'openai-responses')
+                        try:
+                            async with configured.http_client(
+                                'openai-responses'
+                            ) as client:
+                                with pytest.raises(
+                                    httpx2.RemoteProtocolError
+                                    if post
+                                    else httpx2.ConnectTimeout
+                                ):
+                                    await client.post(
+                                        url,
+                                        json={},
+                                        timeout=None,
+                                        extensions={'trace': trace},
+                                    )
+                        finally:
+                            done.set()
+                            server.close_clients()
+                except Exception as error:
+                    client_error = error
+                if peer_error is not None:
+                    raise peer_error from client_error
+                if client_error is not None:
+                    raise client_error
+                assert received is not None
+                return received
 
             received = asyncio.run(request())
             begun_trial.finish(START)
