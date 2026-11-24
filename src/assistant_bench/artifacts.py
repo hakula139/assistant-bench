@@ -11,7 +11,7 @@ from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
-from typing import Annotated, Literal, Self, cast
+from typing import Annotated, Literal, Self, cast, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
@@ -35,7 +35,8 @@ JOB_FILES = (
 )
 TRIAL_FILES = ('config.json', 'lock.json', 'result.json', 'trial.log', 'exception.txt')
 TRIAL_DIRECTORIES = ('agent', 'verifier', 'artifacts')
-GIT_MODES: tuple[str, ...] = ('100644', '100755', '120000')
+GIT_MODES: tuple[str, ...] = get_args(GitMode.__value__)
+_COMPONENT_RE = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.-]*')
 
 
 def audit_trial(root: Path, secrets: set[str]) -> None:
@@ -501,7 +502,7 @@ class ArtifactRepository:
 
     def ensure_publication(self, run_id: str) -> Publication:
         """Find or create the run's exact private branch PR without merging it."""
-        if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]*', run_id):
+        if _COMPONENT_RE.fullmatch(run_id) is None:
             raise InputError('An artifact run ID must be a single path component.')
         branch = f'artifacts/{run_id}'
         _path_parts(branch)
@@ -829,7 +830,7 @@ def _selected_directories(root: Path, trial_name: str) -> Iterator[str]:
 
 
 def _selected_paths(root: Path, trial_name: str) -> Iterator[Path]:
-    if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]*', trial_name):
+    if _COMPONENT_RE.fullmatch(trial_name) is None:
         raise InputError('A trial name must be a single path component.')
     if root.is_symlink() or not root.is_dir():
         raise InputError('The source job must be a regular directory.')
@@ -1010,22 +1011,10 @@ def _restore(
         staged = Path(temporary) / 'contents'
         staged.mkdir(mode=0o700)
         created = {staged}
-        for relative in directories:
+
+        def ensure_dir(parts: Sequence[str]) -> Path:
             directory = staged
-            for component in _path_parts(relative):
-                child = directory / component
-                if child not in created:
-                    if child.is_symlink() or child.exists():
-                        raise InputError(
-                            'Artifact paths collide on the destination filesystem.'
-                        )
-                    child.mkdir()
-                    created.add(child)
-                directory = child
-        for relative, (mode, content) in sorted(files.items()):
-            parts = _path_parts(relative)
-            directory = staged
-            for component in parts[:-1]:
+            for component in parts:
                 child = directory / component
                 if child not in created:
                     if child.is_symlink():
@@ -1039,6 +1028,13 @@ def _restore(
                     child.mkdir()
                     created.add(child)
                 directory = child
+            return directory
+
+        for relative in directories:
+            ensure_dir(_path_parts(relative))
+        for relative, (mode, content) in sorted(files.items()):
+            parts = _path_parts(relative)
+            directory = ensure_dir(parts[:-1])
             path = directory / parts[-1]
             if path.is_symlink() or path.exists():
                 raise InputError(

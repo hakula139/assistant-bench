@@ -10,11 +10,11 @@ from markdown_it.token import Token
 from pydantic import BaseModel, ConfigDict
 
 from assistant_bench.families import CheckContext, CheckRule
+from assistant_bench.scoring.gates import PROSE_FENCES
 
 
 REVISION = 'format-1'
 _MARKDOWN = MarkdownIt('commonmark', {'html': False})
-_PROSE_FENCES = {'md', 'markdown', 'text', 'txt'}
 _TREE_COMMENT = re.compile(r'\S([ \t]+)(#.*)$')
 
 
@@ -127,7 +127,7 @@ def _documents(
     tokens = markdown.parse(source)
     documents = [(source, tokens)]
     for token in tokens:
-        if token.type == 'fence' and token.info.strip().lower() in _PROSE_FENCES:
+        if token.type == 'fence' and token.info.strip().lower() in PROSE_FENCES:
             documents.extend(_documents(token.content, markdown))
     return documents
 
