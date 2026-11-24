@@ -1,10 +1,20 @@
 import { env } from 'cloudflare:workers';
-import { describe, expect, test, vi } from 'vitest';
+import { describe, expect, test } from 'vitest';
 
-import { admitted, browser, call, pairOf, publish, vote, type Browser } from './test/support';
+import { PREVIEW_UNAVAILABLE } from './previews';
+import {
+  admitted,
+  browser,
+  call,
+  duringPlacement,
+  expectIsolation,
+  pairOf,
+  publish,
+  vote,
+  type Browser,
+} from './test/support';
 
 const HTML = 'frontend-fixture';
-const unavailable = 'Preview unavailable. Reload the voting page to try again.';
 const document = (label: string) =>
   `<!doctype html>\r\n<html><head><title>${label}</title></head><body><h1>${label}</h1></body></html>\r\n`;
 
@@ -33,28 +43,6 @@ async function htmlPair(from: Browser) {
     throw new Error('Expected an HTML pair.');
   }
   return pair;
-}
-
-function expectIsolation(response: Response) {
-  expect(response.headers.get('Cache-Control')).toBe('private, no-store');
-  expect(response.headers.get('Content-Security-Policy')?.split('; ').sort()).toEqual(
-    [
-      'sandbox',
-      "default-src 'none'",
-      "style-src 'unsafe-inline'",
-      'img-src data:',
-      'font-src data:',
-      "connect-src 'none'",
-      "form-action 'none'",
-      "base-uri 'none'",
-      "object-src 'none'",
-      "frame-src 'none'",
-    ].sort(),
-  );
-  expect(response.headers.get('X-Frame-Options')).toBe('SAMEORIGIN');
-  expect(response.headers.get('X-DNS-Prefetch-Control')).toBe('off');
-  expect(response.headers.get('Referrer-Policy')).toBe('no-referrer');
-  expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff');
 }
 
 describe('GET /api/previews/:pair/:side', () => {
@@ -94,52 +82,44 @@ describe('GET /api/previews/:pair/:side', () => {
     expect(JSON.stringify(pair)).not.toContain('<html>');
   });
 
-  test.each([
-    ['an invalid UUID', 'invalid-id', 400],
-    ['an invalid side', 'side', 400],
-    ['an unknown pair', 'unknown', 404],
-    ['a different actor', 'actor', 404],
-    ['a text publication', 'render', 404],
-    ['an inactive publication', 'publication', 404],
-    ['no actor cookie', 'cookie', 401],
-  ] as const)(
-    'rejects %s with the same safe body and isolation headers',
-    async (_, scenario, code) => {
-      await publishHtml();
-      let from = await admitted();
-      const pair = await htmlPair(from);
-      let path = `/previews/${pair.id}/a`;
-      if (scenario === 'invalid-id') {
-        path = '/previews/not-a-uuid/a';
-      }
-      if (scenario === 'side') {
-        path = `/previews/${pair.id}/c`;
-      }
-      if (scenario === 'unknown') {
-        path = `/previews/${crypto.randomUUID()}/a`;
-      }
-      if (scenario === 'actor') {
-        from = await admitted('192.0.2.2');
-      }
-      if (scenario === 'render') {
+  test.each<
+    readonly [string, number, (pairId: string) => Promise<{ from?: Browser; path?: string }>]
+  >([
+    ['an invalid UUID', 400, () => Promise.resolve({ path: '/previews/not-a-uuid/a' })],
+    ['an invalid side', 400, (id) => Promise.resolve({ path: `/previews/${id}/c` })],
+    ['an unknown pair', 404, () => Promise.resolve({ path: `/previews/${crypto.randomUUID()}/a` })],
+    ['a different actor', 404, async () => ({ from: await admitted('192.0.2.2') })],
+    [
+      'a text publication',
+      404,
+      async () => {
         await env.DB.prepare("UPDATE publications SET render = 'text' WHERE family = ?")
           .bind(HTML)
           .run();
-      }
-      if (scenario === 'publication') {
+        return {};
+      },
+    ],
+    [
+      'an inactive publication',
+      404,
+      async () => {
         await publishHtml('replacement-publication');
-      }
-      if (scenario === 'cookie') {
-        from = browser();
-      }
+        return {};
+      },
+    ],
+    ['no actor cookie', 401, () => Promise.resolve({ from: browser() })],
+  ])('rejects %s with the same safe body and isolation headers', async (_, code, arrange) => {
+    await publishHtml();
+    const owner = await admitted();
+    const pair = await htmlPair(owner);
+    const { from = owner, path = `/previews/${pair.id}/a` } = await arrange(pair.id);
 
-      const response = await call(from, 'GET', path);
+    const response = await call(from, 'GET', path);
 
-      expect(response.status).toBe(code);
-      expectIsolation(response);
-      expect(await response.text()).toBe(unavailable);
-    },
-  );
+    expect(response.status).toBe(code);
+    expectIsolation(response);
+    expect(await response.text()).toBe(PREVIEW_UNAVAILABLE);
+  });
 
   test.each(['vote', 'skip'] as const)(
     'denies an old preview after %s without falling back to the next pending pair',
@@ -161,7 +141,7 @@ describe('GET /api/previews/:pair/:side', () => {
       expect(following.id).not.toBe(first.id);
       expect(response.status).toBe(404);
       expectIsolation(response);
-      expect(await response.text()).toBe(unavailable);
+      expect(await response.text()).toBe(PREVIEW_UNAVAILABLE);
       if (operation === 'vote') {
         const undone = await call(from, 'POST', '/votes/undo', { family: HTML, pair: first.id });
         expect(undone.status).toBe(204);
@@ -179,29 +159,10 @@ describe('GET /api/previews/:pair/:side', () => {
   test('rejects a concurrent superseded draw and serves only the new publication', async () => {
     await publishHtml();
     const from = await admitted();
-    const prepare = env.DB.prepare.bind(env.DB);
     let replacement: string | undefined;
-    let switched = false;
-    vi.spyOn(env.DB, 'prepare').mockImplementation((query) => {
-      const statement = prepare(query);
-      if (query.includes('"system" in (?, ?)')) {
-        const bind = statement.bind.bind(statement);
-        vi.spyOn(statement, 'bind').mockImplementation((...values) => {
-          const bound = bind(...values);
-          const all = bound.all.bind(bound);
-          vi.spyOn(bound, 'all').mockImplementation(async <T>() => {
-            const result = await all<T>();
-            if (!switched) {
-              switched = true;
-              await publishHtml('replacement-publication', 'New ');
-              replacement = (await htmlPair(from)).id;
-            }
-            return result;
-          });
-          return bound;
-        });
-      }
-      return statement;
+    duringPlacement(async () => {
+      await publishHtml('replacement-publication', 'New ');
+      replacement = (await htmlPair(from)).id;
     });
 
     const response = await call(from, 'GET', `/pair?family=${HTML}`);

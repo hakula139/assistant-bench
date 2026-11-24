@@ -8,18 +8,16 @@ import { expect, test } from 'vitest';
 
 import worker from './index';
 import { PAIR_RETENTION_MS, TAG_RETENTION_MS } from './limits';
-import { admitted, pairOf, seedVote, WRITING } from './test/support';
-
-const FIRST = '32be94015839ac0131d6874ffcc11c79f78e8059790f678d80fa7008a1286c22';
+import { admitted, FIRST_CASE, pairOf, seedVote, WRITING } from './test/support';
 
 test('the daily cron clears IP tags after 60 days and pairs 30 days after issue', async () => {
   const now = Date.now();
-  await seedVote(WRITING, FIRST, ['acme-large', 'acme-small'], {
+  await seedVote(WRITING, FIRST_CASE, ['acme-large', 'acme-small'], {
     actor: 'old',
     ipTag: 'old-tag',
     recordedAt: now - TAG_RETENTION_MS - 60_000,
   });
-  await seedVote(WRITING, FIRST, ['acme-large', 'acme-pro'], {
+  await seedVote(WRITING, FIRST_CASE, ['acme-large', 'acme-pro'], {
     actor: 'recent',
     ipTag: 'recent-tag',
     recordedAt: now - TAG_RETENTION_MS + 60_000,

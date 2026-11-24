@@ -1,16 +1,16 @@
 import { env, exports } from 'cloudflare:workers';
 import { sql, type Compilable } from 'kysely';
-import { vi } from 'vitest';
+import { expect, vi } from 'vitest';
 
 import type { PairState, PairView } from '@/lib/arena';
 
-import { all, batch, first, queries } from '../db';
+import { all, batch, first, onPairOutputA, onPairOutputB, queries } from '../db';
 
 export const ORIGIN = 'http://localhost:8790';
 export const WRITING = 'writing-fixture';
 export const CODING = 'coding-fixture';
+export const FIRST_CASE = '32be94015839ac0131d6874ffcc11c79f78e8059790f678d80fa7008a1286c22';
 
-/** One browser: the address it sends from and the cookie it holds. */
 export interface Browser {
   ip: string;
   cookie: string | null;
@@ -18,7 +18,6 @@ export interface Browser {
 
 export const browser = (ip = '192.0.2.1'): Browser => ({ ip, cookie: null });
 
-/** Sends a request as the browser would, keeping any cookie the Worker sets. */
 export async function call(
   from: Browser,
   method: 'GET' | 'POST',
@@ -56,7 +55,6 @@ export async function freshWindow(needed = 5000): Promise<void> {
   }
 }
 
-/** Answers Turnstile's siteverify with `result`, and records each verification request. */
 export function stubSiteverify(result: { success: boolean; hostname?: string }) {
   const original = globalThis.fetch;
   return vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
@@ -67,7 +65,6 @@ export function stubSiteverify(result: { success: boolean; hostname?: string }) 
   });
 }
 
-/** A browser that passed admission. */
 export async function admitted(ip?: string): Promise<Browser> {
   const from = browser(ip);
   const verify = stubSiteverify({ success: true, hostname: env.TURNSTILE_HOSTNAME });
@@ -99,29 +96,71 @@ export async function pairOf(from: Browser, family = WRITING): Promise<PairState
   return response.json();
 }
 
-/** The pending pair's case and its systems as A and B, read from the store. */
 export async function pendingRow(pair: string) {
   return first(
     env.DB,
     queries
-      .selectFrom('pairs')
-      .innerJoin('outputs as a', (join) =>
-        join
-          .onRef('a.publication_id', '=', 'pairs.publication_id')
-          .onRef('a.output_key', '=', 'pairs.a_output'),
-      )
-      .innerJoin('outputs as b', (join) =>
-        join
-          .onRef('b.publication_id', '=', 'pairs.publication_id')
-          .onRef('b.output_key', '=', 'pairs.b_output'),
-      )
+      .selectFrom('pending_pairs as pairs')
+      .innerJoin('outputs as a', onPairOutputA)
+      .innerJoin('outputs as b', onPairOutputB)
       .select(['pairs.case_key', 'a.system as a_system', 'b.system as b_system', 'pairs.issued_at'])
       .where('pairs.id', '=', pair),
   );
 }
 
+export const systemsOf = (row: { a_system: string; b_system: string } | null) =>
+  row === null ? null : [row.a_system, row.b_system].sort();
+
 export async function vote(from: Browser, pair: string, choice = 'a') {
   return call(from, 'POST', '/votes', { pair, choice, defects: { a: [], b: [] } });
+}
+
+export function duringPlacement(action: () => Promise<void>): void {
+  const prepare = env.DB.prepare.bind(env.DB);
+  let interrupted = false;
+  vi.spyOn(env.DB, 'prepare').mockImplementation((query) => {
+    const statement = prepare(query);
+    if (query.includes('"system" in (?, ?)')) {
+      const bind = statement.bind.bind(statement);
+      vi.spyOn(statement, 'bind').mockImplementation((...values) => {
+        const bound = bind(...values);
+        const allRows = bound.all.bind(bound);
+        vi.spyOn(bound, 'all').mockImplementation(async <T>() => {
+          const result = await allRows<T>();
+          if (!interrupted) {
+            interrupted = true;
+            await action();
+          }
+          return result;
+        });
+        return bound;
+      });
+    }
+    return statement;
+  });
+}
+
+export function expectIsolation(response: Response, extraCsp: readonly string[] = []): void {
+  expect(response.headers.get('Cache-Control')).toBe('private, no-store');
+  expect(response.headers.get('Content-Security-Policy')?.split('; ').sort()).toEqual(
+    [
+      'sandbox',
+      "default-src 'none'",
+      "style-src 'unsafe-inline'",
+      'img-src data:',
+      'font-src data:',
+      "connect-src 'none'",
+      "form-action 'none'",
+      "base-uri 'none'",
+      "object-src 'none'",
+      "frame-src 'none'",
+      ...extraCsp,
+    ].sort(),
+  );
+  expect(response.headers.get('X-Frame-Options')).toBe('SAMEORIGIN');
+  expect(response.headers.get('X-DNS-Prefetch-Control')).toBe('off');
+  expect(response.headers.get('Referrer-Policy')).toBe('no-referrer');
+  expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff');
 }
 
 /**
@@ -149,6 +188,7 @@ export async function publish(
       created_at: 0,
     }),
   ];
+
   for (const [caseKey, systems] of Object.entries(cases)) {
     statements.push(
       queries.insertInto('cases').values({
@@ -179,6 +219,7 @@ export async function publish(
       });
     }
   }
+
   statements.push(
     queries
       .insertInto('publication_pair_cases')
@@ -223,6 +264,7 @@ export async function publish(
           ]),
       ),
   );
+
   statements.push(
     queries
       .insertInto('active')
@@ -236,7 +278,7 @@ export async function publish(
   await batch(env.DB, statements);
 }
 
-/** Records a counted vote from a separate actor, for coverage. */
+/** Inserts a vote row for the active publication, defaulting to a new actor and no exclusion. */
 export async function seedVote(
   family: string,
   caseKey: string,

@@ -7,18 +7,14 @@ export type PublicBindings = Cloudflare.ProductionEnv | Cloudflare.StagingEnv | 
 /** The bindings of every environment that runs the Worker, which the preview Worker lacks. */
 export type Bindings = PublicBindings | Cloudflare.PrivateEnv;
 
-/** The Hono environment of every route. */
 export interface Api {
   Bindings: Bindings;
   Variables: {
-    /** The keyed tag of the request's network. */
     tag: string;
-    /** The actor the request's cookie names under a valid signature, not yet looked up. */
     claimed: string | null;
   };
 }
 
-/** A failure the browser sees as its fixed code, with no other detail. */
 export class ApiError extends Error {
   constructor(
     readonly status: ContentfulStatusCode,

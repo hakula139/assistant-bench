@@ -33,11 +33,10 @@ import { ApiError, type Api, type Bindings } from './api';
 import { all, queries } from './db';
 import { BODY_LIMIT_BYTES } from './limits';
 import { pairBatch, pairState, skip, type PairSnapshot } from './pairs';
-import { preview, previewHeaders, previewUnavailable } from './previews';
+import { preview, PREVIEW_HEADERS, PREVIEW_UNAVAILABLE } from './previews';
 import { retain } from './retention';
 import { confirm, record, recordBatch, undo } from './votes';
 
-/** Answers every request that fails its schema with 400 `invalid_request`. */
 function rejectInvalid(result: { success: boolean }) {
   if (!result.success) {
     throw new ApiError(400, 'invalid_request');
@@ -53,6 +52,16 @@ function address(request: Request): string {
   return value;
 }
 
+function isPreview(c: Context<Api>): boolean {
+  return c.req.path.startsWith('/api/previews/');
+}
+
+function applyPreviewHeaders(c: Pick<Context<Api>, 'header'>): void {
+  for (const [name, value] of Object.entries(PREVIEW_HEADERS)) {
+    c.header(name, value);
+  }
+}
+
 function pairResponse(c: Context<Api>, { state, undoPair }: PairSnapshot) {
   c.header(UNDO_HEADER, undoPair ?? UNDO_NONE);
   return c.json(state);
@@ -63,23 +72,25 @@ function respondError(error: Error, c: Context<Api>) {
     error = new ApiError(400, 'invalid_request');
   }
   if (error instanceof ApiError) {
-    if (c.req.path.startsWith('/api/previews/')) {
-      return c.text(previewUnavailable, error.status);
+    if (isPreview(c)) {
+      return c.text(PREVIEW_UNAVAILABLE, error.status);
     }
+
     const body: ErrorView =
       error.code === 'admission_required' && c.env.STORE !== 'private'
         ? { error: error.code, sitekey: c.env.TURNSTILE_SITEKEY }
         : { error: error.code };
     return c.json(body, error.status);
   }
+
   // With invocation logs off, this record is all Workers Logs keep: never an address or cookie.
   console.error({
     route: `${c.req.method} ${routePath(c)}`,
     message: error.message,
     stack: error.stack,
   });
-  return c.req.path.startsWith('/api/previews/')
-    ? c.text(previewUnavailable, 500)
+  return isPreview(c)
+    ? c.text(PREVIEW_UNAVAILABLE, 500)
     : c.json({ error: 'unavailable' } satisfies ErrorView, 500);
 }
 
@@ -87,9 +98,7 @@ const api = new Hono<Api>()
   .basePath('/api')
   .use('/previews/*', async (c, next) => {
     await next();
-    for (const [name, value] of Object.entries(previewHeaders)) {
-      c.header(name, value);
-    }
+    applyPreviewHeaders(c);
   })
   .use(async (c, next) => {
     await next();
@@ -115,6 +124,7 @@ const api = new Hono<Api>()
     if (c.env.STORE === 'private' && c.get('claimed') !== c.env.PRIVATE_ACTOR_ID) {
       throw new ApiError(401, 'reload_required');
     }
+
     const { success } = await c.env.RATE_LIMIT.limit({ key: c.get('claimed') ?? c.get('tag') });
     if (!success) {
       throw new ApiError(429, 'rate_limited');
@@ -138,6 +148,7 @@ const api = new Hono<Api>()
       await requireActor(c, now);
       return c.body(null, 204);
     }
+
     if (!(await knownActor(c.env.DB, c.get('claimed'), now))) {
       await verifyChallenge(c.env, c.req.valid('json').token, address(c.req.raw));
       await issueCookie(c, await admit(c.env.DB, c.get('tag'), now));
@@ -158,11 +169,6 @@ const api = new Hono<Api>()
     const { family, count } = c.req.valid('json');
     const pairs = await pairBatch(c.env.DB, c.env.ACTOR_KEY, actor, family, count, now);
     return c.json({ pairs });
-  })
-  .get('/previews/:pair/:side', sValidator('param', previewRequest, rejectInvalid), async (c) => {
-    const actor = await requireActor(c, Date.now());
-    const { pair, side } = c.req.valid('param');
-    return c.html(await preview(c.env.DB, actor, pair, side));
   })
   .post('/pair/skip', sValidator('json', skipRequest, rejectInvalid), async (c) => {
     const now = Date.now();
@@ -194,28 +200,33 @@ const api = new Hono<Api>()
     const actor = await requireActor(c, now);
     await undo(c.env.DB, actor, c.req.valid('json'), now);
     return c.body(null, 204);
+  })
+  .get('/previews/:pair/:side', sValidator('param', previewRequest, rejectInvalid), async (c) => {
+    const actor = await requireActor(c, Date.now());
+    const { pair, side } = c.req.valid('param');
+    return c.html(await preview(c.env.DB, actor, pair, side));
   });
 
 export const app = new Hono<Api>()
   .use(async (c, next) => {
     if (c.env.STORE === 'private') {
-      c.header('Cache-Control', 'no-store');
-      c.header('Content-Security-Policy', "frame-ancestors 'self'");
-      c.header('X-Frame-Options', 'SAMEORIGIN');
-      if (c.req.path.startsWith('/api/previews/')) {
-        for (const [name, value] of Object.entries(previewHeaders)) {
-          c.header(name, value);
-        }
-      }
       if (
         new URL(c.req.url).origin !== c.env.APP_ORIGIN ||
         !(await verifyOwner(c.req.raw, c.env))
       ) {
-        c.res = c.json({ error: 'forbidden' } satisfies ErrorView, 403);
+        c.res = isPreview(c)
+          ? c.text(PREVIEW_UNAVAILABLE, 403)
+          : c.json({ error: 'forbidden' } satisfies ErrorView, 403);
       } else {
         await next();
       }
-      c.header('Cache-Control', 'no-store');
+
+      if (isPreview(c)) {
+        applyPreviewHeaders(c);
+      } else {
+        c.header('Cache-Control', 'no-store');
+      }
+
       const policy = (c.res.headers.get('Content-Security-Policy') ?? '')
         .split(';')
         .map((directive) => directive.trim())
@@ -225,6 +236,7 @@ export const app = new Hono<Api>()
       c.header('X-Frame-Options', 'SAMEORIGIN');
       return;
     }
+
     await next();
   })
   .route('/', api)
@@ -232,6 +244,7 @@ export const app = new Hono<Api>()
     if (c.env.STORE !== 'private' || c.req.path.startsWith('/api/')) {
       return c.notFound();
     }
+
     c.res = await c.env.ASSETS.fetch(c.req.raw);
     if (
       c.req.method === 'GET' &&
@@ -245,8 +258,8 @@ export const app = new Hono<Api>()
     return c.res;
   })
   .notFound((c) =>
-    c.req.path.startsWith('/api/previews/')
-      ? c.text(previewUnavailable, 404)
+    isPreview(c)
+      ? c.text(PREVIEW_UNAVAILABLE, 404)
       : c.json({ error: 'not_found' } satisfies ErrorView, 404),
   )
   .onError(respondError);

@@ -12,11 +12,13 @@ export const UNDO_HEADER = 'Arena-Undo';
 export const UNDO_NONE = 'none';
 export const MAX_BATCH_VOTES = 8;
 export const choiceSchema = z.enum(['a', 'b', 'tie', 'both_bad']);
+
 const defectSchema = z.enum(defects);
 export const taggedDefects = z.strictObject({
   a: z.array(defectSchema),
   b: z.array(defectSchema),
 });
+
 const count = z.int().check(z.nonnegative());
 
 // ── Requests ──
@@ -24,18 +26,22 @@ const count = z.int().check(z.nonnegative());
 export const admissionRequest = z.strictObject({
   token: z.string().check(z.minLength(1), z.maxLength(2048)),
 });
+
 export const familyQuery = z.strictObject({ family: familyName });
 export const skipRequest = z.strictObject({ pair: pairId });
 export const previewRequest = z.strictObject({ pair: pairId, side: z.enum(['a', 'b']) });
+
 export const voteRequest = z.strictObject({
   pair: pairId,
   choice: choiceSchema,
   defects: taggedDefects,
 });
+
 export const pairBatchRequest = z.strictObject({
   family: familyName,
   count: z.int().check(z.positive(), z.maximum(MAX_BATCH_VOTES)),
 });
+
 export const voteBatchRequest = z.strictObject({
   family: familyName,
   votes: z.array(voteRequest).check(
@@ -44,7 +50,9 @@ export const voteBatchRequest = z.strictObject({
     z.refine((votes) => new Set(votes.map(({ pair }) => pair)).size === votes.length),
   ),
 });
+
 export const undoRequest = z.strictObject({ family: familyName, pair: pairId });
+
 // ── Responses ──
 
 export const familiesView = z.strictObject({
@@ -56,6 +64,7 @@ export const familiesView = z.strictObject({
     }),
   ),
 });
+
 const pairFields = {
   id: pairId,
   instruction: z.string(),
@@ -67,17 +76,21 @@ export const pairView = z.discriminatedUnion('render', [
   z.strictObject({ ...pairFields, render: z.enum(['text', 'diff']), a: z.string(), b: z.string() }),
   z.strictObject({ ...pairFields, render: z.literal('html') }),
 ]);
+
 export const pairState = z.strictObject({
   pair: z.nullable(pairView),
   votes: count,
   remaining: count,
   undo: z.boolean(),
 });
+
 export const pairBatchView = z.strictObject({ pairs: z.array(pairView) });
+
 const voteStatus = z.enum(['recorded', 'identical', 'stale_pair', 'invalid_request']);
 export const voteBatchView = z.strictObject({
   votes: z.array(z.strictObject({ pair: pairId, status: voteStatus })),
 });
+
 const errorCode = z.enum([
   'invalid_request',
   'forbidden',

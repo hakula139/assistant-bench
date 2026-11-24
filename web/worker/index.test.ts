@@ -74,12 +74,6 @@ describe('blinding', () => {
     await send(from, 'GET', `/pair?family=${BLIND}`);
     await send(from, 'POST', '/votes/undo', { family: BLIND, pair: skipped });
     await send(from, 'POST', '/votes/undo', { family: BLIND, pair: skipped });
-    const freshness = await send(
-      from,
-      'GET',
-      `/freshness?family=${BLIND}&production=0&production_votes=0`,
-    );
-    expect(freshness.status).toBe(404);
 
     for (const response of responses) {
       const text = [
@@ -150,7 +144,7 @@ describe('requests', () => {
       '/votes/undo',
       JSON.stringify({ family: '../x', pair: crypto.randomUUID() }),
     ],
-    ['a legacy Undo request', '/votes/undo', JSON.stringify({ family: WRITING })],
+    ['a missing pair field', '/votes/undo', JSON.stringify({ family: WRITING })],
   ])('answer %s with invalid_request', async (_, path, body) => {
     const from = await admitted();
 

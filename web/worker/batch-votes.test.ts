@@ -18,7 +18,9 @@ import {
   call,
   CODING,
   pairOf,
+  pendingRow,
   publish,
+  systemsOf,
   WRITING,
   type Browser,
 } from './test/support';
@@ -70,17 +72,7 @@ describe('batch voting', () => {
     const from = await admitted();
     const [first, second] = await offered(from, 2);
     await env.DB.prepare('UPDATE batch_pairs SET issued_at = 0').run();
-    const comparison = (id: string) =>
-      env.DB.prepare(
-        `SELECT min(a.system, b.system) AS low, max(a.system, b.system) AS high
-         FROM batch_pairs AS pairs
-         JOIN outputs AS a ON a.publication_id = pairs.publication_id AND a.output_key = pairs.a_output
-         JOIN outputs AS b ON b.publication_id = pairs.publication_id AND b.output_key = pairs.b_output
-         WHERE pairs.id = ?`,
-      )
-        .bind(id)
-        .first();
-    const systems = await comparison(first.id);
+    const systems = systemsOf(await pendingRow(first.id));
 
     const response = await call(from, 'POST', '/pair/skip', { pair: first.id });
 
@@ -88,7 +80,7 @@ describe('batch voting', () => {
     const { pair } = z.parse(pairState, await response.json());
     expect(pair?.id).not.toBe(first.id);
     expect(pair?.instruction).not.toBe(first.instruction);
-    expect(await comparison(pair?.id ?? '')).toEqual(systems);
+    expect(systemsOf(await pendingRow(pair?.id ?? ''))).toEqual(systems);
     expect((await pairOf(from)).pair).toEqual(pair);
     expect(await offered(from, 2)).toEqual([pair, second]);
   });
@@ -183,7 +175,6 @@ describe('batch voting', () => {
       const from = await admitted();
       const [first] = await offered(from, 1);
       const ordinary = crypto.randomUUID();
-      // A preceding Worker can still issue an ordinary receipt while a batch slot exists.
       await env.DB.prepare(
         `INSERT INTO pairs (id, actor_id, family, publication_id, case_key, a_output, b_output, issued_at)
        SELECT ?, actor_id, family, publication_id, case_key, a_output, b_output, issued_at
