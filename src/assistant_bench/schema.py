@@ -1,11 +1,11 @@
 """SQLAlchemy metadata declarations mirroring the vote-store and private SQL schemas."""
 
-from sqlalchemy import ForeignKey, Integer, Text
+from sqlalchemy import Integer, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
 class Base(DeclarativeBase):
-    """Metadata-only base for Core queries; classes are never instantiated."""
+    """Metadata-only base for Core queries whose subclasses are never instantiated."""
 
 
 # ── Vote Store ──
@@ -31,9 +31,7 @@ class Publications(Base):
 class Cases(Base):
     __tablename__ = 'cases'
 
-    publication_id: Mapped[str] = mapped_column(
-        Text, ForeignKey('publications.id'), primary_key=True
-    )
+    publication_id: Mapped[str] = mapped_column(Text, primary_key=True)
     case_key: Mapped[str] = mapped_column(Text, primary_key=True)
     category: Mapped[str] = mapped_column(Text, nullable=False)
     instruction: Mapped[str] = mapped_column(Text, nullable=False)
@@ -61,9 +59,7 @@ class Active(Base):
     __tablename__ = 'active'
 
     family: Mapped[str] = mapped_column(Text, primary_key=True)
-    publication_id: Mapped[str] = mapped_column(
-        Text, ForeignKey('publications.id'), nullable=False
-    )
+    publication_id: Mapped[str] = mapped_column(Text, nullable=False)
     activated_at: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
@@ -79,7 +75,7 @@ class Pairs(Base):
     __tablename__ = 'pairs'
 
     id: Mapped[str] = mapped_column(Text, primary_key=True)
-    actor_id: Mapped[str] = mapped_column(Text, ForeignKey('actors.id'), nullable=False)
+    actor_id: Mapped[str] = mapped_column(Text, nullable=False)
     family: Mapped[str] = mapped_column(Text, nullable=False)
     publication_id: Mapped[str] = mapped_column(Text, nullable=False)
     case_key: Mapped[str] = mapped_column(Text, nullable=False)
@@ -91,9 +87,9 @@ class Pairs(Base):
 class Votes(Base):
     __tablename__ = 'votes'
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    pair_id: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
-    actor_id: Mapped[str] = mapped_column(Text, ForeignKey('actors.id'), nullable=False)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    pair_id: Mapped[str] = mapped_column(Text, nullable=False)
+    actor_id: Mapped[str] = mapped_column(Text, nullable=False)
     family: Mapped[str] = mapped_column(Text, nullable=False)
     publication_id: Mapped[str] = mapped_column(Text, nullable=False)
     case_key: Mapped[str] = mapped_column(Text, nullable=False)
@@ -121,9 +117,7 @@ class PairVoteCounts(Base):
 class PublicationPairCases(Base):
     __tablename__ = 'publication_pair_cases'
 
-    publication_id: Mapped[str] = mapped_column(
-        Text, ForeignKey('publications.id'), primary_key=True
-    )
+    publication_id: Mapped[str] = mapped_column(Text, primary_key=True)
     low_system: Mapped[str] = mapped_column(Text, primary_key=True)
     high_system: Mapped[str] = mapped_column(Text, primary_key=True)
     case_keys: Mapped[str] = mapped_column(Text, nullable=False)
@@ -133,7 +127,7 @@ class BatchPairs(Base):
     __tablename__ = 'batch_pairs'
 
     id: Mapped[str] = mapped_column(Text, primary_key=True)
-    actor_id: Mapped[str] = mapped_column(Text, ForeignKey('actors.id'), nullable=False)
+    actor_id: Mapped[str] = mapped_column(Text, nullable=False)
     family: Mapped[str] = mapped_column(Text, nullable=False)
     publication_id: Mapped[str] = mapped_column(Text, nullable=False)
     case_key: Mapped[str] = mapped_column(Text, nullable=False)
@@ -170,7 +164,7 @@ class AttemptClaims(Base):
     __tablename__ = 'attempt_claims'
 
     id: Mapped[str] = mapped_column(Text, primary_key=True)
-    run_id: Mapped[str] = mapped_column(Text, ForeignKey('runs.id'), nullable=False)
+    run_id: Mapped[str] = mapped_column(Text, nullable=False)
     scope: Mapped[str] = mapped_column(Text, nullable=False)
     slot_key: Mapped[str] = mapped_column(Text, nullable=False)
     trial: Mapped[str] = mapped_column(Text, nullable=False)
@@ -186,9 +180,7 @@ class AttemptStarts(Base):
     __tablename__ = 'attempt_starts'
 
     id: Mapped[str] = mapped_column(Text, primary_key=True)
-    claim_id: Mapped[str] = mapped_column(
-        Text, ForeignKey('attempt_claims.id'), nullable=False
-    )
+    claim_id: Mapped[str] = mapped_column(Text, nullable=False)
     started_at: Mapped[str] = mapped_column(Text, nullable=False)
 
 
@@ -199,12 +191,8 @@ class AttemptEntries(Base):
     job: Mapped[str] = mapped_column(Text, primary_key=True)
     trial: Mapped[str] = mapped_column(Text, primary_key=True)
     started_at: Mapped[str] = mapped_column(Text, primary_key=True)
-    claim_id: Mapped[str | None] = mapped_column(
-        Text, ForeignKey('attempt_claims.id'), nullable=True
-    )
-    attempt_id: Mapped[str | None] = mapped_column(
-        Text, ForeignKey('attempt_starts.id'), nullable=True, unique=True
-    )
+    claim_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    attempt_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     entry_json: Mapped[str] = mapped_column(Text, nullable=False)
 
 
@@ -212,25 +200,21 @@ class RequestAdmissions(Base):
     __tablename__ = 'request_admissions'
 
     id: Mapped[str] = mapped_column(Text, primary_key=True)
-    attempt_id: Mapped[str] = mapped_column(
-        Text, ForeignKey('attempt_starts.id'), nullable=False
-    )
+    attempt_id: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
 
 
 class RequestReceipts(Base):
     __tablename__ = 'request_receipts'
 
-    request_id: Mapped[str] = mapped_column(
-        Text, ForeignKey('request_admissions.id'), primary_key=True
-    )
+    request_id: Mapped[str] = mapped_column(Text, primary_key=True)
     receipt_json: Mapped[str] = mapped_column(Text, nullable=False)
 
 
 class TrialArtifacts(Base):
     __tablename__ = 'trial_artifacts'
 
-    run_id: Mapped[str] = mapped_column(Text, ForeignKey('runs.id'), primary_key=True)
+    run_id: Mapped[str] = mapped_column(Text, primary_key=True)
     trial_id: Mapped[str] = mapped_column(Text, primary_key=True)
     source_trial_id: Mapped[str] = mapped_column(Text, nullable=False)
     commit_sha: Mapped[str] = mapped_column(Text, nullable=False)
@@ -241,9 +225,7 @@ class TrialArtifacts(Base):
 class ClaimArtifacts(Base):
     __tablename__ = 'claim_artifacts'
 
-    claim_id: Mapped[str] = mapped_column(
-        Text, ForeignKey('attempt_claims.id'), primary_key=True
-    )
+    claim_id: Mapped[str] = mapped_column(Text, primary_key=True)
     run_id: Mapped[str] = mapped_column(Text, nullable=False)
     trial_id: Mapped[str] = mapped_column(Text, nullable=False)
 
@@ -265,9 +247,7 @@ class Collections(Base):
 class CollectionOutputs(Base):
     __tablename__ = 'collection_outputs'
 
-    collection_id: Mapped[str] = mapped_column(
-        Text, ForeignKey('collections.id'), primary_key=True
-    )
+    collection_id: Mapped[str] = mapped_column(Text, primary_key=True)
     position: Mapped[int] = mapped_column(Integer, primary_key=True)
     output_key: Mapped[str] = mapped_column(Text, nullable=False)
     output_json: Mapped[str] = mapped_column(Text, nullable=False)
@@ -283,7 +263,7 @@ class ActiveCollections(Base):
 class CanaryRecords(Base):
     __tablename__ = 'canary_records'
 
-    run_id: Mapped[str] = mapped_column(Text, ForeignKey('runs.id'), primary_key=True)
+    run_id: Mapped[str] = mapped_column(Text, primary_key=True)
     system: Mapped[str] = mapped_column(Text, nullable=False)
     record_json: Mapped[str] = mapped_column(Text, nullable=False)
 
@@ -293,21 +273,15 @@ class CanaryBaselines(Base):
 
     system: Mapped[str] = mapped_column(Text, primary_key=True)
     context_key: Mapped[str] = mapped_column(Text, primary_key=True)
-    run_id: Mapped[str] = mapped_column(
-        Text, ForeignKey('canary_records.run_id'), nullable=False
-    )
+    run_id: Mapped[str] = mapped_column(Text, nullable=False)
 
 
 class PublicationPreparations(Base):
     __tablename__ = 'publication_preparations'
 
-    publication_id: Mapped[str] = mapped_column(
-        Text, ForeignKey('publications.id'), primary_key=True
-    )
+    publication_id: Mapped[str] = mapped_column(Text, primary_key=True)
     target: Mapped[str] = mapped_column(Text, nullable=False)
-    collection_id: Mapped[str] = mapped_column(
-        Text, ForeignKey('collections.id'), nullable=False
-    )
+    collection_id: Mapped[str] = mapped_column(Text, nullable=False)
     case_revision: Mapped[str | None] = mapped_column(Text, nullable=True)
     prepared_at: Mapped[str] = mapped_column(Text, nullable=False)
 
@@ -333,9 +307,7 @@ class VoteSnapshots(Base):
 class VoteSnapshotStores(Base):
     __tablename__ = 'vote_snapshot_stores'
 
-    snapshot_id: Mapped[str] = mapped_column(
-        Text, ForeignKey('vote_snapshots.id'), primary_key=True
-    )
+    snapshot_id: Mapped[str] = mapped_column(Text, primary_key=True)
     target: Mapped[str] = mapped_column(Text, primary_key=True)
     publication_id: Mapped[str] = mapped_column(Text, nullable=False)
     reference: Mapped[str] = mapped_column(Text, nullable=False)
@@ -343,9 +315,7 @@ class VoteSnapshotStores(Base):
     defects_json: Mapped[str] = mapped_column(Text, nullable=False)
     cutoff: Mapped[int] = mapped_column(Integer, nullable=False)
     excluded: Mapped[int] = mapped_column(Integer, nullable=False)
-    output_generation_id: Mapped[str | None] = mapped_column(
-        Text, ForeignKey('collections.id'), nullable=True
-    )
+    output_generation_id: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class VoteSnapshotCases(Base):
@@ -378,15 +348,13 @@ class VoteSnapshotVotes(Base):
 class PendingTrialArtifacts(Base):
     __tablename__ = 'pending_trial_artifacts'
 
-    run_id: Mapped[str] = mapped_column(Text, ForeignKey('runs.id'), primary_key=True)
+    run_id: Mapped[str] = mapped_column(Text, primary_key=True)
     trial_id: Mapped[str] = mapped_column(Text, primary_key=True)
     source_trial_id: Mapped[str] = mapped_column(Text, nullable=False)
     staged_commit_sha: Mapped[str] = mapped_column(Text, nullable=False)
     path: Mapped[str] = mapped_column(Text, nullable=False)
     manifest_digest: Mapped[str] = mapped_column(Text, nullable=False)
-    authorized_claim_id: Mapped[str | None] = mapped_column(
-        Text, ForeignKey('attempt_claims.id'), nullable=True, unique=True
-    )
+    authorized_claim_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     publication_ready: Mapped[int] = mapped_column(Integer, nullable=False)
     canonical_commit_sha: Mapped[str | None] = mapped_column(Text, nullable=True)
 

@@ -259,8 +259,8 @@ def mark(database: Database, manifest: Mapping[str, int], now: datetime) -> None
                     deployed.hour_slot > candidates.hour_slot,
                     or_(
                         candidates.published_at.is_(None),
-                        func.date(deployed.hour_slot / 1000, 'unixepoch')
-                        == func.date(candidates.hour_slot / 1000, 'unixepoch'),
+                        func.date(deployed.hour_slot // 1000, 'unixepoch')
+                        == func.date(candidates.hour_slot // 1000, 'unixepoch'),
                     ),
                 )
             )

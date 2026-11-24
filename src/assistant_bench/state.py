@@ -381,9 +381,7 @@ class State:
             return True
         previous = fetch_one(
             self._database,
-            select(starts.id, starts.claim_id, starts.started_at).where(
-                starts.id == attempt.id
-            ),
+            select(starts).where(starts.id == attempt.id),
             AttemptStart,
         )
         if previous is not None and previous != attempt:
@@ -443,9 +441,7 @@ class State:
             return True
         previous = fetch_one(
             self._database,
-            select(requests.id, requests.attempt_id, requests.created_at).where(
-                requests.id == request.id
-            ),
+            select(requests).where(requests.id == request.id),
             RequestAdmission,
         )
         if previous is not None and previous != request:
@@ -475,10 +471,10 @@ class State:
         A missing receipt is None and means unknown usage.
         Unrecorded requests exclude every attempt covered by a final Entry.
         """
-        requests = aliased(schema.RequestAdmissions, name='requests')
-        receipts = aliased(schema.RequestReceipts, name='receipts')
-        starts = aliased(schema.AttemptStarts, name='starts')
-        claims = aliased(schema.AttemptClaims, name='claims')
+        requests = schema.RequestAdmissions
+        receipts = schema.RequestReceipts
+        starts = schema.AttemptStarts
+        claims = schema.AttemptClaims
         entries = schema.AttemptEntries
         stmt = (
             select(
@@ -504,10 +500,10 @@ class State:
 
     def trial_requests(self, run_id: str, trial_id: str) -> list[Row]:
         """Read canonical receipts for admissions belonging to one exact trial."""
-        requests = aliased(schema.RequestAdmissions, name='requests')
-        starts = aliased(schema.AttemptStarts, name='starts')
-        claims = aliased(schema.AttemptClaims, name='claims')
-        receipts = aliased(schema.RequestReceipts, name='receipts')
+        requests = schema.RequestAdmissions
+        starts = schema.AttemptStarts
+        claims = schema.AttemptClaims
+        receipts = schema.RequestReceipts
         return execute(
             self._database,
             select(requests.id.label('request_id'), receipts.receipt_json)
@@ -541,8 +537,8 @@ class State:
 
         started_at = cast(str, entry['started_at'])
         entries = schema.AttemptEntries
-        claims = aliased(schema.AttemptClaims, name='claims')
-        starts = aliased(schema.AttemptStarts, name='starts')
+        claims = schema.AttemptClaims
+        starts = schema.AttemptStarts
         runs = schema.Runs
         execute(
             self._database,
@@ -617,12 +613,12 @@ class State:
 
     def accounting(self, scope: str) -> list[Row]:
         """Read final entries and uncovered admitted requests in one snapshot."""
-        entries = aliased(schema.AttemptEntries, name='entries')
-        requests = aliased(schema.RequestAdmissions, name='requests')
-        starts = aliased(schema.AttemptStarts, name='starts')
-        claims = aliased(schema.AttemptClaims, name='claims')
+        entries = schema.AttemptEntries
+        requests = schema.RequestAdmissions
+        starts = schema.AttemptStarts
+        claims = schema.AttemptClaims
         runs = schema.Runs
-        receipts = aliased(schema.RequestReceipts, name='receipts')
+        receipts = schema.RequestReceipts
         covering = aliased(schema.AttemptEntries, name='covering')
 
         entry_rows = select(
@@ -733,17 +729,7 @@ class State:
         return tuple(
             fetch_all(
                 self._database,
-                select(
-                    pending.run_id,
-                    pending.trial_id,
-                    pending.source_trial_id,
-                    pending.staged_commit_sha,
-                    pending.path,
-                    pending.manifest_digest,
-                    pending.authorized_claim_id,
-                    pending.publication_ready,
-                    pending.canonical_commit_sha,
-                )
+                select(pending)
                 .where(pending.run_id == run_id)
                 .order_by(pending.trial_id),
                 PendingArtifact,
@@ -751,7 +737,7 @@ class State:
         )
 
     def pending_runs(self) -> tuple[Run, ...]:
-        pending = aliased(schema.PendingTrialArtifacts, name='pending')
+        pending = schema.PendingTrialArtifacts
         runs = schema.Runs
         rows = execute(
             self._database,
@@ -814,8 +800,8 @@ class State:
         )
 
     def pending_claims_authorized(self, run_id: str) -> bool:
-        claims = aliased(schema.AttemptClaims, name='claims')
-        pending = aliased(schema.PendingTrialArtifacts, name='pending')
+        claims = schema.AttemptClaims
+        pending = schema.PendingTrialArtifacts
         return not execute(
             self._database,
             select(literal(1))
@@ -924,8 +910,8 @@ class State:
         """
         self._run(run_id)
         runs = schema.Runs
-        claims = aliased(schema.AttemptClaims, name='claims')
-        artifacts = aliased(schema.ClaimArtifacts, name='artifacts')
+        claims = schema.AttemptClaims
+        artifacts = schema.ClaimArtifacts
         return bool(
             execute(
                 self._database,
@@ -1145,8 +1131,8 @@ class State:
 
     def output_generation(self, family: str) -> OutputGeneration:
         """Read the active generation and its ordered outputs in one SQL snapshot."""
-        active = aliased(schema.ActiveCollections, name='active')
-        outputs = aliased(schema.CollectionOutputs, name='outputs')
+        active = schema.ActiveCollections
+        outputs = schema.CollectionOutputs
         rows = fetch_all(
             self._database,
             select(active.collection_id, outputs.output_json)
@@ -1161,7 +1147,7 @@ class State:
     def collection_generation(self, collection: str) -> OutputGeneration:
         """Read one complete immutable generation, refusing an unsealed import."""
         collections = schema.Collections
-        outputs = aliased(schema.CollectionOutputs, name='outputs')
+        outputs = schema.CollectionOutputs
         rows = fetch_all(
             self._database,
             select(collections.id.label('collection_id'), outputs.output_json)
@@ -1214,8 +1200,8 @@ class State:
         ]
 
     def baseline(self, system: str, context_key: str) -> str | None:
-        records = aliased(schema.CanaryRecords, name='records')
-        baselines = aliased(schema.CanaryBaselines, name='baselines')
+        records = schema.CanaryRecords
+        baselines = schema.CanaryBaselines
         return fetch_scalar(
             self._database,
             select(records.record_json)
@@ -1265,16 +1251,7 @@ class State:
         runs = schema.Runs
         stored = fetch_one(
             self._database,
-            select(
-                runs.id,
-                runs.scope,
-                runs.job,
-                runs.code_revision,
-                runs.case_revision,
-                runs.created_at,
-                runs.max_requests,
-                runs.status,
-            ).where(runs.id == run_id),
+            select(runs).where(runs.id == run_id),
             _StoredRun,
         )
         if stored is None:
@@ -1289,19 +1266,7 @@ class State:
         claims = schema.AttemptClaims
         stored = fetch_one(
             self._database,
-            select(
-                claims.id,
-                claims.run_id,
-                claims.scope,
-                claims.slot_key,
-                claims.trial,
-                claims.system,
-                claims.fingerprint,
-                claims.accounting_json,
-                claims.expected_source_revision,
-                claims.created_at,
-                claims.state,
-            ).where(claims.id == claim_id),
+            select(claims).where(claims.id == claim_id),
             _StoredClaim,
         )
         if stored is None:
@@ -1312,17 +1277,7 @@ class State:
         collections = schema.Collections
         stored = fetch_one(
             self._database,
-            select(
-                collections.id,
-                collections.family,
-                collections.expected_count,
-                collections.manifest_digest,
-                collections.created_at,
-                collections.code_revision,
-                collections.case_revision,
-                collections.system_names_json,
-                collections.sealed,
-            ).where(collections.id == collection),
+            select(collections).where(collections.id == collection),
             _StoredCollection,
         )
         if stored is None:

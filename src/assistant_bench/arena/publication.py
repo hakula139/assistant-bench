@@ -734,13 +734,7 @@ def preparation(database: Database, publication_id: str) -> Preparation | None:
     preparations = schema.PublicationPreparations
     return fetch_one(
         database,
-        select(
-            preparations.publication_id,
-            preparations.target,
-            preparations.collection_id,
-            preparations.case_revision,
-            preparations.prepared_at,
-        ).where(preparations.publication_id == publication_id),
+        select(preparations).where(preparations.publication_id == publication_id),
         Preparation,
     )
 

@@ -95,7 +95,7 @@ def fetch_one[T: BaseModel](
 def fetch_scalar[T](
     database: Database, statement: ClauseElement, scalar_type: type[T]
 ) -> T | None:
-    """Execute a statement and validate the first column of its first row."""
+    """Validate the first column of the first row, or None when empty or NULL."""
     rows = execute(database, statement).rows
     if not rows:
         return None

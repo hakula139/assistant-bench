@@ -13,7 +13,6 @@ class TestSchemaParity:
                 ).rows
             }
             assert set(schema.Base.metadata.tables) == sql_tables
-            assert len(sql_tables) == 32
 
             for table_name, table in schema.Base.metadata.tables.items():
                 info = database.execute(f'PRAGMA table_info({table_name})').rows
@@ -32,6 +31,9 @@ class TestSchemaParity:
 
                 for col_name, col in table.columns.items():
                     row = sql_columns[col_name]
+                    assert col.type.__class__.__name__.upper() == str(row['type']), (
+                        f'{table_name}.{col_name} type mismatch'
+                    )
                     is_pk = int(str(row['pk'])) > 0
                     if is_pk:
                         assert col.primary_key

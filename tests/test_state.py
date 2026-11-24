@@ -17,6 +17,7 @@ from assistant_bench.harnesses.usage import MeasuredUsage
 from assistant_bench.messages import InputError
 from assistant_bench.spend import Accounting, Entry
 from assistant_bench.state import (
+    OUTPUTS_PER_STATEMENT,
     AttemptStart,
     Claim,
     Collection,
@@ -934,6 +935,19 @@ class TestState:
             state.seal_collection('next')
             assert state.activate_collection('next', None)
             assert state.output_generation('sample').outputs == (original,)
+
+        def test_stages_outputs_across_batches_within_d1_parameter_limit(self) -> None:
+            outputs = [
+                output(f'case-{i:02d}') for i in range(OUTPUTS_PER_STATEMENT + 1)
+            ]
+            with private_database() as database:
+                store = State(database)
+                store.begin_collection(collection('batched', outputs))
+                store.stage_outputs('batched', list(enumerate(outputs)))
+                store.seal_collection('batched')
+                assert store.collection_generation('batched') == OutputGeneration(
+                    id='batched', outputs=tuple(outputs)
+                )
 
     class TestSealCollection:
         def test_staging_is_invisible_until_a_complete_generation_is_activated(
