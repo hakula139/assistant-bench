@@ -1,9 +1,7 @@
-acompletion
 aiohttp
 aread
 asciinema
 asyncio
-ATIF
 Atoi
 basedpyright
 BFGS
@@ -116,7 +114,6 @@ sigalrm
 sigxfsz
 srcdoc
 SSIM
-statix
 strconv
 syncd
 tabex
