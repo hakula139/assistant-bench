@@ -58,6 +58,33 @@ _ELIGIBLE_CASES = (
     'AND a.system < b.system AND a.content_digest <> b.content_digest'
 )
 
+_BALLOT_OUTPUTS = """SELECT a.system, a.fingerprint, b.system AS peer,
+    b.fingerprint AS peer_fingerprint
+    FROM votes AS v
+    JOIN outputs AS a ON a.publication_id = v.publication_id
+        AND a.output_key = v.a_output
+    JOIN outputs AS b ON b.publication_id = v.publication_id
+        AND b.output_key = v.b_output
+    WHERE v.family = ?
+        AND a.case_key = v.case_key AND b.case_key = v.case_key
+        AND a.system = v.a_system AND b.system = v.b_system AND a.system <> b.system
+        AND a.verdict = 'pass' AND b.verdict = 'pass'
+        AND a.content_digest <> b.content_digest"""
+
+_FINGERPRINT_CONFLICTS = """SELECT prior.system, prior.fingerprint AS recorded,
+    incoming.value AS candidate
+    FROM (
+        SELECT system, fingerprint FROM ballots
+        UNION ALL
+        SELECT peer, peer_fingerprint FROM ballots
+        UNION ALL
+        SELECT o.system, o.fingerprint FROM active AS p
+        JOIN outputs AS o ON o.publication_id = p.publication_id
+        WHERE p.family = ? AND ?
+    ) AS prior
+    JOIN json_each(?) AS incoming ON incoming.key = prior.system
+    WHERE incoming.value <> prior.fingerprint"""
+
 
 # ── Models ──
 
@@ -603,7 +630,50 @@ def read_prepared(database: Database, publication_id: str) -> Publication:
     return read(database, publication_id)
 
 
-def activate(database: Database, publication_id: str, now: datetime) -> bool:
+def refuse_fingerprint_conflicts(
+    database: Database,
+    publication: Publication,
+    store: VotingTarget,
+    *,
+    include_active: bool,
+) -> None:
+    """Refuse evidence that could pool different fingerprints under one system."""
+    rows = database.execute(
+        f'WITH ballots AS ({_BALLOT_OUTPUTS}) '
+        f'{_FINGERPRINT_CONFLICTS} ORDER BY prior.system, recorded LIMIT 1',
+        [
+            publication.family,
+            publication.family,
+            int(include_active),
+            _fingerprint_json(publication),
+        ],
+    ).rows
+    if rows:
+        conflict = rows[0]
+        raise InputError(
+            f'Family `{publication.family}` has voting evidence in `{store}` for '
+            f'system `{conflict["system"]}` under fingerprint '
+            f'`{conflict["recorded"]}`. '
+            f'This publication uses `{conflict["candidate"]}`. Give the changed '
+            'configuration a distinct system ID and display name, update the family '
+            'and its reference as needed, then rerun, collect and prepare again. '
+            'See `docs/guide/authoring.md#systems`.'
+        )
+
+
+def _fingerprint_json(publication: Publication) -> str:
+    return json.dumps(
+        {output.system: output.fingerprint for output in publication.outputs}
+    )
+
+
+def activate(
+    database: Database,
+    publication_id: str,
+    now: datetime,
+    *,
+    preserve_ballots: bool = True,
+) -> bool:
     """Atomically activate a complete verified publication for its family."""
     publication = read(database, publication_id)
     active = database.execute(
@@ -616,13 +686,14 @@ def activate(database: Database, publication_id: str, now: datetime) -> bool:
         f'WITH expected AS ({_ELIGIBLE_CASES}), stored AS ('  # noqa: S608
         'SELECT low_system, high_system, value AS case_key '
         'FROM publication_pair_cases, json_each(case_keys) '
-        'WHERE publication_id = ?) '
+        f'WHERE publication_id = ?), ballots AS ({_BALLOT_OUTPUTS}) '
         'INSERT INTO active (family, publication_id, activated_at) '
         'SELECT ?, ?, ? '
         'WHERE (SELECT count(*) FROM cases WHERE publication_id = ?) = ? '
         'AND (SELECT count(*) FROM outputs WHERE publication_id = ?) = ? '
         'AND NOT EXISTS (SELECT * FROM expected EXCEPT SELECT * FROM stored) '
         'AND NOT EXISTS (SELECT * FROM stored EXCEPT SELECT * FROM expected) '
+        f'AND (NOT ? OR NOT EXISTS ({_FINGERPRINT_CONFLICTS})) '
         'ON CONFLICT (family) DO UPDATE SET '
         'publication_id = excluded.publication_id, '
         'activated_at = excluded.activated_at',
@@ -630,15 +701,24 @@ def activate(database: Database, publication_id: str, now: datetime) -> bool:
             publication.id,
             publication.id,
             publication.family,
+            publication.family,
             publication.id,
             milliseconds,
             publication.id,
             len(publication.cases),
             publication.id,
             len(publication.outputs),
+            int(preserve_ballots),
+            publication.family,
+            0,
+            _fingerprint_json(publication),
         ],
     )
     if activated.changes != 1:
+        if preserve_ballots:
+            refuse_fingerprint_conflicts(
+                database, publication, publication.target, include_active=False
+            )
         raise InputError(
             f'Publication `{publication.id}` is not completely staged, so it was '
             'not activated. Publish the same ID again.'

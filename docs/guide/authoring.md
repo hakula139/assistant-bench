@@ -119,7 +119,7 @@ Installed agents use table names of the form `<model>-<harness>-<effort>`, and t
 When a change moves fingerprints:
 
 1. Run `uv run bench fingerprints` to find changed systems frozen in closed reports, and include any system flagged by `bench run` for retained-trial drift in its family.
-2. Where [Systems](../design/systems.md#fingerprints) requires a new name, add a new table in `systems.toml` with a suffix identifying its effort or snapshot and a distinct `display_name`. An unreported task system can keep its name and start fresh trials under its new fingerprint.
+2. Where [Systems](../design/systems.md#fingerprints) requires a new name, add a new table in `systems.toml` with a suffix identifying its effort or snapshot and a distinct `display_name`. Check official voting publications even for a task family without closed reports.
 3. If a name changes, replace the old name in each affected family's `systems` list and in its `reference` or checker `pairs` where applicable. `bench close` anchors the board at the new reference once it ranks, and until then uses the most-voted system as the round's `anchor`.
 4. Keep the old table while any unaffected family still lists it under a matching fingerprint. Once no family lists a retired system, remove its runnable table while preserving its retained trials, closed reports, and task authorship.
 5. Run `uv run pytest tests/test_repository.py -k manifest --update-fixtures` to rewrite `fingerprints.json`, then `uv run bench fingerprints` to confirm that it passes.

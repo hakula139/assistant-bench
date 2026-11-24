@@ -151,12 +151,22 @@ def publish(
                 f'Publication `{identity}` was prepared for `{prepared.target}`.'
             )
         if target == 'private':
+            with d1.connect('production') as production:
+                publication.refuse_fingerprint_conflicts(
+                    production, prepared, 'production', include_active=True
+                )
             changed = publication.activate(database, identity, datetime.now(UTC))
         else:
+            if target == 'production':
+                publication.refuse_fingerprint_conflicts(
+                    database, prepared, 'private', include_active=True
+                )
             with d1.connect(target) as destination:
                 now = datetime.now(UTC)
                 publication.stage(destination, prepared, now)
-                changed = publication.activate(destination, identity, now)
+                changed = publication.activate(
+                    destination, identity, now, preserve_ballots=target == 'production'
+                )
 
     if not changed:
         typer.echo(

@@ -736,7 +736,7 @@ class TestStageAndActivate:
 
         assert rows(database, 'SELECT * FROM active') == []
 
-    def test_switches_the_active_publication_and_keeps_the_old_rows(
+    def test_switches_a_publication_without_votes_to_a_new_fingerprint(
         self, arena_store: SQLiteDatabase
     ) -> None:
         database = arena_store
@@ -745,7 +745,10 @@ class TestStageAndActivate:
         second = prepare(
             make_votes_family(),
             [make_case('first')],
-            [make_trial('first', system) for system in ARENA_SYSTEMS],
+            [
+                make_trial('first', system, fingerprint=f'new-{system}')
+                for system in ARENA_SYSTEMS
+            ],
         )
 
         stage_and_activate(database, second, NOW)

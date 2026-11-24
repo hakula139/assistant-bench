@@ -18,7 +18,7 @@ A system's fingerprint hashes its harness, model name, generation version, and e
 
 Votes and scores pool only within one fingerprint. A nixos-config bump that leaves the resolved generation settings unchanged keeps its pool.
 
-A system name identifies the model and its variant. In a task family, a system absent from the family's closed reports can keep its name when its fingerprint changes. Its earlier trials stay in the archive. Their agent configuration carries the old fingerprint, so Harbor excludes them from reuse and regrading and collection excludes them from current outputs. After a report freezes the current fingerprint, the system can continue under that fingerprint while older trials remain archived.
+A system name identifies the model and its variant. In a task family, a system absent from the family's closed reports can keep its name for fresh trials when its fingerprint changes. Its earlier trials stay in the archive. Their agent configuration carries the old fingerprint, so Harbor excludes them from reuse and regrading and collection excludes them from current outputs. For voted families, [official publication](arena.md#publication-and-closing) also checks the evidence in both voting stores before the changed fingerprint can serve under that name.
 
 The [fingerprint check](../conventions/ci.md#checks), `bench fingerprints`, fails for each runnable system whose fingerprint differs from the one that the closed reports of its family froze. A report that recorded no fingerprint for a system leaves the check nothing to compare. `fingerprints.json` maps each runnable `<family>/<system>` to its fingerprint, and a test fails when it is stale, so a PR's diff of the manifest lists the systems that change.
 
