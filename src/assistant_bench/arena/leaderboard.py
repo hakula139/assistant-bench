@@ -1,7 +1,6 @@
 """Capture, export, and confirm delayed public arena standings."""
 
 import argparse
-import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
@@ -14,6 +13,7 @@ from sqlalchemy.orm import aliased
 
 from assistant_bench import report, schema
 from assistant_bench.arena import d1, settlement
+from assistant_bench.arena.publication import canonical_digest, timestamp_ms
 from assistant_bench.database import Database, execute, fetch_all
 from assistant_bench.families import (
     Family,
@@ -43,10 +43,6 @@ class _Candidate(BaseModel):
     published_at: int | None
 
 
-def _timestamp(time: datetime) -> int:
-    return int(time.timestamp() * 1000)
-
-
 def _hour(time: datetime) -> datetime:
     return time.astimezone(UTC).replace(minute=0, second=0, microsecond=0)
 
@@ -69,7 +65,6 @@ def capture(
     families: Sequence[Family],
     started_at: datetime,
 ) -> None:
-    """Read the official stores and stage one changed aggregate per family per hour."""
     for family in families:
         snapshot = settlement.capture(
             family, private, production, started_at, revision=None
@@ -106,19 +101,17 @@ def stage(
     cutoffs: report.Cutoffs | None = None,
     has_archive: bool = False,
 ) -> None:
-    """Stage a completed cut if this hour and content advance the family."""
     payload = None if closed is None else closed.model_dump_json()
     facts = (
         None
         if closed is None
         else closed.model_dump(mode='json', exclude={'round', 'closed_at'})
     )
-    canonical = json.dumps(facts, sort_keys=True, separators=(',', ':'))
-    digest = hashlib.sha256(canonical.encode()).hexdigest()
+    digest = canonical_digest(facts)
 
     candidates = schema.LeaderboardCandidates
-    hour_slot = _timestamp(_hour(started_at))
-    captured = _timestamp(captured_at)
+    hour_slot = timestamp_ms(_hour(started_at))
+    captured = timestamp_ms(captured_at)
     cutoffs_json = None if cutoffs is None else cutoffs.model_dump_json()
 
     prior = (
@@ -176,7 +169,7 @@ def export(
 
     Return whether the overlay contains an unconfirmed, matured candidate.
     """
-    deadline = _timestamp(now - EMBARGO)
+    deadline = timestamp_ms(now - EMBARGO)
     candidates = schema.LeaderboardCandidates
     family_values = func.json_each(json.dumps(list(families))).table_valued('value')
     ready = (
@@ -221,7 +214,6 @@ def export(
 
 
 def mark(database: Database, manifest: Mapping[str, int], now: datetime) -> None:
-    """Confirm reported deployment selections without regressing their release floor."""
     if not manifest:
         return
 
@@ -231,12 +223,12 @@ def mark(database: Database, manifest: Mapping[str, int], now: datetime) -> None
     execute(
         database,
         update(candidates)
-        .values(published_at=_timestamp(now))
+        .values(published_at=timestamp_ms(now))
         .where(
             tuple_(candidates.family, candidates.hour_slot).in_(
                 select(entries.c.key, entries.c.value)
             ),
-            candidates.captured_at <= _timestamp(now - EMBARGO),
+            candidates.captured_at <= timestamp_ms(now - EMBARGO),
             candidates.published_at.is_(None),
             ~exists(
                 select(literal(1)).where(

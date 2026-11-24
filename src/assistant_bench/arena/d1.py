@@ -88,7 +88,6 @@ def connect(
 
 
 def token() -> str:
-    """Read the configured file-backed D1 credential without retaining it."""
     sources = [
         (name, path)
         for name in (TOKEN_FILE_VAR, ENV_FILE_VAR)

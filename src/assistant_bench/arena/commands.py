@@ -3,7 +3,7 @@
 import json
 from collections.abc import Sequence
 from datetime import UTC, datetime
-from typing import Annotated, Literal
+from typing import Annotated
 
 import typer
 from pydantic import TypeAdapter, ValidationError
@@ -46,7 +46,7 @@ VoteIds = Annotated[
 
 
 @app.command()
-def prepare(family: FamilyArgument, target: Literal['production', 'private']) -> None:
+def prepare(family: FamilyArgument, target: publication.VotingTarget) -> None:
     """Prepare a cloud publication for review and print its immutable ID."""
     with open_context() as context, d1.connect('private') as database:
         generation = context.state.output_generation(family)
@@ -388,7 +388,6 @@ def _required_selector(
 
 
 def _table(header: Sequence[str], rows: Sequence[Sequence[str]]) -> str:
-    """Align the rows under the header, or return an empty string without rows."""
     if not rows:
         return ''
 

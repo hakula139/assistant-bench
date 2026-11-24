@@ -12,6 +12,7 @@ from pydantic import (
     AwareDatetime,
     BaseModel,
     ConfigDict,
+    Json,
     JsonValue,
     ValidationError,
     model_validator,
@@ -34,6 +35,7 @@ from assistant_bench import schema
 from assistant_bench.database import (
     Database,
     execute,
+    fetch_all,
     fetch_one,
     fetch_scalar,
     insert_missing,
@@ -73,17 +75,40 @@ CASE_SPLITS: dict[CaseSource, CaseSplit] = {
 # ── Models ──
 
 
-class _Model(BaseModel):
+class ArenaModel(BaseModel):
     model_config = ConfigDict(extra='forbid', frozen=True)
 
 
-class _FingerprintConflict(_Model):
+class _FingerprintConflict(ArenaModel):
     system: str
     recorded: str
     candidate: str
 
 
-class CaseFacts(_Model):
+class _PublicationRow(ArenaModel):
+    id: str
+    target: VotingTarget
+    family: FamilyName
+    display_name: str
+    aspect: str | None
+    render: Literal['text', 'diff', 'html']
+    defects: Json[tuple[Defect, ...]]
+    reference: str
+    systems: Json[dict[str, str]]
+    case_count: int
+    output_count: int
+
+
+class _CaseRow(ArenaModel):
+    key: str
+    category: Category
+    split: CaseSplit
+    source: CaseSource
+    instruction: str
+    checklist: Json[tuple[str, ...]]
+
+
+class CaseFacts(ArenaModel):
     key: str
     category: Category
     split: CaseSplit
@@ -95,7 +120,7 @@ class PublishedCase(CaseFacts):
     checklist: tuple[str, ...]
 
 
-class OutputFacts(_Model):
+class OutputFacts(ArenaModel):
     key: str
     case_key: str
     system: str
@@ -117,7 +142,7 @@ class PublishedOutput(OutputFacts):
         return self
 
 
-class Inventory(_Model):
+class Inventory(ArenaModel):
     """A publication's identities and verdicts without its content."""
 
     id: str
@@ -131,7 +156,7 @@ class Inventory(_Model):
     outputs: tuple[OutputFacts, ...]
 
 
-class Publication(_Model):
+class Publication(ArenaModel):
     """An immutable snapshot of a family's cases and outputs, named by its digest."""
 
     id: str
@@ -166,11 +191,10 @@ class Publication(_Model):
         return self
 
     def identity(self) -> str:
-        """Return the digest of everything but the recorded ID."""
-        return _digest(self.model_dump(mode='json', exclude={'id'}))
+        return canonical_digest(self.model_dump(mode='json', exclude={'id'}))
 
 
-class Preparation(_Model):
+class Preparation(ArenaModel):
     publication_id: str
     target: VotingTarget
     collection_id: str
@@ -181,12 +205,7 @@ class Preparation(_Model):
 # ── Preparation ──
 
 
-class NoPairsError(InputError):
-    """The selected publication has no comparison two systems can form."""
-
-
 def voting_target(family: Family, case: Case) -> VotingTarget:
-    """Select the sole vote store allowed to hold this case's content."""
     assert isinstance(family.settings, VotesSettings)
     if family.settings.public_voting and case.source in PUBLIC_SOURCES:
         return 'production'
@@ -196,12 +215,14 @@ def voting_target(family: Family, case: Case) -> VotingTarget:
 def case_key(case: Case) -> str:
     """Digest what the voter reads, so an unchanged case keeps its key."""
     checklist: list[JsonValue] = list(case.checklist)
-    return _digest({'instruction': case.instruction, 'checklist': checklist})
+    return canonical_digest({'instruction': case.instruction, 'checklist': checklist})
 
 
 def output_key(family: str, output: Output) -> str:
     """Digest the trial that wrote the output, so republishing keeps its votes."""
-    return _digest({'family': family, 'job': output.job, 'trial': output.trial})
+    return canonical_digest(
+        {'family': family, 'job': output.job, 'trial': output.trial}
+    )
 
 
 def prepare(
@@ -262,7 +283,7 @@ def prepare(
         key=lambda output: output.key,
     )
     if not _pairable(published):
-        raise NoPairsError(
+        raise InputError(
             f'Family `{family.name}` has no {target} case on which two systems '
             'have different passing outputs, so no pair can be voted on.'
         )
@@ -340,7 +361,7 @@ def _published_output(
         verdict=verdict,
         errored=output.error is not None,
         length=None if render == 'html' else text_length(text),
-        content_digest=_digest(text),
+        content_digest=canonical_digest(text),
         content=output.text if verdict == 'pass' else None,
     )
 
@@ -352,7 +373,6 @@ def _verdict(gate_failures: Sequence[Gate] | None) -> Verdict:
 
 
 def _pairable(outputs: Iterable[OutputFacts]) -> bool:
-    """Whether some case has passing outputs of two systems that differ."""
     passing: defaultdict[str, set[tuple[str, str]]] = defaultdict(set)
     for output in outputs:
         if output.verdict == 'pass':
@@ -370,7 +390,6 @@ def _pairable(outputs: Iterable[OutputFacts]) -> bool:
 
 
 def listing(publication: Publication, outputs: Sequence[Output]) -> str:
-    """Render the prepared snapshot and its generation's gate failures."""
     gates = {
         output_key(publication.family, output): output.gate_failures or []
         for output in outputs
@@ -408,7 +427,6 @@ def _listing(publication: Publication, gates: Mapping[str, Sequence[Gate]]) -> s
 
 
 def _fenced(text: str, language: str) -> str:
-    """Fence `text` with more backticks than any run it holds."""
     longest = max((len(run) for run in re.findall('`+', text)), default=0)
     fence = '`' * max(3, longest + 1)
     return f'{fence}{language}\n{text.rstrip()}\n{fence}'
@@ -511,7 +529,6 @@ def stage(
     publication: Publication,
     now: datetime,
 ) -> None:
-    """Insert and verify an immutable publication without activating it."""
     if publication.identity() != publication.id:
         raise InputError(f'Publication `{publication.id}` has an invalid identity.')
     if publication.target == 'production' and (
@@ -522,7 +539,7 @@ def stage(
             'is neither `public` nor `synthetic`, so it cannot enter production.'
         )
 
-    milliseconds = int(now.timestamp() * 1000)
+    milliseconds = timestamp_ms(now)
     execute(
         database,
         sqlite.insert(schema.Publications)
@@ -618,84 +635,90 @@ def stage(
 
 
 def read(database: Database, publication_id: str) -> Publication:
-    """Reconstruct the normalized snapshot and verify its content identity."""
     publications = schema.Publications
-    rows = execute(
-        database,
-        select(
-            publications.id,
-            publications.target,
-            publications.family,
-            publications.display_name,
-            publications.aspect,
-            publications.render,
-            publications.defects,
-            publications.reference,
-            publications.systems,
-            publications.case_count,
-            publications.output_count,
-        ).where(publications.id == publication_id),
-    ).rows
-    if not rows:
-        raise InputError(f'Publication `{publication_id}` does not exist.')
-    row = rows[0]
-
     cases_table = schema.Cases
-    cases = execute(
-        database,
-        select(
-            cases_table.case_key.label('key'),
-            cases_table.category,
-            cases_table.split,
-            cases_table.source,
-            cases_table.instruction,
-            cases_table.checklist,
-        )
-        .where(cases_table.publication_id == publication_id)
-        .order_by(cases_table.case_key),
-    ).rows
-
     outputs_table = schema.Outputs
-    outputs = execute(
-        database,
-        select(
-            outputs_table.output_key.label('key'),
-            outputs_table.case_key,
-            outputs_table.system,
-            outputs_table.fingerprint,
-            outputs_table.verdict,
-            outputs_table.errored,
-            outputs_table.length,
-            outputs_table.content_digest,
-            outputs_table.content,
-        )
-        .where(outputs_table.publication_id == publication_id)
-        .order_by(outputs_table.output_key),
-    ).rows
     try:
-        publication = Publication.model_validate(
-            {
-                **{
-                    key: value
-                    for key, value in row.items()
-                    if key not in ('case_count', 'output_count')
-                },
-                'defects': json.loads(str(row['defects'])),
-                'systems': json.loads(str(row['systems'])),
-                'cases': [
-                    {**case, 'checklist': json.loads(str(case['checklist']))}
-                    for case in cases
-                ],
-                'outputs': outputs,
-            }
+        row = fetch_one(
+            database,
+            select(
+                publications.id,
+                publications.target,
+                publications.family,
+                publications.display_name,
+                publications.aspect,
+                publications.render,
+                publications.defects,
+                publications.reference,
+                publications.systems,
+                publications.case_count,
+                publications.output_count,
+            ).where(publications.id == publication_id),
+            _PublicationRow,
+        )
+        if row is None:
+            raise InputError(f'Publication `{publication_id}` does not exist.')
+        cases = fetch_all(
+            database,
+            select(
+                cases_table.case_key.label('key'),
+                cases_table.category,
+                cases_table.split,
+                cases_table.source,
+                cases_table.instruction,
+                cases_table.checklist,
+            )
+            .where(cases_table.publication_id == publication_id)
+            .order_by(cases_table.case_key),
+            _CaseRow,
+        )
+        outputs = fetch_all(
+            database,
+            select(
+                outputs_table.output_key.label('key'),
+                outputs_table.case_key,
+                outputs_table.system,
+                outputs_table.fingerprint,
+                outputs_table.verdict,
+                outputs_table.errored,
+                outputs_table.length,
+                outputs_table.content_digest,
+                outputs_table.content,
+            )
+            .where(outputs_table.publication_id == publication_id)
+            .order_by(outputs_table.output_key),
+            PublishedOutput,
+        )
+        publication = Publication(
+            id=row.id,
+            target=row.target,
+            family=row.family,
+            display_name=row.display_name,
+            aspect=row.aspect,
+            render=row.render,
+            defects=row.defects,
+            reference=row.reference,
+            systems=row.systems,
+            cases=tuple(
+                PublishedCase(
+                    key=case.key,
+                    category=case.category,
+                    split=case.split,
+                    source=case.source,
+                    instruction=case.instruction,
+                    checklist=case.checklist,
+                )
+                for case in cases
+            ),
+            outputs=tuple(outputs),
         )
     except ValidationError as error:
         raise InputError(
             error_lines(error, f'Publication `{publication_id}`')
         ) from error
     if (len(cases), len(outputs)) != (
-        row['case_count'],
-        row['output_count'],
+        row.case_count,
+        row.output_count,
     ) or publication.identity() != publication_id:
         raise InputError(
             f'Publication `{publication_id}` does not match its immutable snapshot.'
@@ -704,7 +727,6 @@ def read(database: Database, publication_id: str) -> Publication:
 
 
 def record_preparation(database: Database, metadata: Preparation) -> None:
-    """Mark a verified staged snapshot ready for review and publication."""
     publication = read(database, metadata.publication_id)
     if publication.target != metadata.target:
         raise InputError('A preparation must match its publication target.')
@@ -786,7 +808,6 @@ def activate(
     *,
     preserve_ballots: bool = True,
 ) -> bool:
-    """Atomically activate a complete verified publication for its family."""
     publication = read(database, publication_id)
     active_publication = fetch_scalar(
         database,
@@ -798,7 +819,7 @@ def activate(
     if active_publication == publication_id:
         return False
 
-    milliseconds = int(now.timestamp() * 1000)
+    milliseconds = timestamp_ms(now)
     expected = _eligible_cases(publication.id).cte('expected')
     pair_cases = schema.PublicationPairCases
     each_case = func.json_each(pair_cases.case_keys).table_valued('value')
@@ -866,8 +887,15 @@ def activate(
     return True
 
 
-def _digest(value: JsonValue) -> str:
+# ── Shared Helpers ──
+
+
+def canonical_digest(value: JsonValue) -> str:
     canonical = json.dumps(
         value, sort_keys=True, separators=(',', ':'), ensure_ascii=False
     )
     return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def timestamp_ms(value: datetime) -> int:
+    return int(value.timestamp() * 1000)

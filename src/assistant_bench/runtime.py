@@ -6,7 +6,7 @@ import re
 import subprocess
 import tarfile
 import tempfile
-from collections.abc import Collection, Generator
+from collections.abc import Collection, Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -27,6 +27,11 @@ from assistant_bench.state import State
 
 REPOSITORY_VAR = 'BENCH_DATA_REPOSITORY'
 PUBLIC_REPOSITORY = 'https://github.com/hakulab/assistant-bench.git'
+
+_SHA_RE = re.compile(r'[0-9a-f]{40}')
+
+
+# ── Context ──
 
 
 @dataclass(frozen=True)
@@ -101,7 +106,6 @@ class RunContext:
         return list(self._sources[family.name])
 
     def refresh_sources(self, family: Family) -> None:
-        """Pin a new artifact inventory after an explicitly completed operation."""
         if family.source == 'cases':
             tasks.render_tasks(
                 family,
@@ -126,7 +130,6 @@ class RunContext:
         return self._revisions[family.name]
 
     def closing_sources(self, collection_id: str) -> ClosingSources:
-        """Materialize the exact public and private inputs frozen by collection."""
         collection = self.state.collection(collection_id)
         if collection.code_revision is None or collection.case_revision is None:
             raise InputError(
@@ -149,7 +152,32 @@ class RunContext:
 
 @contextmanager
 def open_sources() -> Generator[PrivateSources]:
-    """Pin authenticated private cases for this command and remove them on exit."""
+    with _open_sources() as (sources, _):
+        yield sources
+
+
+@contextmanager
+def open_context() -> Generator[RunContext]:
+    revision = implementation_revision()
+    with tempfile.TemporaryDirectory(prefix='bench-run-') as temporary:
+        root = Path(temporary)
+        public = root / 'public'
+        materialize_implementation(revision, public)
+        with _open_sources() as (sources, repository), connect('private') as database:
+            execute_sql(database, select(literal(1)))
+            yield RunContext(
+                root=root,
+                public_root=public,
+                private_root=sources.root,
+                case_revision=sources.revision,
+                code_revision=revision,
+                state=State(database),
+                artifacts=repository,
+            )
+
+
+@contextmanager
+def _open_sources() -> Generator[tuple[PrivateSources, ArtifactRepository]]:
     slug = os.environ.get(REPOSITORY_VAR)
     if not slug:
         raise InputError(
@@ -159,32 +187,14 @@ def open_sources() -> Generator[PrivateSources]:
     revision = repository.head()
     with tempfile.TemporaryDirectory(prefix='bench-sources-') as temporary:
         root = repository.source(revision, Path(temporary) / 'source')
-        yield PrivateSources(revision=revision, root=root)
+        yield PrivateSources(revision=revision, root=root), repository
 
 
-@contextmanager
-def open_context() -> Generator[RunContext]:
-    """Open cloud state and pinned sources for one disposable local execution."""
-    revision = implementation_revision()
-    with tempfile.TemporaryDirectory(prefix='bench-run-') as temporary:
-        root = Path(temporary)
-        public = root / 'public'
-        materialize_implementation(revision, public)
-        with open_sources() as sources, connect('private') as database:
-            execute_sql(database, select(literal(1)))
-            yield RunContext(
-                root=root,
-                public_root=public,
-                private_root=sources.root,
-                case_revision=sources.revision,
-                code_revision=revision,
-                state=State(database),
-                artifacts=ArtifactRepository(os.environ[REPOSITORY_VAR]),
-            )
+# ── Implementation Revision ──
 
 
 def implementation_revision() -> str:
-    """Identify committed checkout inputs and refuse a mutable execution source."""
+    """Return HEAD once verified clean and reachable from canonical GitHub main."""
     try:
         environment = git_environment()
 
@@ -207,9 +217,9 @@ def implementation_revision() -> str:
             )
         remote = git('ls-remote', '--exit-code', PUBLIC_REPOSITORY, 'refs/heads/main')
         head, reference = remote.split('\t')
-        if reference != 'refs/heads/main' or not re.fullmatch(r'[0-9a-f]{40}', head):
+        if reference != 'refs/heads/main' or not _is_commit_sha(head):
             raise InputError('The canonical implementation main could not be verified.')
-        git('fetch', '--no-tags', '--no-write-fetch-head', PUBLIC_REPOSITORY, head)
+        _fetch_public(head, environment)
         reachable = subprocess.run(
             [
                 'git',
@@ -238,29 +248,13 @@ def implementation_revision() -> str:
 
 
 def materialize_implementation(revision: str, destination: Path) -> None:
-    """Restore public implementation inputs from the canonical Git repository."""
-    if not re.fullmatch(r'[0-9a-f]{40}', revision):
+    if not _is_commit_sha(revision):
         raise InputError(
             'A collection implementation revision must be a Git commit SHA.'
         )
     environment = git_environment()
     try:
-        subprocess.run(
-            [
-                'git',
-                '-C',
-                str(REPO_ROOT),
-                'fetch',
-                '--no-tags',
-                '--no-write-fetch-head',
-                PUBLIC_REPOSITORY,
-                revision,
-            ],
-            env=environment,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=True,
-        )
+        _fetch_public(revision, environment)
         archive = subprocess.check_output(
             ['git', '-C', str(REPO_ROOT), 'archive', revision],
             env=environment,
@@ -273,3 +267,26 @@ def materialize_implementation(revision: str, destination: Path) -> None:
     destination.mkdir(parents=True)
     with tarfile.open(fileobj=io.BytesIO(archive)) as source:
         source.extractall(destination, filter='data')
+
+
+def _is_commit_sha(value: str) -> bool:
+    return _SHA_RE.fullmatch(value) is not None
+
+
+def _fetch_public(revision: str, environment: Mapping[str, str]) -> None:
+    subprocess.run(
+        [
+            'git',
+            '-C',
+            str(REPO_ROOT),
+            'fetch',
+            '--no-tags',
+            '--no-write-fetch-head',
+            PUBLIC_REPOSITORY,
+            revision,
+        ],
+        env=environment,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=True,
+    )
