@@ -82,8 +82,9 @@ runner = CliRunner()
 REAL_EXECUTE = execution.execute
 
 RENAME_GUIDE = (
-    'Give a changed system a new name and keep the old name only in closed '
-    'reports, as `docs/guide/authoring.md#systems` describes.'
+    'Give each changed system a new name in each affected family and keep '
+    'the old table while other families list it, as `docs/guide/authoring.md#systems` '
+    'describes.'
 )
 DRIFTED = (
     'System `opus-5.5-high` ran under fingerprint `fp-old` but now resolves to '
@@ -93,8 +94,7 @@ MOVED = (
     'Closed reports of `f` froze `opus-5.5-high` under fingerprint `fp-old`, but it '
     'now resolves to `{current}`.'
 )
-RENAME = f'Closed reports name `opus-5.5-high`. {RENAME_GUIDE}'
-STALE_TRIALS = 'Give the changed systems `opus-5.5-high` new names before the next run.'
+REPORTED = 'Closed reports name `opus-5.5-high`.'
 
 
 def invoke(*args: str) -> Result:
@@ -1564,35 +1564,35 @@ class TestRun:
                 False,
                 None,
                 True,
-                [DRIFTED, STALE_TRIALS],
+                [DRIFTED],
                 id='unreported',
             ),
             pytest.param(
                 True,
                 'fp-old',
                 True,
-                [MOVED, DRIFTED, RENAME],
+                [MOVED, DRIFTED, REPORTED],
                 id='moved',
             ),
             pytest.param(
                 True,
                 'fp-old',
                 False,
-                [MOVED, RENAME],
+                [MOVED, REPORTED],
                 id='moved-without-trials',
             ),
             pytest.param(
                 True,
                 '{current}',
                 True,
-                [DRIFTED, STALE_TRIALS],
+                [DRIFTED],
                 id='restored',
             ),
             pytest.param(
                 True,
                 None,
                 True,
-                [DRIFTED, RENAME],
+                [DRIFTED, REPORTED],
                 id='unrecorded',
             ),
         ],
@@ -1633,7 +1633,8 @@ class TestRun:
         assert (result.exit_code, result.output) == (
             1,
             'Family `f` has systems that changed their fingerprints:\n'
-            + ''.join(f'{line.format(current=current)}\n' for line in expected),
+            + ''.join(f'{line.format(current=current)}\n' for line in expected)
+            + f'{RENAME_GUIDE}\n',
         )
         assert submitted == []
 
