@@ -98,9 +98,9 @@ def started(
         created_at=START.isoformat(),
     )
     start = AttemptStart(
-        f'attempt-{identifier}',
-        owner.id,
-        frozen.started_at.isoformat().replace('+00:00', 'Z'),
+        id=f'attempt-{identifier}',
+        claim_id=owner.id,
+        started_at=frozen.started_at.isoformat().replace('+00:00', 'Z'),
     )
     state.create_run(parent)
     assert state.claim_attempt(owner)
@@ -116,7 +116,9 @@ def admitted(
     *,
     terminal: bool = True,
 ) -> None:
-    request = RequestAdmission(identifier, start.id, start.started_at)
+    request = RequestAdmission(
+        id=identifier, attempt_id=start.id, created_at=start.started_at
+    )
     assert state.admit_request(request)
     if terminal:
         state.record_receipt(
@@ -206,7 +208,9 @@ class TestReadLedger:
         admitted(private_state, start, 'unknown', None)
         admitted(private_state, start, 'unfinished', None, terminal=False)
         assert private_state.admit_request(
-            RequestAdmission('before-dispatch', start.id, start.started_at)
+            RequestAdmission(
+                id='before-dispatch', attempt_id=start.id, created_at=start.started_at
+            )
         )
         private_state.record_receipt(
             'before-dispatch',
@@ -234,9 +238,11 @@ class TestReadLedger:
         owner, first = started(private_state, frozen, 'first')
         admitted(private_state, first, 'first-request', USAGE)
         second = AttemptStart(
-            'attempt-second',
-            owner.id,
-            (START + timedelta(seconds=2)).isoformat().replace('+00:00', 'Z'),
+            id='attempt-second',
+            claim_id=owner.id,
+            started_at=(START + timedelta(seconds=2))
+            .isoformat()
+            .replace('+00:00', 'Z'),
         )
         assert private_state.begin_attempt(second)
         later_usage = MeasuredUsage(20, 0, 0, 10, None)

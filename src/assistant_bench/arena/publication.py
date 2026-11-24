@@ -6,7 +6,7 @@ import re
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import datetime
-from typing import Literal, Self
+from typing import Any, Literal, Self
 
 from pydantic import (
     AwareDatetime,
@@ -16,8 +16,28 @@ from pydantic import (
     ValidationError,
     model_validator,
 )
+from sqlalchemy import (
+    CTE,
+    Select,
+    and_,
+    except_,
+    exists,
+    func,
+    literal,
+    select,
+    union_all,
+)
+from sqlalchemy.dialects import sqlite
+from sqlalchemy.orm import aliased
 
-from assistant_bench.database import Database, insert_missing
+from assistant_bench import schema
+from assistant_bench.database import (
+    Database,
+    execute,
+    fetch_one,
+    fetch_scalar,
+    insert_missing,
+)
 from assistant_bench.families import (
     Case,
     CaseSource,
@@ -50,52 +70,17 @@ CASE_SPLITS: dict[CaseSource, CaseSplit] = {
     'held-out': 'held-out',
 }
 
-_ELIGIBLE_CASES = (
-    'SELECT DISTINCT a.system AS low_system, b.system AS high_system, a.case_key '
-    'FROM outputs AS a JOIN outputs AS b '
-    'ON b.publication_id = a.publication_id AND b.case_key = a.case_key '
-    "WHERE a.publication_id = ?1 AND a.verdict = 'pass' AND b.verdict = 'pass' "
-    'AND a.system < b.system AND a.content_digest <> b.content_digest'
-)
-
-
-def _ballot_outputs(family_param: int) -> str:
-    return (
-        'SELECT a.system, a.fingerprint, b.system AS peer, '  # noqa: S608
-        'b.fingerprint AS peer_fingerprint '
-        'FROM votes AS v '
-        'JOIN outputs AS a ON a.publication_id = v.publication_id '
-        'AND a.output_key = v.a_output '
-        'JOIN outputs AS b ON b.publication_id = v.publication_id '
-        'AND b.output_key = v.b_output '
-        f'WHERE v.family = ?{family_param} '
-        'AND a.case_key = v.case_key AND b.case_key = v.case_key '
-        'AND a.system = v.a_system AND b.system = v.b_system AND a.system <> b.system '
-        "AND a.verdict = 'pass' AND b.verdict = 'pass' "
-        'AND a.content_digest <> b.content_digest'
-    )
-
-
-def _fingerprint_conflicts(fingerprints_param: int) -> str:
-    return (
-        'SELECT prior.system, prior.fingerprint AS recorded, '  # noqa: S608
-        'incoming.value AS candidate '
-        'FROM ('
-        'SELECT system, fingerprint FROM ballots '
-        'UNION ALL '
-        'SELECT peer, peer_fingerprint FROM ballots'
-        ') AS prior '
-        f'JOIN json_each(?{fingerprints_param}) AS incoming '
-        'ON incoming.key = prior.system '
-        'WHERE incoming.value <> prior.fingerprint'
-    )
-
-
 # ── Models ──
 
 
 class _Model(BaseModel):
     model_config = ConfigDict(extra='forbid', frozen=True)
+
+
+class _FingerprintConflict(_Model):
+    system: str
+    recorded: str
+    candidate: str
 
 
 class CaseFacts(_Model):
@@ -432,6 +417,95 @@ def _fenced(text: str, language: str) -> str:
 # ── Publishing ──
 
 
+def _eligible_cases(publication_id: str) -> Select[str, str, str]:
+    left = aliased(schema.Outputs, name='a')
+    right = aliased(schema.Outputs, name='b')
+    return (
+        select(
+            left.system.label('low_system'),
+            right.system.label('high_system'),
+            left.case_key,
+        )
+        .distinct()
+        .join(
+            right,
+            and_(
+                right.publication_id == left.publication_id,
+                right.case_key == left.case_key,
+            ),
+        )
+        .where(
+            left.publication_id == publication_id,
+            left.verdict == 'pass',
+            right.verdict == 'pass',
+            left.system < right.system,
+            left.content_digest != right.content_digest,
+        )
+    )
+
+
+def _ballot_outputs(family: FamilyName) -> Select[str, str, str, str]:
+    votes = aliased(schema.Votes, name='v')
+    left = aliased(schema.Outputs, name='a')
+    right = aliased(schema.Outputs, name='b')
+    return (
+        select(
+            left.system,
+            left.fingerprint,
+            right.system.label('peer'),
+            right.fingerprint.label('peer_fingerprint'),
+        )
+        .select_from(votes)
+        .join(
+            left,
+            and_(
+                left.publication_id == votes.publication_id,
+                left.output_key == votes.a_output,
+            ),
+        )
+        .join(
+            right,
+            and_(
+                right.publication_id == votes.publication_id,
+                right.output_key == votes.b_output,
+            ),
+        )
+        .where(
+            votes.family == family,
+            left.case_key == votes.case_key,
+            right.case_key == votes.case_key,
+            left.system == votes.a_system,
+            right.system == votes.b_system,
+            left.system != right.system,
+            left.verdict == 'pass',
+            right.verdict == 'pass',
+            left.content_digest != right.content_digest,
+        )
+    )
+
+
+def _fingerprint_conflicts(
+    ballots: CTE, fingerprints_json: str
+) -> Select[Any, Any, Any]:
+    prior = union_all(
+        select(ballots.c.system, ballots.c.fingerprint),
+        select(ballots.c.peer, ballots.c.peer_fingerprint),
+    ).subquery('prior')
+    incoming = (
+        func.json_each(fingerprints_json).table_valued('key', 'value').alias('incoming')
+    )
+    return (
+        select(
+            prior.c.system,
+            prior.c.fingerprint.label('recorded'),
+            incoming.c.value.label('candidate'),
+        )
+        .select_from(prior)
+        .join(incoming, incoming.c.key == prior.c.system)
+        .where(incoming.c.value != prior.c.fingerprint)
+    )
+
+
 def stage(
     database: Database,
     publication: Publication,
@@ -449,93 +523,93 @@ def stage(
         )
 
     milliseconds = int(now.timestamp() * 1000)
-    database.execute(
-        'INSERT INTO publications (id, family, display_name, aspect, render, '
-        'defects, reference, systems, case_count, output_count, created_at, target) '
-        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING',
-        [
-            publication.id,
-            publication.family,
-            publication.display_name,
-            publication.aspect,
-            publication.render,
-            json.dumps(publication.defects),
-            publication.reference,
-            json.dumps(publication.systems, ensure_ascii=False),
-            len(publication.cases),
-            len(publication.outputs),
-            milliseconds,
-            publication.target,
-        ],
+    execute(
+        database,
+        sqlite.insert(schema.Publications)
+        .values(
+            id=publication.id,
+            family=publication.family,
+            display_name=publication.display_name,
+            aspect=publication.aspect,
+            render=publication.render,
+            defects=json.dumps(publication.defects),
+            reference=publication.reference,
+            systems=json.dumps(publication.systems, ensure_ascii=False),
+            case_count=len(publication.cases),
+            output_count=len(publication.outputs),
+            created_at=milliseconds,
+            target=publication.target,
+        )
+        .on_conflict_do_nothing(index_elements=[schema.Publications.id]),
     )
 
     insert_missing(
         database,
-        'cases',
+        schema.Cases,
         (
-            'publication_id',
-            'case_key',
-            'category',
-            'split',
-            'instruction',
-            'checklist',
-            'source',
-        ),
-        (
-            (
-                publication.id,
-                case.key,
-                case.category,
-                case.split,
-                case.instruction,
-                json.dumps(case.checklist, ensure_ascii=False),
-                case.source,
-            )
+            {
+                'publication_id': publication.id,
+                'case_key': case.key,
+                'category': case.category,
+                'split': case.split,
+                'instruction': case.instruction,
+                'checklist': json.dumps(case.checklist, ensure_ascii=False),
+                'source': case.source,
+            }
             for case in publication.cases
         ),
     )
 
     insert_missing(
         database,
-        'outputs',
+        schema.Outputs,
         (
-            'publication_id',
-            'output_key',
-            'case_key',
-            'system',
-            'fingerprint',
-            'verdict',
-            'errored',
-            'length',
-            'content_digest',
-            'content',
-        ),
-        (
-            (
-                publication.id,
-                output.key,
-                output.case_key,
-                output.system,
-                output.fingerprint,
-                output.verdict,
-                int(output.errored),
-                output.length,
-                output.content_digest,
-                output.content,
-            )
+            {
+                'publication_id': publication.id,
+                'output_key': output.key,
+                'case_key': output.case_key,
+                'system': output.system,
+                'fingerprint': output.fingerprint,
+                'verdict': output.verdict,
+                'errored': int(output.errored),
+                'length': output.length,
+                'content_digest': output.content_digest,
+                'content': output.content,
+            }
             for output in publication.outputs
         ),
     )
 
-    database.execute(
-        'INSERT INTO publication_pair_cases '  # noqa: S608
-        '(publication_id, low_system, high_system, case_keys) '
-        'SELECT ?1, low_system, high_system, json_group_array(case_key) '
-        f'FROM ({_ELIGIBLE_CASES} ORDER BY low_system, high_system, a.case_key) '
-        'GROUP BY low_system, high_system '
-        'ON CONFLICT (publication_id, low_system, high_system) '
-        'DO UPDATE SET case_keys = excluded.case_keys',
-        [publication.id],
+    eligible = _eligible_cases(publication.id)
+    ordered = eligible.order_by(
+        eligible.selected_columns.low_system,
+        eligible.selected_columns.high_system,
+        eligible.selected_columns.case_key,
+    ).subquery()
+    pair_cases = sqlite.insert(schema.PublicationPairCases)
+    execute(
+        database,
+        pair_cases.from_select(
+            [
+                schema.PublicationPairCases.publication_id,
+                schema.PublicationPairCases.low_system,
+                schema.PublicationPairCases.high_system,
+                schema.PublicationPairCases.case_keys,
+            ],
+            select(
+                literal(publication.id),
+                ordered.c.low_system,
+                ordered.c.high_system,
+                func.json_group_array(ordered.c.case_key),
+            ).group_by(ordered.c.low_system, ordered.c.high_system),
+        ).on_conflict_do_update(
+            index_elements=[
+                schema.PublicationPairCases.publication_id,
+                schema.PublicationPairCases.low_system,
+                schema.PublicationPairCases.high_system,
+            ],
+            set_={'case_keys': pair_cases.excluded.case_keys},
+        ),
     )
     if read(database, publication.id) != publication:
         raise InputError(
@@ -545,24 +619,58 @@ def stage(
 
 def read(database: Database, publication_id: str) -> Publication:
     """Reconstruct the normalized snapshot and verify its content identity."""
-    rows = database.execute(
-        'SELECT id, target, family, display_name, aspect, render, defects, reference, '
-        'systems, case_count, output_count FROM publications WHERE id = ?',
-        [publication_id],
+    publications = schema.Publications
+    rows = execute(
+        database,
+        select(
+            publications.id,
+            publications.target,
+            publications.family,
+            publications.display_name,
+            publications.aspect,
+            publications.render,
+            publications.defects,
+            publications.reference,
+            publications.systems,
+            publications.case_count,
+            publications.output_count,
+        ).where(publications.id == publication_id),
     ).rows
     if not rows:
         raise InputError(f'Publication `{publication_id}` does not exist.')
     row = rows[0]
-    cases = database.execute(
-        'SELECT case_key AS key, category, split, source, instruction, checklist '
-        'FROM cases WHERE publication_id = ? ORDER BY case_key',
-        [publication_id],
+
+    cases_table = schema.Cases
+    cases = execute(
+        database,
+        select(
+            cases_table.case_key.label('key'),
+            cases_table.category,
+            cases_table.split,
+            cases_table.source,
+            cases_table.instruction,
+            cases_table.checklist,
+        )
+        .where(cases_table.publication_id == publication_id)
+        .order_by(cases_table.case_key),
     ).rows
-    outputs = database.execute(
-        'SELECT output_key AS key, case_key, system, fingerprint, verdict, errored, '
-        'length, content_digest, content FROM outputs WHERE publication_id = ? '
-        'ORDER BY output_key',
-        [publication_id],
+
+    outputs_table = schema.Outputs
+    outputs = execute(
+        database,
+        select(
+            outputs_table.output_key.label('key'),
+            outputs_table.case_key,
+            outputs_table.system,
+            outputs_table.fingerprint,
+            outputs_table.verdict,
+            outputs_table.errored,
+            outputs_table.length,
+            outputs_table.content_digest,
+            outputs_table.content,
+        )
+        .where(outputs_table.publication_id == publication_id)
+        .order_by(outputs_table.output_key),
     ).rows
     try:
         publication = Publication.model_validate(
@@ -600,17 +708,19 @@ def record_preparation(database: Database, metadata: Preparation) -> None:
     publication = read(database, metadata.publication_id)
     if publication.target != metadata.target:
         raise InputError('A preparation must match its publication target.')
-    database.execute(
-        'INSERT INTO publication_preparations '
-        '(publication_id, target, collection_id, case_revision, prepared_at) '
-        'VALUES (?, ?, ?, ?, ?) ON CONFLICT (publication_id) DO NOTHING',
-        [
-            metadata.publication_id,
-            metadata.target,
-            metadata.collection_id,
-            metadata.case_revision,
-            metadata.prepared_at.isoformat(),
-        ],
+    execute(
+        database,
+        sqlite.insert(schema.PublicationPreparations)
+        .values(
+            publication_id=metadata.publication_id,
+            target=metadata.target,
+            collection_id=metadata.collection_id,
+            case_revision=metadata.case_revision,
+            prepared_at=metadata.prepared_at.isoformat(),
+        )
+        .on_conflict_do_nothing(
+            index_elements=[schema.PublicationPreparations.publication_id]
+        ),
     )
     if preparation(database, metadata.publication_id) != metadata:
         raise InputError(
@@ -621,12 +731,18 @@ def record_preparation(database: Database, metadata: Preparation) -> None:
 
 def preparation(database: Database, publication_id: str) -> Preparation | None:
     """Return its preparation, absent for an unmapped historical publication."""
-    rows = database.execute(
-        'SELECT publication_id, target, collection_id, case_revision, prepared_at '
-        'FROM publication_preparations WHERE publication_id = ?',
-        [publication_id],
-    ).rows
-    return Preparation.model_validate(rows[0]) if rows else None
+    preparations = schema.PublicationPreparations
+    return fetch_one(
+        database,
+        select(
+            preparations.publication_id,
+            preparations.target,
+            preparations.collection_id,
+            preparations.case_revision,
+            preparations.prepared_at,
+        ).where(preparations.publication_id == publication_id),
+        Preparation,
+    )
 
 
 def read_prepared(database: Database, publication_id: str) -> Publication:
@@ -641,18 +757,22 @@ def refuse_fingerprint_conflicts(
     store: VotingTarget,
 ) -> None:
     """Refuse evidence that could pool different fingerprints under one system."""
-    rows = database.execute(
-        f'WITH ballots AS ({_ballot_outputs(1)}) '
-        f'{_fingerprint_conflicts(2)} ORDER BY prior.system, recorded LIMIT 1',
-        [publication.family, _fingerprint_json(publication)],
-    ).rows
-    if rows:
-        conflict = rows[0]
+    ballots = _ballot_outputs(publication.family).cte('ballots')
+    conflicts = _fingerprint_conflicts(ballots, _fingerprint_json(publication))
+    conflict = fetch_one(
+        database,
+        conflicts.order_by(
+            conflicts.selected_columns.system,
+            conflicts.selected_columns.recorded,
+        ).limit(1),
+        _FingerprintConflict,
+    )
+    if conflict is not None:
         raise InputError(
             f'Family `{publication.family}` has voting evidence in `{store}` for '
-            f'system `{conflict["system"]}` under fingerprint '
-            f'`{conflict["recorded"]}`. '
-            f'This publication uses `{conflict["candidate"]}`. Give the changed '
+            f'system `{conflict.system}` under fingerprint '
+            f'`{conflict.recorded}`. '
+            f'This publication uses `{conflict.candidate}`. Give the changed '
             'configuration a distinct system ID and display name, update the family '
             'and its reference as needed, then rerun, collect and prepare again. '
             'See `docs/guide/authoring.md#systems`.'
@@ -674,39 +794,75 @@ def activate(
 ) -> bool:
     """Atomically activate a complete verified publication for its family."""
     publication = read(database, publication_id)
-    active = database.execute(
-        'SELECT publication_id FROM active WHERE family = ?', [publication.family]
-    ).rows
-    if active and active[0]['publication_id'] == publication_id:
-        return False
-    milliseconds = int(now.timestamp() * 1000)
-    activated = database.execute(
-        f'WITH expected AS ({_ELIGIBLE_CASES}), stored AS ('  # noqa: S608
-        'SELECT low_system, high_system, value AS case_key '
-        'FROM publication_pair_cases, json_each(case_keys) '
-        f'WHERE publication_id = ?1), ballots AS ({_ballot_outputs(2)}) '
-        'INSERT INTO active (family, publication_id, activated_at) '
-        'SELECT ?2, ?1, ?3 '
-        'WHERE (SELECT count(*) FROM cases WHERE publication_id = ?1) = ?4 '
-        'AND (SELECT count(*) FROM outputs WHERE publication_id = ?1) = ?5 '
-        'AND NOT EXISTS (SELECT * FROM expected EXCEPT SELECT * FROM stored) '
-        'AND NOT EXISTS (SELECT * FROM stored EXCEPT SELECT * FROM expected) '
-        f'AND (NOT ?6 OR NOT EXISTS ({_fingerprint_conflicts(7)})) '
-        'ON CONFLICT (family) DO UPDATE SET '
-        'publication_id = excluded.publication_id, '
-        'activated_at = excluded.activated_at '
-        'RETURNING publication_id',
-        [
-            publication.id,
-            publication.family,
-            milliseconds,
-            len(publication.cases),
-            len(publication.outputs),
-            int(preserve_ballots),
-            _fingerprint_json(publication),
-        ],
+    active_publication = fetch_scalar(
+        database,
+        select(schema.Active.publication_id).where(
+            schema.Active.family == publication.family
+        ),
+        str,
     )
-    if activated.rows != [{'publication_id': publication.id}]:
+    if active_publication == publication_id:
+        return False
+
+    milliseconds = int(now.timestamp() * 1000)
+    expected = _eligible_cases(publication.id).cte('expected')
+    pair_cases = schema.PublicationPairCases
+    each_case = func.json_each(pair_cases.case_keys).table_valued('value')
+    stored = (
+        select(
+            pair_cases.low_system,
+            pair_cases.high_system,
+            each_case.c.value.label('case_key'),
+        )
+        .select_from(pair_cases, each_case)
+        .where(pair_cases.publication_id == publication.id)
+        .cte('stored')
+    )
+    conditions = [
+        select(func.count())
+        .select_from(schema.Cases)
+        .where(schema.Cases.publication_id == publication.id)
+        .scalar_subquery()
+        == len(publication.cases),
+        select(func.count())
+        .select_from(schema.Outputs)
+        .where(schema.Outputs.publication_id == publication.id)
+        .scalar_subquery()
+        == len(publication.outputs),
+        ~exists(except_(select(expected), select(stored))),
+        ~exists(except_(select(stored), select(expected))),
+    ]
+    if preserve_ballots:
+        ballots = _ballot_outputs(publication.family).cte('ballots')
+        conditions.append(
+            ~exists(_fingerprint_conflicts(ballots, _fingerprint_json(publication)))
+        )
+    active_insert = sqlite.insert(schema.Active)
+    activated_id = fetch_scalar(
+        database,
+        active_insert.from_select(
+            [
+                schema.Active.family,
+                schema.Active.publication_id,
+                schema.Active.activated_at,
+            ],
+            select(
+                literal(publication.family),
+                literal(publication.id),
+                literal(milliseconds),
+            ).where(*conditions),
+        )
+        .on_conflict_do_update(
+            index_elements=[schema.Active.family],
+            set_={
+                'publication_id': active_insert.excluded.publication_id,
+                'activated_at': active_insert.excluded.activated_at,
+            },
+        )
+        .returning(schema.Active.publication_id),
+        str,
+    )
+    if activated_id != publication.id:
         if preserve_ballots:
             refuse_fingerprint_conflicts(database, publication, publication.target)
         raise InputError(

@@ -8,10 +8,13 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Json, TypeAdapter
+from sqlalchemy import and_, delete, exists, func, literal, or_, select, tuple_, update
+from sqlalchemy.dialects import sqlite
+from sqlalchemy.orm import aliased
 
-from assistant_bench import report
+from assistant_bench import report, schema
 from assistant_bench.arena import d1, settlement
-from assistant_bench.database import Database
+from assistant_bench.database import Database, execute, fetch_all
 from assistant_bench.families import (
     Family,
     FamilyName,
@@ -112,25 +115,49 @@ def stage(
     )
     canonical = json.dumps(facts, sort_keys=True, separators=(',', ':'))
     digest = hashlib.sha256(canonical.encode()).hexdigest()
-    database.execute(
-        """WITH prior AS (
-               SELECT hour_slot, digest FROM leaderboard_candidates
-               WHERE family = ?1 ORDER BY hour_slot DESC LIMIT 1
-           )
-           INSERT INTO leaderboard_candidates (
-               family, hour_slot, captured_at, digest, report_json, cutoffs_json
-           )
-           SELECT ?1, ?2, ?3, ?4, ?5, ?6
-           WHERE ((?5 IS NOT NULL OR ?7) AND NOT EXISTS (SELECT 1 FROM prior))
-               OR EXISTS (SELECT 1 FROM prior WHERE hour_slot < ?2 AND digest <> ?4)""",
-        (
-            family,
-            _timestamp(_hour(started_at)),
-            _timestamp(captured_at),
-            digest,
-            payload,
-            None if cutoffs is None else cutoffs.model_dump_json(),
-            int(has_archive),
+
+    candidates = schema.LeaderboardCandidates
+    hour_slot = _timestamp(_hour(started_at))
+    captured = _timestamp(captured_at)
+    cutoffs_json = None if cutoffs is None else cutoffs.model_dump_json()
+
+    prior = (
+        select(candidates.hour_slot, candidates.digest)
+        .where(candidates.family == family)
+        .order_by(candidates.hour_slot.desc())
+        .limit(1)
+        .cte('prior')
+    )
+    advanced = exists(
+        select(literal(1))
+        .select_from(prior)
+        .where(prior.c.hour_slot < hour_slot, prior.c.digest != digest)
+    )
+    condition = (
+        or_(~exists(select(literal(1)).select_from(prior)), advanced)
+        if payload is not None or has_archive
+        else advanced
+    )
+    source = select(
+        literal(family),
+        literal(hour_slot),
+        literal(captured),
+        literal(digest),
+        literal(payload),
+        literal(cutoffs_json),
+    ).where(condition)
+    execute(
+        database,
+        sqlite.insert(candidates).from_select(
+            [
+                candidates.family,
+                candidates.hour_slot,
+                candidates.captured_at,
+                candidates.digest,
+                candidates.report_json,
+                candidates.cutoffs_json,
+            ],
+            source,
         ),
     )
 
@@ -150,23 +177,38 @@ def export(
     Return whether the overlay contains an unconfirmed, matured candidate.
     """
     deadline = _timestamp(now - EMBARGO)
-    rows = database.execute(
-        """WITH ready AS (
-               SELECT family, max(hour_slot) AS hour_slot
-               FROM leaderboard_candidates
-               WHERE (published_at IS NOT NULL OR captured_at <= ?)
-                   AND family IN (SELECT value FROM json_each(?))
-               GROUP BY family
-           )
-           SELECT family, hour_slot, report_json AS report, published_at
-           FROM leaderboard_candidates JOIN ready USING (family, hour_slot)
-           ORDER BY family""",
-        (deadline, json.dumps(families)),
-    ).rows
+    candidates = schema.LeaderboardCandidates
+    family_values = func.json_each(json.dumps(list(families))).table_valued('value')
+    ready = (
+        select(candidates.family, func.max(candidates.hour_slot).label('hour_slot'))
+        .where(
+            or_(
+                candidates.published_at.is_not(None), candidates.captured_at <= deadline
+            ),
+            candidates.family.in_(select(family_values.c.value)),
+        )
+        .group_by(candidates.family)
+        .cte('ready')
+    )
+    stmt = (
+        select(
+            candidates.family,
+            candidates.hour_slot,
+            candidates.report_json.label('report'),
+            candidates.published_at,
+        )
+        .join(
+            ready,
+            and_(
+                candidates.family == ready.c.family,
+                candidates.hour_slot == ready.c.hour_slot,
+            ),
+        )
+        .order_by(candidates.family)
+    )
     standings: Standings = {}
     manifest: Manifest = {}
-    for row in rows:
-        candidate = _Candidate.model_validate(row)
+    for candidate in fetch_all(database, stmt, _Candidate):
         if candidate.report is not None and candidate.report.family != candidate.family:
             raise ValueError('The candidate report names another family.')
         standings[candidate.family] = candidate.report
@@ -183,31 +225,46 @@ def mark(database: Database, manifest: Mapping[str, int], now: datetime) -> None
     if not manifest:
         return
 
-    database.execute(
-        """UPDATE leaderboard_candidates AS candidate SET published_at = ?
-           WHERE (family, hour_slot) IN (SELECT key, value FROM json_each(?))
-               AND captured_at <= ? AND published_at IS NULL
-               AND NOT EXISTS (
-                   SELECT 1 FROM leaderboard_candidates AS newer
-                   WHERE newer.family = candidate.family
-                       AND newer.published_at IS NOT NULL
-                       AND newer.hour_slot > candidate.hour_slot
-               )""",
-        (_timestamp(now), json.dumps(dict(manifest)), _timestamp(now - EMBARGO)),
+    candidates = schema.LeaderboardCandidates
+    entries = func.json_each(json.dumps(dict(manifest))).table_valued('key', 'value')
+    newer = aliased(candidates, name='newer')
+    execute(
+        database,
+        update(candidates)
+        .values(published_at=_timestamp(now))
+        .where(
+            tuple_(candidates.family, candidates.hour_slot).in_(
+                select(entries.c.key, entries.c.value)
+            ),
+            candidates.captured_at <= _timestamp(now - EMBARGO),
+            candidates.published_at.is_(None),
+            ~exists(
+                select(literal(1)).where(
+                    newer.family == candidates.family,
+                    newer.published_at.is_not(None),
+                    newer.hour_slot > candidates.hour_slot,
+                )
+            ),
+        ),
     )
-    database.execute(
-        """DELETE FROM leaderboard_candidates AS older
-           WHERE EXISTS (
-               SELECT 1 FROM leaderboard_candidates AS deployed
-               WHERE deployed.family = older.family
-                   AND deployed.published_at IS NOT NULL
-                   AND deployed.hour_slot > older.hour_slot
-                   AND (
-                       older.published_at IS NULL
-                       OR date(deployed.hour_slot / 1000, 'unixepoch')
-                           = date(older.hour_slot / 1000, 'unixepoch')
-                   )
-           )"""
+
+    deployed = aliased(candidates, name='deployed')
+    execute(
+        database,
+        delete(candidates).where(
+            exists(
+                select(literal(1)).where(
+                    deployed.family == candidates.family,
+                    deployed.published_at.is_not(None),
+                    deployed.hour_slot > candidates.hour_slot,
+                    or_(
+                        candidates.published_at.is_(None),
+                        func.date(deployed.hour_slot / 1000, 'unixepoch')
+                        == func.date(candidates.hour_slot / 1000, 'unixepoch'),
+                    ),
+                )
+            )
+        ),
     )
 
 

@@ -4,7 +4,6 @@ import sqlite3
 from collections.abc import Generator, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing, contextmanager
-from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
 from threading import Barrier
@@ -119,7 +118,9 @@ def start(owner: Claim, number: int = 0) -> AttemptStart:
 
 
 def admission(attempt: AttemptStart, identifier: str = 'request-a') -> RequestAdmission:
-    return RequestAdmission(identifier, attempt.id, attempt.started_at)
+    return RequestAdmission(
+        id=identifier, attempt_id=attempt.id, created_at=attempt.started_at
+    )
 
 
 def register(state: State, parent: Run, owner: Claim) -> None:
@@ -197,13 +198,15 @@ class TestState:
             parent = (
                 run()
                 if known
-                else replace(run(), code_revision=None, case_revision=None)
+                else run().model_copy(
+                    update={'code_revision': None, 'case_revision': None}
+                )
             )
             state.create_run(parent)
             state.create_run(parent)
 
             with pytest.raises(InputError):
-                state.create_run(replace(parent, case_revision='3' * 40))
+                state.create_run(parent.model_copy(update={'case_revision': '3' * 40}))
 
             state.create_run(parent)
 
@@ -346,8 +349,8 @@ class TestState:
             other = claim(run(), 'other-claim', slot='another-slot')
             assert state.claim_attempt(other)
             for changed in [
-                replace(attempt, claim_id=other.id),
-                replace(attempt, started_at=start(owner, 1).started_at),
+                attempt.model_copy(update={'claim_id': other.id}),
+                attempt.model_copy(update={'started_at': start(owner, 1).started_at}),
             ]:
                 with pytest.raises(InputError):
                     state.begin_attempt(changed)
@@ -376,8 +379,8 @@ class TestState:
             following = start(owner, 1)
             assert state.begin_attempt(following)
             for changed in [
-                replace(request, attempt_id=following.id),
-                replace(request, created_at='2025-01-01T00:00:00Z'),
+                request.model_copy(update={'attempt_id': following.id}),
+                request.model_copy(update={'created_at': '2025-01-01T00:00:00Z'}),
             ]:
                 with pytest.raises(InputError):
                     state.admit_request(changed)
@@ -632,7 +635,14 @@ class TestState:
             assert artifact['source_trial_id'] == reference[2]
             assert artifact['commit_sha'] == COMMIT
             assert state.artifact_generation(parent.scope).artifacts == (
-                TrialArtifact(*reference),
+                TrialArtifact(
+                    run_id=reference[0],
+                    trial_id=reference[1],
+                    source_trial_id=reference[2],
+                    commit_sha=reference[3],
+                    path=reference[4],
+                    manifest_digest=reference[5],
+                ),
             )
             assert state.entries(parent.scope) == []
             assert state.requests(parent.scope) == []
@@ -702,7 +712,9 @@ class TestState:
             self, state: State
         ) -> None:
             parent, owner = claimed(state)
-            second = replace(owner, id='claim-b', trial='trial-b', slot_key='slot-b')
+            second = owner.model_copy(
+                update={'id': 'claim-b', 'trial': 'trial-b', 'slot_key': 'slot-b'}
+            )
             assert state.claim_attempt(second)
             assert state.begin_attempt(start(owner))
             state.record_entry(owner.id, entry(parent, owner).model_dump_json())
@@ -836,8 +848,8 @@ class TestState:
                 target = claim(other, 'claim-b', slot='slot-b')
                 assert state.claim_attempt(target)
             elif binding == 'another-trial':
-                target = replace(
-                    owner, id='claim-b', trial='trial-b', slot_key='slot-b'
+                target = owner.model_copy(
+                    update={'id': 'claim-b', 'trial': 'trial-b', 'slot_key': 'slot-b'}
                 )
                 assert state.claim_attempt(target)
             if binding != 'no-entry':
@@ -941,7 +953,7 @@ class TestState:
             assert state.activate_collection('next', 'old')
 
             assert state.output_generation('sample') == OutputGeneration(
-                'next', (first, second)
+                id='next', outputs=(first, second)
             )
             assert state.collection_generation('old') == pinned
 
@@ -952,7 +964,7 @@ class TestState:
             first, second = output('first'), output('second')
             pending = collection('next', [first, second])
             if failure == 'digest':
-                pending = replace(pending, manifest_digest='0' * 64)
+                pending = pending.model_copy(update={'manifest_digest': '0' * 64})
             state.begin_collection(pending)
             state.stage_outputs('next', [(0, first)])
             if failure != 'missing':
@@ -1051,7 +1063,9 @@ class TestState:
         def test_an_empty_generation_retains_its_compare_and_swap_identity(
             self, state: State
         ) -> None:
-            assert state.output_generation('sample') == OutputGeneration(None, ())
+            assert state.output_generation('sample') == OutputGeneration(
+                id=None, outputs=()
+            )
             sealed(state, 'empty')
             assert state.activate_collection('empty', None)
             following = output('next')
@@ -1061,10 +1075,10 @@ class TestState:
             assert not state.activate_collection('next', None)
             assert state.activate_collection('next', empty.id)
 
-            assert empty == OutputGeneration('empty', ())
+            assert empty == OutputGeneration(id='empty', outputs=())
             assert state.collection_generation('empty') == empty
             assert state.output_generation('sample') == OutputGeneration(
-                'next', (following,)
+                id='next', outputs=(following,)
             )
 
     class TestCollectionGeneration:

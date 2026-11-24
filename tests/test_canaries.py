@@ -584,17 +584,17 @@ class TestRun:
             log: Path | None = None,
         ) -> Run:
             parent = Run(
-                run_id,
-                scope,
-                config.job_name,
-                context.code_revision,
-                context.case_revision,
-                START.isoformat(),
+                id=run_id,
+                scope=scope,
+                job=config.job_name,
+                code_revision=context.code_revision,
+                case_revision=context.case_revision,
+                created_at=START.isoformat(),
             )
             context.state.create_run(parent)
             recorded.append(run_id)
             context.state.create_run(
-                replace(parent, id='unrelated', job='concurrent-job')
+                parent.model_copy(update={'id': 'unrelated', 'job': 'concurrent-job'})
             )
             if failure == 'interrupt':
                 raise KeyboardInterrupt

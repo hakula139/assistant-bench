@@ -38,12 +38,12 @@ class TestReconcilePublications:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         run = Run(
-            'run-a',
-            'sample',
-            'job-a',
-            REVISION,
-            REVISION,
-            datetime.now(UTC).isoformat(),
+            id='run-a',
+            scope='sample',
+            job='job-a',
+            code_revision=REVISION,
+            case_revision=REVISION,
+            created_at=datetime.now(UTC).isoformat(),
         )
         run_context.state.create_run(run)
         run_context.state.record_pending_artifact(

@@ -99,6 +99,7 @@ pyproject
 pytest
 PYTHONDEVMODE
 PYTHONDONTWRITEBYTECODE
+qmark
 RDONLY
 remoteip
 repr

@@ -476,12 +476,12 @@ class TestMaterializeSources:
             directory = finish_job(config)
             private_state.create_run(
                 Run(
-                    name,
-                    family.name,
-                    name,
-                    '1' * 40,
-                    private_repository.revision,
-                    START.isoformat(),
+                    id=name,
+                    scope=family.name,
+                    job=name,
+                    code_revision='1' * 40,
+                    case_revision=private_repository.revision,
+                    created_at=START.isoformat(),
                 )
             )
             for result_path in sorted(directory.glob('*/result.json')):

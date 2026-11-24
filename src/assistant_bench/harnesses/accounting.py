@@ -94,9 +94,9 @@ class TrialAccounting:
             self._fail('The paid attempt cannot start again.')
         self._started_at = started_at
         self._attempt = AttemptStart(
-            str(uuid4()),
-            self.claim_id,
-            _timestamp.dump_python(started_at, mode='json'),
+            id=str(uuid4()),
+            claim_id=self.claim_id,
+            started_at=_timestamp.dump_python(started_at, mode='json'),
         )
         try:
             started = self._state.begin_attempt(self._attempt)
@@ -113,9 +113,9 @@ class TrialAccounting:
         self._requests[request_id] = None
         self._apis[request_id] = api
         request = RequestAdmission(
-            request_id,
-            self._attempt.id,
-            _timestamp.dump_python(datetime.now(UTC), mode='json'),
+            id=request_id,
+            attempt_id=self._attempt.id,
+            created_at=_timestamp.dump_python(datetime.now(UTC), mode='json'),
         )
         try:
             admitted = self._state.admit_request(request)
