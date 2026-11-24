@@ -181,6 +181,7 @@ class TestPrepare:
     ) -> None:
         family = load_family('smoke-text')
         other = family.model_copy(update={'name': 'other'})
+        cases = load_cases(family)[:1]
         bare = make_system()
         prompted = bare.model_copy(update={'prompt': 'Keep the order.'})
         configs = [
@@ -188,7 +189,7 @@ class TestPrepare:
                 jobs.job(
                     scope,
                     [system],
-                    render_tasks(scope, load_cases(scope)[:1], root=tmp_path),
+                    render_tasks(scope, cases, root=tmp_path),
                     root=tmp_path,
                     sources=[],
                 ),
