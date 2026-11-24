@@ -76,7 +76,7 @@ When Harbor exits, `bench run` stages completed trial artifacts on a private `ar
 
 The same command evaluates its canary's frozen, audited snapshot before family trials start. A PR API failure leaves the branch and receipt recoverable through `bench run` or `bench collect`, without another model call. A closed, unmerged PR needs reopening. A process killed before sealing its receipts leaves an unfinished publication that requires operator inspection, and affected commands stop before paying for new work.
 
-Because a rerun generates only the trials that no earlier job of the family finished, adding a system to `family.toml` and rerunning sends requests for that system alone.
+After you add a system to `family.toml`, a full-family rerun sends requests only for the new system if Harbor can [reuse every trial for the existing systems](../design/architecture.md#reruns). Adding the family's first installed agent changes its environment to `InstalledDocker`, so a full rerun can send paid requests for existing systems too.
 
 An edited task reruns, regrades, or reuses its trials by its version bump, as [Authoring](authoring.md#tasks) lists, and an edited case [reruns](../design/architecture.md#reruns) on every system. Publication proves the selected source and output identities. Earlier releases and saved evidence retain their frozen content.
 
