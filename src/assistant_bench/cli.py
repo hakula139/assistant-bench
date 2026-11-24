@@ -82,8 +82,8 @@ from assistant_bench.tasks import (
 SYSTEMS_DOC = 'docs/guide/authoring.md#systems'
 HARBOR_DOC = 'docs/research/harbor.md#quirks-of-the-pinned-release'
 SYSTEM_RENAME_GUIDE = (
-    'Give a changed system a new name and keep the old name only in closed '
-    f'reports, as `{SYSTEMS_DOC}` describes.'
+    'Give each changed system a new name in each affected family and keep '
+    f'the old table while other families list it, as `{SYSTEMS_DOC}` describes.'
 )
 USAGE_SOURCES: dict[Basis, str] = {'own': 'its own', 'borrowed': "another system's"}
 
@@ -723,10 +723,9 @@ def _refuse_drift(family: Family, systems: list[System], context: RunContext) ->
     moved = _moved(frozen, systems)
     if not drifted and not moved:
         return
-    renamed = {name for name, _, _ in moved} | {
+    reported = {name for name, _, _ in moved} | {
         name for name, _, _ in drifted if name in frozen and frozen[name] is None
     }
-    rerun = sorted({name for name, _, _ in drifted} - renamed)
     lines = [
         f'Family `{family.name}` has systems that changed their fingerprints:',
         *(_moved_line(family.name, *change) for change in moved),
@@ -736,14 +735,9 @@ def _refuse_drift(family: Family, systems: list[System], context: RunContext) ->
             for name, recorded, current in drifted
         ),
     ]
-    if renamed:
-        lines.append(
-            f'Closed reports name {code(sorted(renamed))}. {SYSTEM_RENAME_GUIDE}'
-        )
-    if rerun:
-        lines.append(
-            f'Give the changed systems {code(rerun)} new names before the next run.'
-        )
+    if reported:
+        lines.append(f'Closed reports name {code(sorted(reported))}.')
+    lines.append(SYSTEM_RENAME_GUIDE)
     raise InputError('\n'.join(lines))
 
 
