@@ -1,3 +1,4 @@
+import hashlib
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -145,6 +146,24 @@ class TestStage:
             }
             for offset, value in [(0, closed_report), (2, changed), (3, closed_report)]
         ]
+
+    def test_uses_ascii_escaped_digest_for_non_ascii_reports(
+        self, private_store: SQLiteDatabase, closed_report: Report
+    ) -> None:
+        non_ascii = closed_report.model_copy(update={'display_name': 'Café'})
+        expected = hashlib.sha256(
+            json.dumps(
+                non_ascii.model_dump(mode='json', exclude={'round', 'closed_at'}),
+                sort_keys=True,
+                separators=(',', ':'),
+                ensure_ascii=True,
+            ).encode()
+        ).hexdigest()
+
+        leaderboard.stage(private_store, non_ascii.family, non_ascii, NOW, NOW)
+
+        (row,) = private_store.execute('SELECT digest FROM leaderboard_candidates').rows
+        assert row == {'digest': expected}
 
 
 class TestExport:

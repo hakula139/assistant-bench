@@ -890,9 +890,9 @@ def activate(
 # ── Shared Helpers ──
 
 
-def canonical_digest(value: JsonValue) -> str:
+def canonical_digest(value: JsonValue, *, ensure_ascii: bool = False) -> str:
     canonical = json.dumps(
-        value, sort_keys=True, separators=(',', ':'), ensure_ascii=False
+        value, sort_keys=True, separators=(',', ':'), ensure_ascii=ensure_ascii
     )
     return hashlib.sha256(canonical.encode()).hexdigest()
 

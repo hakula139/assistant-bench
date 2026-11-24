@@ -107,7 +107,7 @@ def stage(
         if closed is None
         else closed.model_dump(mode='json', exclude={'round', 'closed_at'})
     )
-    digest = canonical_digest(facts)
+    digest = canonical_digest(facts, ensure_ascii=True)
 
     candidates = schema.LeaderboardCandidates
     hour_slot = timestamp_ms(_hour(started_at))

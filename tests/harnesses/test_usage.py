@@ -65,6 +65,51 @@ class TestMeasuredUsage:
                     'cache_creation': {'ephemeral_5m_input_tokens': 10},
                 },
             ),
+            ('openai-responses', {'output_tokens': 40}),
+            ('openai-responses', {'input_tokens': 120}),
+            ('openai-responses', {'input_tokens': -1, 'output_tokens': 40}),
+            ('openai-responses', {'input_tokens': 120, 'output_tokens': -1}),
+            ('openai-responses', {'input_tokens': 1.5, 'output_tokens': 40}),
+            (
+                'openai-chat-completions',
+                {
+                    'prompt_tokens': 120,
+                    'completion_tokens': 40,
+                    'prompt_tokens_details': {'cached_tokens': -1},
+                },
+            ),
+            (
+                'anthropic-messages',
+                {
+                    'input_tokens': 20,
+                    'output_tokens': 40,
+                    'cache_read_input_tokens': -1,
+                },
+            ),
+            (
+                'openai-chat-completions',
+                {
+                    'prompt_tokens': 120,
+                    'completion_tokens': 40,
+                    'completion_tokens_details': {'reasoning_tokens': 41},
+                },
+            ),
+            (
+                'openai-responses',
+                {
+                    'input_tokens': 120,
+                    'output_tokens': 40,
+                    'output_tokens_details': {'reasoning_tokens': 41},
+                },
+            ),
+            (
+                'anthropic-messages',
+                {
+                    'input_tokens': 20,
+                    'output_tokens': 40,
+                    'output_tokens_details': {'thinking_tokens': 41},
+                },
+            ),
         ],
         ids=[
             'non-object',
@@ -77,6 +122,16 @@ class TestMeasuredUsage:
             'inconsistent-total',
             'inconsistent-cache-ttl-total',
             'missing-cache-ttl-counter',
+            'missing-input',
+            'missing-output',
+            'negative-input',
+            'negative-output',
+            'fractional-input',
+            'chat-negative-cache',
+            'messages-negative-cache',
+            'chat-excess-reasoning',
+            'responses-excess-reasoning',
+            'messages-excess-thinking',
         ],
     )
     def test_leaves_inconsistent_counts_unknown(

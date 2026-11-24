@@ -1906,9 +1906,7 @@ class TestTerminus:
 
             assert result.content == 'Hello there.'
             (sent,) = tls_endpoint.requests
-            assert sent.path == (
-                '/v1/responses' if api == 'openai-responses' else '/v1/chat/completions'
-            )
+            assert sent.path == '/v1/responses'
             assert sent.headers['authorization'] == 'Bearer test-key'
             assert sent.headers['x-trace'] == 'bench'
             assert is_closed()

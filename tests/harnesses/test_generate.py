@@ -274,31 +274,8 @@ class TestGenerate:
                         if api == 'openai-chat-completions'
                         else 'output_tokens_details'
                     ] = {'reasoning_tokens': 0}
-            elif scenario.startswith('missing-'):
-                usage.pop(input_key if scenario == 'missing-input' else output_key)
-            elif scenario in ('negative-input', 'fractional-input'):
-                usage[input_key] = -1 if scenario == 'negative-input' else 1.5
-            elif scenario == 'negative-output':
-                usage[output_key] = -1
-            elif scenario == 'negative-cache':
-                if api == 'anthropic-messages':
-                    usage['cache_read_input_tokens'] = -1
-                else:
-                    usage[
-                        'prompt_tokens_details'
-                        if api == 'openai-chat-completions'
-                        else 'input_tokens_details'
-                    ] = {'cached_tokens': -1}
             else:
-                usage[
-                    'completion_tokens_details'
-                    if api == 'openai-chat-completions'
-                    else 'output_tokens_details'
-                ] = {
-                    'thinking_tokens'
-                    if api == 'anthropic-messages'
-                    else 'reasoning_tokens': 41
-                }
+                usage[input_key] = -1
             if api == 'anthropic-messages':
                 endpoint.stream = message_stream(payload)
             else:

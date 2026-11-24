@@ -568,6 +568,24 @@ class TestPreparation:
         assert private_store.execute('SELECT * FROM active').rows == []
         assert publication.preparation(private_store, published.id) is None
 
+    @pytest.mark.parametrize(
+        'statement',
+        [
+            'UPDATE cases SET source = NULL',
+            "UPDATE cases SET checklist = '{}'",
+        ],
+        ids=['null-source', 'malformed-checklist'],
+    )
+    def test_read_rejects_invalid_stored_rows(
+        self, private_store: SQLiteDatabase, statement: str
+    ) -> None:
+        published = text_publication()
+        publication.stage(private_store, published, NOW)
+        private_store.execute(statement)
+
+        with pytest.raises(InputError, match=f'Publication `{published.id}`'):
+            publication.read(private_store, published.id)
+
 
 class TestRefuseFingerprintConflicts:
     @pytest.mark.parametrize('changed_index', [0, 1], ids=['a-system', 'b-system'])
@@ -867,7 +885,7 @@ class TestStageAndActivate:
             stale_fixture(PUBLICATION_FIXTURE, dumped)
 
 
-def dump(connection: sqlite3.Connection, *, original_schema: bool = False) -> str:
+def dump(connection: sqlite3.Connection) -> str:
     """Return the rows `publish` writes as SQL that `wrangler d1 execute` loads."""
     lines: list[str] = []
     for table, order in (
@@ -878,16 +896,10 @@ def dump(connection: sqlite3.Connection, *, original_schema: bool = False) -> st
         ('active', 'family'),
     ):
         cursor = connection.execute(f'SELECT * FROM {table} ORDER BY {order}')
-        names = [column[0] for column in cursor.description]
-        selected = [
-            index
-            for index, name in enumerate(names)
-            if not original_schema or name not in ('target', 'source')
-        ]
-        columns = ', '.join(names[index] for index in selected)
+        columns = ', '.join(column[0] for column in cursor.description)
         lines.extend(
             f'INSERT INTO {table} ({columns}) VALUES '
-            f'({", ".join(literal(row[index]) for index in selected)});'
+            f'({", ".join(literal(value) for value in row)});'
             for row in cursor
         )
     return '\n'.join(lines) + '\n'
