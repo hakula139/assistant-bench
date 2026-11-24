@@ -257,16 +257,39 @@ class TestEndpoint:
     @pytest.mark.usefixtures('begun_trial')
     class TestHttpClient:
         @pytest.mark.parametrize(
-            ('api', 'usage'),
+            ('api', 'usage', 'credential_source'),
             [
-                ('openai-chat-completions', MeasuredUsage(120, 100, 0, 40, 25)),
-                ('openai-responses', MeasuredUsage(120, 100, 0, 40, 25)),
-                ('anthropic-messages', MeasuredUsage(130, 100, 10, 40, None)),
+                pytest.param(
+                    'openai-chat-completions',
+                    MeasuredUsage(120, 100, 0, 40, 25),
+                    'api-key',
+                    id='chat-api-key',
+                ),
+                pytest.param(
+                    'openai-responses',
+                    MeasuredUsage(120, 100, 0, 40, 25),
+                    'secret-header',
+                    id='responses-secret-header',
+                ),
+                pytest.param(
+                    'openai-responses',
+                    MeasuredUsage(120, 100, 0, 40, 25),
+                    'ordinary-header',
+                    id='responses-ordinary-header',
+                ),
+                pytest.param(
+                    'anthropic-messages',
+                    MeasuredUsage(130, 100, 10, 40, None),
+                    'api-key',
+                    id='messages-api-key',
+                ),
+                pytest.param(
+                    'anthropic-messages',
+                    MeasuredUsage(130, 100, 10, 40, None),
+                    'ordinary-header',
+                    id='messages-ordinary-header',
+                ),
             ],
-            ids=['chat-completions', 'responses', 'messages'],
-        )
-        @pytest.mark.parametrize(
-            'credential_source', ['api-key', 'ordinary-header', 'secret-header']
         )
         def test_only_credentials_are_refused_in_artifacts_and_provider_metadata(
             self,

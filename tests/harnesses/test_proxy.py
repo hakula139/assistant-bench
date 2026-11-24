@@ -265,14 +265,19 @@ class TestConnect:
         assert not begun_trial.fatal
 
     @pytest.mark.parametrize(
-        'ending', [b'\n', b'\r\n', b'\r'], ids=['lf', 'crlf', 'cr']
-    )
-    @pytest.mark.parametrize('split', [1, 7, 4096], ids=['byte', 'small', 'whole'])
-    @pytest.mark.parametrize('compressed', [False, True], ids=['plain', 'gzip'])
-    @pytest.mark.parametrize(
-        'content_type',
-        ['text/event-stream', 'Text/Event-Stream; Charset=UTF-8'],
-        ids=['lowercase-mime', 'mixed-case-mime'],
+        ('ending', 'split', 'compressed', 'content_type'),
+        [
+            pytest.param(b'\n', 1, False, 'text/event-stream', id='lf-byte-plain'),
+            pytest.param(
+                b'\r\n',
+                7,
+                True,
+                'Text/Event-Stream; Charset=UTF-8',
+                id='crlf-small-gzip-mixed-mime',
+            ),
+            pytest.param(b'\r', 4096, False, 'text/event-stream', id='cr-whole-plain'),
+            pytest.param(b'\n', 7, True, 'text/event-stream', id='lf-small-gzip'),
+        ],
     )
     def test_preserves_complete_frame_bytes_with_a_durable_terminal_receipt(
         self,

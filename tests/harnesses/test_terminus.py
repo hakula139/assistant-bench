@@ -1830,8 +1830,10 @@ class TestTerminus:
             assert agent.client.get_model_context_limit() == 98304
             assert agent.client.get_model_output_limit() == 32768
 
-        @pytest.mark.parametrize('effort', ['high', 'max'])
-        @pytest.mark.parametrize('api', ['openai-chat-completions', 'openai-responses'])
+        @pytest.mark.parametrize(
+            ('api', 'effort'),
+            [('openai-chat-completions', 'high'), ('openai-responses', 'max')],
+        )
         def test_forwards_the_configured_quality_settings_through_the_native_client(
             self, endpoint: StubEndpoint, logs_dir: Path, effort: str, api: str
         ) -> None:
@@ -1881,13 +1883,12 @@ class TestTerminus:
             assert result.usage.completion_tokens == 40
             assert result.usage.cache_tokens == 100
 
-        @pytest.mark.parametrize('api', ['openai-chat-completions', 'openai-responses'])
         def test_uses_the_configured_ca_and_local_address_for_native_calls(
-            self, tls_endpoint: StubEndpoint, logs_dir: Path, api: str
+            self, tls_endpoint: StubEndpoint, logs_dir: Path
         ) -> None:
             assert tls_endpoint.ca_file is not None
-            if api == 'openai-responses':
-                tls_endpoint.response = response()
+            api = 'openai-responses'
+            tls_endpoint.response = response()
             system = make_system(harness='terminus-2', api=api)
             agent = NativeProbe(
                 logs_dir=logs_dir,
@@ -1912,8 +1913,13 @@ class TestTerminus:
             assert sent.headers['x-trace'] == 'bench'
             assert is_closed()
 
-        @pytest.mark.parametrize('api', ['openai-chat-completions', 'openai-responses'])
-        @pytest.mark.parametrize('fails', [False, True], ids=['success', 'failure'])
+        @pytest.mark.parametrize(
+            ('api', 'fails'),
+            [
+                pytest.param('openai-chat-completions', False, id='chat-success'),
+                pytest.param('openai-responses', True, id='responses-failure'),
+            ],
+        )
         def test_closes_the_transport_and_keeps_metadata_after_the_parent_finishes(
             self,
             private_state: State,

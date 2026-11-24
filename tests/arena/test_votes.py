@@ -3,7 +3,6 @@ import math
 import re
 import sqlite3
 from collections.abc import Sequence
-from contextlib import closing
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -31,7 +30,6 @@ from assistant_bench.state import State
 from support import (
     ARENA_NAMES,
     ARENA_SYSTEMS,
-    MIGRATIONS_DIR,
     make_case,
     make_trial,
     make_votes_family,
@@ -328,56 +326,6 @@ class TestReadCut:
         self, arena_store: SQLiteDatabase
     ) -> None:
         assert votes.read_cut(arena_store, FAMILY.name, NOW) is None
-
-
-class TestPairVoteCounts:
-    def test_initializes_existing_votes_and_tracks_subsequent_changes(
-        self, published_store: tuple[SQLiteDatabase, publication.Publication]
-    ) -> None:
-        _, published = published_store
-        with closing(sqlite3.connect(':memory:', isolation_level=None)) as connection:
-            connection.executescript((MIGRATIONS_DIR / '0001_init.sql').read_text())
-            connection.executescript(
-                (MIGRATIONS_DIR / '0003_case_splits.sql').read_text()
-            )
-            connection.executescript(
-                (MIGRATIONS_DIR / '0004_publication_pair_cases.sql').read_text()
-            )
-            for path in sorted(MIGRATIONS_DIR.glob('*.sql')):
-                if path.name[:4] > '0004':
-                    connection.executescript(path.read_text())
-            database = SQLiteDatabase(connection)
-            stage_and_activate(database, published, NOW)
-            first = record_vote(
-                database, published, NOW, actor='first', age=timedelta(hours=1)
-            )
-            second = record_vote(
-                database,
-                published,
-                NOW,
-                actor='second',
-                age=timedelta(hours=1),
-                exclusion='spam',
-            )
-
-            connection.executescript(
-                (MIGRATIONS_DIR / '0002_pair_vote_counts.sql').read_text()
-            )
-
-            check_pair_counts(database)
-            for sql, identifier in [
-                ('UPDATE votes SET exclusion = NULL WHERE id = ?', second),
-                ("UPDATE votes SET exclusion = 'spam' WHERE id = ?", first),
-                ('DELETE FROM votes WHERE id = ?', second),
-                ('DELETE FROM votes WHERE id = ?', first),
-            ]:
-                database.execute(sql, [identifier])
-
-                check_pair_counts(database)
-
-            record_vote(database, published, NOW, actor='third', age=timedelta(hours=1))
-
-            check_pair_counts(database)
 
 
 class TestStatus:

@@ -121,6 +121,3 @@ class TestMeasuredUsage:
             measured.harbor.cache_tokens,
             measured.harbor.completion_tokens,
         ) == (130, 100, 40)
-
-
-VALID = {'prompt_tokens': 120, 'completion_tokens': 40}

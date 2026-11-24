@@ -1,23 +1,27 @@
+import asyncio
 import hashlib
 import json
 import sqlite3
-from collections.abc import Generator, Iterator
+from collections.abc import Callable, Generator, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing, contextmanager
 from datetime import timedelta
 from pathlib import Path
 from threading import Barrier
+from typing import cast
 
 import pytest
 
 from assistant_bench.canaries import Record
 from assistant_bench.catalog import Price, SystemIdentity
-from assistant_bench.database import SQLiteDatabase
+from assistant_bench.database import Param, Result, SQLiteDatabase
+from assistant_bench.harnesses.accounting import RequestReceipt
 from assistant_bench.harnesses.usage import MeasuredUsage
 from assistant_bench.messages import InputError
 from assistant_bench.spend import Accounting, Entry
 from assistant_bench.state import (
     OUTPUTS_PER_STATEMENT,
+    ArtifactGeneration,
     AttemptStart,
     Claim,
     Collection,
@@ -27,7 +31,7 @@ from assistant_bench.state import (
     State,
     TrialArtifact,
 )
-from support import START, make_output, make_system, private_database
+from support import START, accounted_trial, make_output, make_system, private_database
 
 
 PRICE = Price(input=2, output=10, cache_read=0.2, cache_write=2.5)
@@ -1145,3 +1149,137 @@ class TestState:
             ]
             assert state.entries('canaries') == [measured.model_dump_json()]
             assert state.claim_state(owner.id) == 'claimed'
+
+
+class _CommitAfterRead:
+    def __init__(
+        self,
+        reader: SQLiteDatabase,
+        commit: Callable[[], None],
+    ) -> None:
+        self.reader = reader
+        self.commit = commit
+        self.finished = False
+
+    def execute(self, sql: str, params: Sequence[Param] = ()) -> Result:
+        result = self.reader.execute(sql, params)
+        if not self.finished:
+            self.finished = True
+            self.commit()
+        return result
+
+
+class TestStateConcurrency:
+    def test_artifact_inventory_and_revision_cannot_straddle_registration(
+        self, tmp_path: Path
+    ) -> None:
+        with (
+            private_database(tmp_path / 'state.sqlite') as reader,
+            private_database(tmp_path / 'state.sqlite') as writer,
+        ):
+            state = State(writer)
+            state.create_run(
+                Run(
+                    id='run-a',
+                    scope='sample',
+                    job='job-a',
+                    code_revision='1' * 40,
+                    case_revision='2' * 40,
+                    created_at=START.isoformat(),
+                )
+            )
+            artifact = TrialArtifact(
+                run_id='run-a',
+                trial_id='trial-a',
+                source_trial_id='source-trial-a',
+                commit_sha='a' * 40,
+                path='runs/run-a/trials/artifact-a',
+                manifest_digest='b' * 64,
+            )
+
+            def register() -> None:
+                state.record_pending_artifact(
+                    artifact.run_id,
+                    artifact.trial_id,
+                    artifact.source_trial_id,
+                    artifact.commit_sha,
+                    artifact.path,
+                    artifact.manifest_digest,
+                )
+                state.seal_publication(artifact.run_id)
+                state.finalize_publication(artifact.run_id, artifact.commit_sha)
+
+            during = State(_CommitAfterRead(reader, register)).artifact_generation(
+                'sample'
+            )
+            after = State(reader).artifact_generation('sample')
+
+            assert during == ArtifactGeneration(revision=0, artifacts=())
+            assert after == ArtifactGeneration(revision=1, artifacts=(artifact,))
+
+    def test_two_clients_compete_for_the_last_request_across_two_claims(
+        self, tmp_path: Path
+    ) -> None:
+        path = tmp_path / 'state.sqlite'
+        with private_database(path) as database:
+            state = State(database)
+            with accounted_trial(state, max_requests=2) as recorder:
+                recorder.begin(START)
+                first = asyncio.run(recorder.admit('openai-responses'))
+                asyncio.run(
+                    recorder.confirm(
+                        first,
+                        RequestReceipt(
+                            api='openai-responses',
+                            outcome='http_error',
+                            http_status=503,
+                            usage=None,
+                        ),
+                    )
+                )
+                owner = state.get_claim(recorder.claim_id)
+                second = owner.model_copy(
+                    update={
+                        'id': 'second-claim',
+                        'slot_key': 'second-slot',
+                        'trial': 'second',
+                    }
+                )
+                assert state.claim_attempt(second)
+                assert state.begin_attempt(
+                    AttemptStart(
+                        id='second-attempt',
+                        claim_id=second.id,
+                        started_at=START.isoformat(),
+                    )
+                )
+                (initial,) = state.requests('sample')
+                attempts = [cast(str, initial['attempt_id']), 'second-attempt']
+                barrier = Barrier(2)
+
+                def compete(index: int) -> bool:
+                    with private_database(path) as client:
+                        barrier.wait(timeout=5)
+                        return State(client).admit_request(
+                            RequestAdmission(
+                                id=f'contender-{index}',
+                                attempt_id=attempts[index],
+                                created_at=START.isoformat(),
+                            )
+                        )
+
+                with ThreadPoolExecutor(max_workers=2) as clients:
+                    granted = list(clients.map(compete, range(2)))
+
+                assert sorted(granted) == [False, True]
+                admitted = {
+                    cast(str, row['request_id']) for row in state.requests('sample')
+                }
+                assert admitted == {first, f'contender-{granted.index(True)}'}
+                assert not state.admit_request(
+                    RequestAdmission(
+                        id='later-request',
+                        attempt_id=attempts[0],
+                        created_at=START.isoformat(),
+                    )
+                )
