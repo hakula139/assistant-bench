@@ -70,7 +70,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
           args=()
-          if [[ -n $BASE_SHA ]]; then
+          if [[ -n "$BASE_SHA" ]]; then
             args+=("$BASE_SHA")
           fi
           nix develop -c uv run --locked python -m assistant_bench.ci "${args[@]}"
@@ -154,7 +154,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           state=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .state)
-          if [[ $state == open ]]; then
+          if [[ "$state" == open ]]; then
             echo "open=true" >>"$GITHUB_OUTPUT"
           else
             echo "Skipping the preview, since the PR is $state."
@@ -190,7 +190,8 @@ jobs:
         shell: bash
         run: |
           nix develop -c pnpm --filter web exec wrangler preview \
-            --name "pr-$PR_NUMBER" --message "PR #$PR_NUMBER @ $PR_SHA"
+            --name "pr-$PR_NUMBER" \
+            --message "PR #$PR_NUMBER @ $PR_SHA"
 
       - name: Extract preview metadata
         id: meta
@@ -202,7 +203,7 @@ jobs:
           record=$(jq -c 'select(.type == "preview")' "$WRANGLER_OUTPUT_FILE_PATH")
           preview_url=$(jq -er '.preview_urls[0]' <<<"$record")
           deployment_url=$(jq -er '.deployment_urls[0]' <<<"$record")
-          cat >> "$GITHUB_OUTPUT" <<OUTPUT
+          cat >>"$GITHUB_OUTPUT" <<OUTPUT
           preview_url=$preview_url
           deployment_url=$deployment_url
           OUTPUT
@@ -260,7 +261,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           head=$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)
-          if [[ $head == "$GITHUB_SHA" ]]; then
+          if [[ "$head" == "$GITHUB_SHA" ]]; then
             echo "current=true" >>"$GITHUB_OUTPUT"
           else
             echo "Skipping the deploy, since main has moved on to $head."

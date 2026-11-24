@@ -2,21 +2,21 @@
 
 ## Dev Shell
 
-Follow [Quickstart](../guide/quickstart.md#setup) for checkout and browser setup. The dev shell supplies uv, Node.js, pnpm and the nixos-config export. Editors use the root `.venv`.
+Follow [Quickstart](../guide/quickstart.md#setup) for checkout and browser setup. The dev shell supplies uv, Node.js, pnpm, and the nixos-config export. Editors use the root `.venv`.
 
 Host code and authored task code share the strict typing policy in `pyproject.toml`. Missing library metadata is permitted, while missing imports and unknown or incompatible API types are errors. Starters resolve only their own modules, while task references and hidden tests resolve the reference package.
 
-The voting Worker's disposable `local` environment uses Cloudflare's always-passing Turnstile test keys. Production, staging and private stores remain separate, as [Arena](../design/arena.md#vote-store) describes.
+The voting Worker's disposable `local` environment uses Cloudflare's always-passing Turnstile test keys. Production, staging, and private stores remain separate, as [Arena](../design/arena.md#vote-store) describes.
 
 ## Pre-Commit Hooks
 
-`flake.nix` enables devkit's [pre-commit hooks](https://github.com/hakulab/devkit/blob/v3/docs/hooks.md). [AGENTS.md](../../AGENTS.md#verification) lists the remaining checks. Authored applications, references and hidden tests follow the host's formatting and spelling. Deliberately wrong regression patches remain unformatted and untyped so the real verifier tests their failure.
+`flake.nix` enables devkit's [pre-commit hooks](https://github.com/hakulab/devkit/blob/v3/docs/hooks.md). [AGENTS.md](../../AGENTS.md#verification) lists the remaining checks. Authored applications, references, and hidden tests follow the host's formatting and spelling. Deliberately wrong regression patches remain unformatted and untyped so the real verifier tests their failure.
 
 ## Where Settings Live
 
 Commands select what to act on. Systems and families own benchmark settings in `systems.toml` and `family.toml`, while `pyproject.toml` owns generation protocol versions. Model allowances come from the shared catalog. Tool policies belong in their tools' configuration files.
 
-Environment variables carry credentials and per-environment values. Running covers the [endpoint](../guide/running.md#the-model-endpoint) and [cloud credentials](../guide/running.md#voting), [Data](data.md#the-data-directory) covers private sources and the disposable cache, and [CI](ci.md#deploy) covers deployment values. Generated Harbor job configs are runtime records, never committed configuration.
+Environment variables carry credentials and per-environment values. Running covers the [endpoint](../guide/running.md#the-model-endpoint) and [cloud credentials](../guide/running.md#voting), [Data](data.md#the-data-directory) covers private sources and the disposable cache, and [CI](ci.md#deploy) covers deployment values. Generated Harbor job configs are runtime records kept out of version control.
 
 ## Toolchain and Pins
 

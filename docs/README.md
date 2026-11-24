@@ -7,23 +7,23 @@
 
 ## Use and Operate
 
-- [Running](guide/running.md) covers credentials, generation and collection, budgets, publication and closing rounds.
-- [Authoring](guide/authoring.md): add families, cases, tasks and systems.
+- [Running](guide/running.md) covers credentials, generation and collection, budgets, publication, and closing rounds.
+- [Authoring](guide/authoring.md): add families, cases, tasks, and systems.
 - [Data](conventions/data.md): choose where sources and runtime records belong.
 
 ## Understand Results
 
-- [Systems](design/systems.md): generation identity, harnesses and route probes.
+- [Systems](design/systems.md): generation identity, harnesses, and route probes.
 - Read the [methodology](https://bench.hakula.xyz/methodology/) to interpret a leaderboard and its uncertainty.
 - [Ranking](design/ranking.md) and [Reports](design/reports.md) explain how to reproduce scores from the evidence frozen in each round.
-- [Writing](design/families/writing.md) and [Coding](design/families/coding.md): measurement goals, source policies and limitations.
-- [Arena](design/arena.md) and [Site](design/site.md): blind comparisons, publication boundaries and presentation.
+- [Writing](design/families/writing.md) and [Coding](design/families/coding.md): measurement goals, source policies, and limitations.
+- [Arena](design/arena.md) and [Site](design/site.md): blind comparisons, publication boundaries, and presentation.
 
 ## Modify the Implementation
 
 Start with [`AGENTS.md`](../AGENTS.md), then the relevant area:
 
-- [Development](conventions/development.md), [Testing](conventions/testing.md) and [CI](conventions/ci.md).
-- [Python](conventions/python.md), [TypeScript](conventions/typescript.md) and [GitHub](conventions/github.md).
-- [Architecture](design/architecture.md): module responsibilities, import layers and rerun contracts.
+- [Development](conventions/development.md), [Testing](conventions/testing.md), and [CI](conventions/ci.md).
+- [Python](conventions/python.md), [TypeScript](conventions/typescript.md), and [GitHub](conventions/github.md).
+- [Architecture](design/architecture.md): module responsibilities, import layers, and rerun contracts.
 - [Harbor](research/harbor.md): upstream behavior that constrains integration changes.

@@ -12,9 +12,9 @@ Browse the [leaderboards](https://bench.hakula.xyz/) or [vote on a blind pair](h
 
 ## Documentation
 
-- The [voting guide](docs/guide/voting.md) covers keyboard shortcuts, issue tags and recovering a vote.
+- The [voting guide](docs/guide/voting.md) covers keyboard shortcuts, issue tags, and recovering a vote.
 - Follow the [quickstart](docs/guide/quickstart.md) to set up a checkout and run the two smoke families.
-- Browse the [documentation](docs/README.md) for operation, benchmark design and contributor conventions.
+- Browse the [documentation](docs/README.md) for operation, benchmark design, and contributor conventions.
 - Contributors start with [AGENTS.md](AGENTS.md).
 
 ## License

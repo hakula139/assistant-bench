@@ -12,15 +12,15 @@ Each board uses the shared scorer and render registries for steps, labels, and i
 
 A votes board shows one round. Category selections refit its scores without intervals, mark them as preliminary, and distinguish family-wide measurements. The board identifies systems its leader test cannot separate. Chart axes share the comparison's scale and identify clipped points. Cost and latency charts label their Pareto frontier and omit unavailable measurements.
 
-Each system's page uses its latest appearance for its heading and results. Each history row retains its own label, fingerprint, reference, anchor, method and rules. Compare scores within one family's round because the anchor can change.
+Each system's page uses its latest appearance for its heading and results. Each history row retains its own label, fingerprint, reference, anchor, method, and rules. Compare scores within one family's round because the anchor can change.
 
-A tests board shows pass rates with their 95% intervals on one axis from 0 to 100% and the [reported measurements](reports.md#results) in its table. A category selection, kept in the URL, shows that category's pass rates and task counts. A note names the leader and the systems its paired test cannot separate from it.
+A tests or checkers board shows pass rates with their 95% intervals on one axis from 0 to 100%. A tests board adds the [reported measurements](reports.md#results) in its table, while a checkers board adds prompt effects and per-rule pass rates. A category selection, kept in the URL, shows that category's pass rates and case or task counts. A note names the leader and the systems its paired test cannot separate from it.
 
 Every chart has a table twin with the same values, and its tooltips use values the twin also shows. Static point plots are tables themselves. Token and latency ranges show observed output percentiles.
 
 ## The Vote Page
 
-`/vote/` is emitted in every build. The page fetches pairs from the same-origin [vote API](arena.md#vote-api) at runtime, so no vote data enters a build. On public deployments, a browser the Worker has not admitted solves an interaction-only Turnstile challenge in place, whose frame the `/vote/*` rule in `web/public/_headers` allows. Turnstile is the page's only third-party content. A private deployment verifies Cloudflare Access before serving any page, asset or API and admits its owner when serving `/vote/`. The owner's allowed login addresses share one persistent actor. Static previews without the API show an unavailable state.
+`/vote/` is emitted in default builds and omitted from GitLab Pages builds when `CI_PAGES_URL` is set. The page fetches pairs from the same-origin [vote API](arena.md#vote-api) at runtime, so no vote data enters a build. On public deployments, a browser the Worker has not admitted solves an interaction-only Turnstile challenge in place, whose frame the `/vote/*` rule in `web/public/_headers` allows. Turnstile is the page's only third-party content. A private deployment verifies Cloudflare Access before serving any page, asset, or API and admits its owner when serving `/vote/`. The owner's allowed login addresses share one persistent actor. Static previews without the API show an unavailable state.
 
 Each tab keeps its own draft only while the server still holds the same pair. Reloading never sends a vote, and closing the tab clears unsent choices on a shared device.
 
@@ -36,4 +36,4 @@ The remaining design uses ink text, one ultramarine accent, tabular numbers, and
 
 Lists of aspects and families must scale to many more entries, so none uses a fixed slot per entry. Visible copy stays minimal, with details in tooltips or popovers that a tap also opens.
 
-Prevent paragraphs, headings, labels and short notes from ending on a lone word. Check screenshots in both themes and at phone and desktop widths, since automated layout metrics miss these orphans.
+Prevent paragraphs, headings, labels, and short notes from ending on a lone word. Check screenshots in both themes and at phone and desktop widths, since automated layout metrics miss these orphans.

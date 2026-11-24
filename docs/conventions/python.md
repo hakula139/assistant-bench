@@ -7,14 +7,15 @@ Conventions for Python code and tests that the tooling and the module map don't 
 - The [module map](../design/architecture.md#module-map) gives each module's responsibility, and imports stay within the [import layers](../design/architecture.md#import-layers).
 - Build Harbor inputs and results on its own models so schema changes fail validation. Keep agents on `BaseAgent`, `AgentContext`, and the logs directory where possible. The private API overrides and `HostEnvironment`'s `BaseEnvironment` implementation require real Harbor trials when upgrading Harbor.
 - Native adapters preserve SDK conversation items across summaries and read original usage counters. A semantic failure of an accepted request is terminal: `NativeCompletionError` must not regenerate the response.
-- Model each input file the bench owns with a pydantic model that sets `extra='forbid'`, so a misspelled key fails at load time. Models of the nixos-config export accept extra fields, since that schema belongs to nixos-config.
+- Model each input file the bench owns with a Pydantic model that sets `extra='forbid'`, so a misspelled key fails at load time. Models of the nixos-config export accept extra fields, since that schema belongs to nixos-config. Private run state and record types in `state.py` use frozen Pydantic models (`extra='forbid', frozen=True`).
+- Build SQLite and D1 queries with SQLAlchemy Core through `database.py` against the declarative table metadata in `schema.py`, which `tests/test_schema.py` checks 1:1 against the SQL migrations.
 - Branch on a family's scorer with a `match` over its settings model that ends in `case _: assert_never(...)`, so mypy reports each `match` a new scorer misses.
 - Reach the data directory only through `paths.data_dir()`.
 
 ## Errors
 
-- Raise `messages.InputError` for input an author or operator can fix, naming the item and accepted values. Use `error_lines` for author-facing validation errors, while pydantic validators raise `ValueError`. Commands let `InputError` and `D1Error` reach the root handler, which prints them and exits with code 1. Other exceptions retain their traceback. `PYTHONDEVMODE=1` also exposes the traceback behind a handled error.
-- Write CLI messages as complete sentences, starting with a capital and ending with a period. Put names, files and commands in backticks.
+- Raise `messages.InputError` for input an author or operator can fix, naming the item and accepted values. Use `error_lines` for author-facing validation errors, while Pydantic validators raise `ValueError`. Commands let `InputError` and `D1Error` reach the root handler, which prints them and exits with code 1. Other exceptions retain their traceback. `PYTHONDEVMODE=1` also exposes the traceback behind a handled error.
+- Write CLI messages as complete sentences, starting with a capital and ending with a period. Put names, files, and commands in backticks.
 - Let HTTP and Harbor errors propagate so Harbor records them on the trial.
 
 ## Modules
