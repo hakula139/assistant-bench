@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 
-import type { FamilyConfig, VotesConfig } from '@/lib/family';
+import { familyConfigSchema, type FamilyConfig, type VotesConfig } from '@/lib/family';
+import { unmeasuredRows } from '@/lib/forest';
 import { reportSchema, type Report } from '@/lib/report';
 import {
   boardSlug,
@@ -160,6 +161,35 @@ describe('publicFamilies', () => {
         systemNames: FIXTURE_NAMES,
       },
     ]);
+  });
+
+  test('uses family-local alias labels in unmeasured rows', () => {
+    const config = familyConfigSchema.parse({
+      ...votes(true),
+      systems: ['acme-large', 'acme-large-custom'],
+      system_aliases: {
+        'acme-large-custom': {
+          model_effort: 'acme-large',
+          condition: 'prompted',
+          display_name: 'Acme Large with Instructions',
+        },
+      },
+    });
+
+    const [english, chinese] = publicFamilies(
+      [
+        { name: 'writing-en', config },
+        { name: 'writing-zh', config: votes(true, 'Chinese Prose') },
+      ],
+      [],
+      FIXTURE_NAMES,
+    );
+
+    expect(unmeasuredRows(english.config.systems, english.systemNames)).toEqual([
+      { system: 'acme-large', name: 'Acme Large', unplaced: 'no-votes' },
+      { system: 'acme-large-custom', name: 'Acme Large with Instructions', unplaced: 'no-votes' },
+    ]);
+    expect(chinese.systemNames).toEqual(FIXTURE_NAMES);
   });
 
   test('leaves out a family that is not public, with its reports', async () => {

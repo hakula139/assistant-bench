@@ -62,7 +62,13 @@ from assistant_bench.arena.publication import (
 )
 from assistant_bench.arena.votes import Cut, Snapshot, TaggedDefects, Vote
 from assistant_bench.artifacts import ArtifactRef, ArtifactRepository, MaterializedTrial
-from assistant_bench.catalog import Price, System, SystemConfig
+from assistant_bench.catalog import (
+    NixosConfigExport,
+    Price,
+    System,
+    SystemConfig,
+    load_export,
+)
 from assistant_bench.database import SQLiteDatabase
 from assistant_bench.execution import ExecutionInput, ExecutionPlugin
 from assistant_bench.families import (
@@ -376,11 +382,14 @@ def make_system(**overrides: Any) -> System:
 MANIFEST_FILE = 'fingerprints.json'
 
 
-def current_fingerprints(systems: dict[str, System]) -> dict[str, str]:
+def current_fingerprints(
+    systems: dict[str, System], export: NixosConfigExport | None = None
+) -> dict[str, str]:
     """Map `<family>/<system>` to the fingerprint of each runnable system."""
+    resolved = load_export() if export is None else export
     return {
         f'{family}/{system.name}': fingerprint(system)
-        for family, members in runnable_systems(systems).items()
+        for family, members in runnable_systems(systems, resolved).items()
         for system in members
     }
 

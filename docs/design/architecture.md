@@ -106,7 +106,7 @@ An [arena publication](arena.md) freezes a generation for voting. Closing uses t
 
 ## Reruns
 
-Each `bench run` job lists the family's earlier jobs as diff sources, so Harbor skips every trial that an earlier job completed with the same task version, agent config, and environment.
+Each `bench run` job lists the family's earlier jobs as diff sources, so Harbor skips every trial that an earlier job completed with the same task version, agent config, and environment. The agent config includes the recorded family key that distinguishes conditions of the same model and effort, and [Systems](systems.md#retained-trial-identities) maps the keys in retained jobs to the conditions operators can select.
 
 Each rendered task's version carries a hash of its instruction, task name and agent timeout as build metadata on `tasks.TASK_VERSION`, and Harbor reruns a task whose build metadata changed, so an edited case reruns under its ID on every system. `bench check` and `bench run` render tasks in disposable workspaces. Collection derives the expected version from its pinned case source and render settings, so stale outputs cannot become current through an old local task directory.
 

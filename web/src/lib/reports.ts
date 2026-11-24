@@ -138,7 +138,15 @@ export function publicFamilies(
         throw new Error(`public family ${name} has no aspect`);
       }
 
-      const listing = { name, title: familyTitle(config), aspect: config.aspect, systemNames };
+      const aliases = Object.fromEntries(
+        Object.entries(config.system_aliases ?? {}).map(([id, alias]) => [id, alias.display_name]),
+      );
+      const listing = {
+        name,
+        title: familyTitle(config),
+        aspect: config.aspect,
+        systemNames: { ...systemNames, ...aliases },
+      };
       const reports = rounds.get(name) ?? [];
       return [
         config.scorer === 'votes'

@@ -1234,14 +1234,29 @@ class State:
             ).rows
         )
 
-    def reset_baseline(self, system: str) -> int:
+    def reset_baseline(
+        self, system: str, *, source_fingerprint: str | None = None
+    ) -> int:
         baselines = schema.CanaryBaselines
+        statement = delete(baselines).where(baselines.system == system)
+        if source_fingerprint is not None:
+            records = schema.CanaryRecords
+            record_fingerprint = (
+                select(
+                    func.json_extract(
+                        records.record_json,
+                        '$.source_generate_fingerprint',
+                    )
+                )
+                .where(records.run_id == baselines.run_id)
+                .correlate(baselines)
+                .scalar_subquery()
+            )
+            statement = statement.where(record_fingerprint == source_fingerprint)
         return len(
             execute(
                 self._database,
-                delete(baselines)
-                .where(baselines.system == system)
-                .returning(baselines.context_key),
+                statement.returning(baselines.context_key),
             ).rows
         )
 

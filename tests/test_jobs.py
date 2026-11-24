@@ -21,7 +21,7 @@ from openai.types.responses import Response
 
 from assistant_bench import jobs
 from assistant_bench.artifacts import MaterializedTrial, build_manifest
-from assistant_bench.catalog import System
+from assistant_bench.catalog import NixosConfigExport, System
 from assistant_bench.families import (
     Family,
     case_task,
@@ -90,7 +90,7 @@ class TestCheckSystems:
                 'codex',
                 make_system(api='openai-responses'),
                 'System `acme-large`: set its `harness` and pinned `version` '
-                'in `systems.toml`.',
+                'in `family.toml`.',
                 id='installed-missing-version',
             ),
         ],
@@ -160,16 +160,18 @@ class TestFamilySystems:
 
 
 class TestRunnableSystems:
-    def test_names_an_undefined_system_and_its_family(self, families_dir: Path) -> None:
+    def test_names_an_undefined_system_and_its_family(
+        self, families_dir: Path, export: NixosConfigExport
+    ) -> None:
         write_votes_family(families_dir, ['missing'], name='writing')
 
         with pytest.raises(
             ValueError, match='Family `writing`.*`missing`.*systems.toml'
         ):
-            jobs.runnable_systems({})
+            jobs.runnable_systems({}, export)
 
     def test_resolves_only_listed_systems_under_each_family_harness(
-        self, families_dir: Path
+        self, families_dir: Path, export: NixosConfigExport
     ) -> None:
         write_votes_family(families_dir, ['large'], name='writing')
         write_task_family(families_dir, 'echo', name='coding', systems=('large',))
@@ -177,7 +179,8 @@ class TestRunnableSystems:
         system = make_system(name='large')
 
         runnable = jobs.runnable_systems(
-            {'large': system, 'author-only': make_system(name='author-only')}
+            {'large': system, 'author-only': make_system(name='author-only')},
+            export,
         )
 
         assert runnable == {

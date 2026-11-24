@@ -35,3 +35,57 @@ pairs = [
 ]
 samples = 1
 categories = ["docs", "message"]
+
+[system_aliases."opus-5.5-high-nixos"]
+model_effort = "opus-5.5-high"
+condition = "prompted"
+prompt = "nixos-config:claudeCode"
+display_name = "Claude Opus 5.5 · High · Instructions"
+
+[system_aliases."gpt-6-astra-high-nixos"]
+model_effort = "gpt-6-astra-high"
+condition = "prompted"
+prompt = "nixos-config:claudeCode"
+display_name = "GPT-6 Astra · High · Instructions"
+
+[system_aliases."gpt-6.1-sol-high-nixos"]
+model_effort = "gpt-6.1-sol-high"
+condition = "prompted"
+prompt = "nixos-config:claudeCode"
+display_name = "GPT-6.1 Sol · High · Instructions"
+
+[system_aliases."gpt-6.2-astra-high-nixos"]
+model_effort = "gpt-6.2-astra-high"
+condition = "prompted"
+prompt = "nixos-config:claudeCode"
+display_name = "GPT-6.2 Astra · High · Instructions"
+
+[system_aliases."gpt-6.2-sol-high-nixos"]
+model_effort = "gpt-6.2-sol-high"
+condition = "prompted"
+prompt = "nixos-config:claudeCode"
+display_name = "GPT-6.2 Sol · High · Instructions"
+
+[system_aliases."gemini-4-argon-high-nixos"]
+model_effort = "gemini-4-argon-high"
+condition = "prompted"
+prompt = "nixos-config:claudeCode"
+display_name = "Gemini 4 Argon · High · Instructions"
+
+[system_aliases."gemini-3.8-flash-high-nixos"]
+model_effort = "gemini-3.8-flash-high"
+condition = "prompted"
+prompt = "nixos-config:claudeCode"
+display_name = "Gemini 3.8 Flash · High · Instructions"
+
+[system_aliases."deepseek-v4.1-flash-1017-high-nixos"]
+model_effort = "deepseek-v4.1-flash-1017-high"
+condition = "prompted"
+prompt = "nixos-config:claudeCode"
+display_name = "DeepSeek V4.1 Flash 1017 · High · Instructions"
+
+[system_aliases."kimi-k3.1-pro-high-nixos"]
+model_effort = "kimi-k3.1-pro-high"
+condition = "prompted"
+prompt = "nixos-config:claudeCode"
+display_name = "Kimi K3.1 Pro · High · Instructions"

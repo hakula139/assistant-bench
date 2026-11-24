@@ -103,8 +103,8 @@ def collect(
     keeping only trials whose recorded generation, environment, and verifier
     settings match the current job. A successful trial comes first, then an
     errored trial its tests graded, then one they never graded, with the oldest
-    first within each tier whatever its reward. Usage and costs come from the
-    originating attempt's confirmed accounting and frozen price.
+    first within each tier whatever its reward. Usage and costs come from
+    the originating attempt's confirmed accounting and frozen price.
 
     A regraded trial yields the output of the trial whose agent wrote its
     solution, with the regrade's verdict, so the votes on that output stay. Harbor

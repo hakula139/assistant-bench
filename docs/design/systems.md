@@ -1,6 +1,6 @@
 # Systems
 
-A system is one generation configuration under test: a model route and API, completion and context allowances, an effort, a harness, and an optional system prompt. [`systems.toml`](../../systems.toml) declares each system as a table, whose keys are covered in [Authoring](../guide/authoring.md#systems).
+A runnable configuration combines the model and effort declared in [`systems.toml`](../../systems.toml) with the family's harness and optional system prompt. Its ID is `<family>/<model-effort>`. When a family evaluates the same model and effort under several conditions, each condition has its own configuration and fingerprint. [Authoring](../guide/authoring.md#systems) describes how to declare them.
 
 ## Resolution
 
@@ -18,19 +18,30 @@ A system's fingerprint hashes its harness, model name, generation version, and e
 
 Votes and scores pool only within one fingerprint. A nixos-config bump that leaves the resolved generation settings unchanged keeps its pool.
 
-A system name identifies the model and its variant. In a task family, a system absent from the family's closed reports can keep its name for fresh trials when its fingerprint changes. Its earlier trials stay in the archive. Their agent configuration carries the old fingerprint, so Harbor excludes them from reuse and regrading and collection excludes them from current outputs. For voted families, [official publication](arena.md#publication-and-closing) also checks the evidence in both voting stores before the changed fingerprint can serve under that name.
+In a task family, a configuration absent from the family's closed reports can keep its family key when its fingerprint changes. Its earlier trials stay in the archive. Their agent configuration carries the old fingerprint, so Harbor excludes them from reuse and regrading and collection excludes them from current outputs. After a report freezes the current fingerprint, the configuration can continue under that fingerprint while older trials remain archived. For voted families, [official publication](arena.md#publication-and-closing) also checks the evidence in both voting stores before the changed fingerprint can serve under that key.
 
-The [fingerprint check](../conventions/ci.md#checks), `bench fingerprints`, fails for each runnable system whose fingerprint differs from the one that the closed reports of its family froze. A report that recorded no fingerprint for a system leaves the check nothing to compare. `fingerprints.json` maps each runnable `<family>/<system>` to its fingerprint, and a test fails when it is stale, so a PR's diff of the manifest lists the systems that change.
+The [fingerprint check](../conventions/ci.md#checks), `bench fingerprints`, compares each runnable configuration with the fingerprint that a closed report froze under the same family key. A mismatch fails the check. A report that recorded no fingerprint for an entrant leaves the check nothing to compare. [`fingerprints.json`](../../fingerprints.json) records each runnable configuration's fingerprint, and a test fails when the manifest is stale.
 
 A local `bench run` refuses the same mismatch before Harbor starts, even when the system has no trials yet. When retained trials carry a different fingerprint, it also requires a new name for systems in case families and for task systems whose closed reports name them without a fingerprint. Every output also records the nixos-config rev it ran under.
 
 [Reports](reports.md#frozen-identity) owns frozen public identities. A retired system can carry its latest prior identity into a new report only when known fingerprints match. Unknown provenance remains null and cannot prove retired continuity.
 
+### Retained Trial Identities
+
+Harbor records a configuration's family key in the agent kwargs. Collection matches that key and the resolved generation and environment settings against the originating trial. A family alias uses the key already recorded by its trials, so both reuse and tests-only regrading can match those trials. Regrades keep the originating output identity and its votes. Closed reports keep their keys, labels and fingerprints.
+
+| Family                | Recorded family key           | Model and effort        | Condition   |
+| --------------------- | ----------------------------- | ----------------------- | ----------- |
+| Any                   | `<model-effort>`              | `<model-effort>`        | `default`   |
+| `instructions-format` | `<model-effort>-nixos`        | `<model-effort>`        | `prompted`  |
+| `coding-repo`         | `opus-5.5-claude-code-high`   | `opus-5.5-high`         | `installed` |
+| `coding-repo`         | `gemini-3.8-flash-codex-high` | `gemini-3.8-flash-high` | `installed` |
+
 ### Model Swaps
 
 A fingerprint hashes a system's route, so it cannot see an endpoint that serves another model under an unchanged route. Collection therefore checks each pool, the outputs of one system under one fingerprint, for two signals. A pool conflicts when its responses report more than one model, or, in a case family, when its outputs of one case differ by more than the larger of 2 input tokens and 2% of the lower count, a margin that a one-token jitter stays within and another tokenizer exceeds on most cases. Neither signal proves which model answered. A gateway that echoes the requested name hides a backend swap from the model field, and one that recounts tokens with its own tokenizer hides it from the token count. A swap within one tokenizer family, such as a quantized checkpoint or a smaller sibling, passes both signals unless the reported model changes, and so does a provider that recognizes the bench's requests.
 
-Before adding trials, `bench run` sends one fixed synthetic canary through each pending system's `generate` binding, once across the selected families. It preserves the route, API, effort and resolved system prompt, including for systems normally run through an installed agent. The probe has one Harbor attempt, no SDK retries, and at most 2,048 completion tokens including reasoning. Its first successful response with valid usage establishes the baseline for that source generate identity and probe protocol. A changed instruction, resolved probe configuration or completion allowance starts another protocol. Each record keeps the original system identity, the source generate identity and the actual probe identity separately.
+Before adding trials, `bench run` sends one fixed synthetic canary through each pending system's `generate` binding. Families share a probe when they use the same recorded key and source generation fingerprint. The probe preserves the route, API, effort and resolved system prompt, including for systems normally run through an installed agent. It has one Harbor attempt, no SDK retries, and at most 2,048 completion tokens including reasoning. Its first successful response with valid usage establishes the baseline for that source generate identity and probe protocol. A changed instruction, resolved probe configuration or completion allowance starts another protocol. Each record keeps the original system identity, the source generate identity and the actual probe identity separately.
 
 A successful probe refuses the whole run when its reported model set changes or its input count differs from its baseline by more than `max(2, baseline_input_tokens * 0.02)`. An error, refusal, incomplete response or missing usage also refuses the run, remains recorded with its spend, and cannot establish a baseline or be labeled a model swap. These probes share the pool checks' limits above. `bench close` sends no probe.
 

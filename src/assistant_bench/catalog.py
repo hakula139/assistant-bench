@@ -25,6 +25,10 @@ EXPORT_VAR = 'BENCH_NIXOS_CONFIG'
 NIXOS_CONFIG_PROMPT = 'nixos-config:'
 SYSTEMS_FILE = 'systems.toml'
 Api = Literal['openai-chat-completions', 'openai-responses', 'anthropic-messages']
+type SystemKey = Annotated[str, StringConstraints(pattern=r'^[a-z0-9][a-z0-9.-]*$')]
+type DisplayName = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1)
+]
 
 
 # ── nixos-config Export ──
@@ -114,30 +118,49 @@ class Price(BaseModel):
 
 
 class SystemConfig(BaseModel):
-    """One table of `systems.toml`."""
+    """One canonical model and effort from `systems.toml`."""
 
     model_config = ConfigDict(extra='forbid')
 
     model: str
     api: Api = 'openai-chat-completions'
     effort: str | None = None
+    display_name: DisplayName
+
+
+class SystemAlias(BaseModel):
+    """A family-local configuration for a canonical model and effort."""
+
+    model_config = ConfigDict(extra='forbid', frozen=True)
+
+    model_effort: SystemKey
+    condition: SystemKey
+    api: Api | None = None
     prompt: str | None = None
     """`nixos-config:<client>` selects global instructions as the system message."""
 
     harness: Literal['claude-code', 'codex'] | None = None
     version: Annotated[str, StringConstraints(pattern=r'^\d+\.\d+\.\d+$')] | None = None
 
-    display_name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+    display_name: DisplayName
     """Public label the site and reports show."""
 
     @model_validator(mode='after')
-    def _check_harness_version(self) -> Self:
+    def _check_variant(self) -> Self:
         if (self.harness is None) != (self.version is None):
             raise ValueError('`harness` and `version` must be set together')
+        if self.prompt is not None and self.harness is not None:
+            raise ValueError('`prompt` and `harness` cannot be set together')
+        if self.condition == 'default' and (
+            self.prompt is not None or self.harness is not None
+        ):
+            raise ValueError('`default` is reserved for the canonical configuration')
         return self
 
 
-_CONFIGS = TypeAdapter(dict[str, SystemConfig], config=ConfigDict(title='systems.toml'))
+_CONFIGS = TypeAdapter(
+    dict[SystemKey, SystemConfig], config=ConfigDict(title='systems.toml')
+)
 
 
 class SystemIdentity(BaseModel):
@@ -171,13 +194,23 @@ class System(SystemIdentity):
     """An admitted runnable identity and its public labels and prices."""
 
     name: str
-    """Table name used by data and URLs, excluded from the fingerprint."""
+    """Storage key used in trial locks and report records."""
 
     display_name: str
     """Public label, excluded from the fingerprint."""
 
     price: Price | None
     vendor: str
+    supported_apis: tuple[str, ...] = ()
+    model_effort: str | None = None
+    condition: str = 'default'
+
+    @property
+    def canonical_name(self) -> str:
+        return self.model_effort or self.name
+
+    def public_id(self, family: str) -> str:
+        return f'{family}/{self.canonical_name}'
 
 
 def load_systems(
@@ -195,24 +228,30 @@ def parse_systems(
     Raises
     ------
     InputError
-        The document does not parse or validate, a table fails to resolve, or
-        two systems share a display name.
+        The document does not parse or validate, a table fails to resolve,
+        two systems share a display name, or two tables define the same
+        model and effort.
     """
-    systems = {
-        name: resolve_system(name, config, export, generation)
-        for name, config in parse_system_configs(document).items()
-    }
-
+    configs = parse_system_configs(document)
     owners: dict[str, str] = {}
-    for name, system in systems.items():
-        owner = owners.setdefault(system.display_name, name)
+    models: dict[tuple[str, str | None], str] = {}
+    for name, config in configs.items():
+        owner = owners.setdefault(config.display_name, name)
         if owner != name:
             raise InputError(
                 f'Systems `{owner}` and `{name}` share the display name '
-                f'`{system.display_name}`. Set a distinct `display_name`.'
+                f'`{config.display_name}`. Set a distinct `display_name`.'
+            )
+        owner = models.setdefault((config.model, config.effort), name)
+        if owner != name:
+            raise InputError(
+                f'Systems `{owner}` and `{name}` define the same model and effort.'
             )
 
-    return systems
+    return {
+        name: resolve_system(name, config, export, generation)
+        for name, config in configs.items()
+    }
 
 
 def parse_system_configs(document: str) -> dict[str, SystemConfig]:
@@ -230,7 +269,7 @@ def resolve_system(
     Raises
     ------
     InputError
-        The model, its channel, the API, the effort, or the prompt is unknown or
+        The model, its channel, the API, or the effort is unknown or
         ambiguous, or the model's capacities or thinking rules do not fit.
     """
     entry = _catalog_model(name, config.model, export)
@@ -260,16 +299,55 @@ def resolve_system(
             max_output_tokens=entry.max_output_tokens,
             context_window=entry.context_window,
             effort=config.effort,
-            prompt=_prompt(name, config.prompt, export),
-            harness=config.harness or 'generate',
-            version=config.version,
+            prompt=None,
+            harness='generate',
             name=name,
             display_name=config.display_name,
             price=_price(entry.channel_cost.get(channel)),
             vendor=entry.vendor,
+            supported_apis=tuple(entry.apis),
         )
     except ValidationError as error:
         raise InputError(error_lines(error, f'System `{name}`')) from error
+
+
+def resolve_alias(
+    name: str, alias: SystemAlias, base: System, export: NixosConfigExport
+) -> System:
+    """Resolve a family alias against its canonical system.
+
+    Keeps the alias's storage key while applying the family-local display name,
+    condition, API, prompt, or installed harness.
+
+    Raises
+    ------
+    InputError
+        The overridden API is unsupported by the catalog model, native Messages
+        is chosen for a model without thinking rules, or the prompt is
+        unavailable.
+    """
+    api = alias.api or base.api
+    if alias.api is not None and api not in base.supported_apis:
+        raise InputError(
+            f'System `{name}`: API `{api}` is not one of {code(base.supported_apis)}.'
+        )
+    if api == 'anthropic-messages' and base.effort is None:
+        raise InputError(
+            f"System `{name}`: native Messages requires the catalog model's "
+            'thinking rules.'
+        )
+    return base.model_copy(
+        update={
+            'name': name,
+            'display_name': alias.display_name,
+            'model_effort': alias.model_effort,
+            'condition': alias.condition,
+            'api': api,
+            'prompt': _prompt(name, alias.prompt, export),
+            'harness': alias.harness or base.harness,
+            'version': alias.version,
+        }
+    )
 
 
 def _catalog_model(name: str, model: str, export: NixosConfigExport) -> CatalogModel:

@@ -15,6 +15,7 @@ from pydantic import (
     model_validator,
 )
 
+from assistant_bench.catalog import SystemAlias, SystemKey
 from assistant_bench.messages import InputError, code, error_lines, validated_toml
 from assistant_bench.paths import FAMILIES_DIR
 
@@ -87,6 +88,7 @@ class _Settings(BaseModel):
     """Short name within the aspect, or the whole name without one."""
 
     systems: Unique[str] = []
+    system_aliases: dict[SystemKey, SystemAlias] = {}
     samples: int = Field(ge=1)
 
     harness: str | None = None
@@ -100,6 +102,15 @@ class _Settings(BaseModel):
 
     public: bool = False
     """Whether the public site lists the family."""
+
+    @model_validator(mode='after')
+    def _check_aliases(self) -> Self:
+        unlisted = self.system_aliases.keys() - set(self.systems)
+        if unlisted:
+            raise ValueError(
+                f'system aliases must be listed in `systems`: {code(sorted(unlisted))}'
+            )
+        return self
 
 
 type Language = Literal['en', 'zh']

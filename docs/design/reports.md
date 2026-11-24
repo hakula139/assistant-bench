@@ -1,6 +1,6 @@
 # Reports
 
-A report publishes one closed round's aggregates under public system IDs. [`report.py`](../../src/assistant_bench/report.py) defines the strict Pydantic schema, mirrored by the site's Zod schema. [Testing](../conventions/testing.md#cross-checks-and-the-report-fixture) describes their shared synthetic fixtures. Prettier leaves generated reports and fixtures as their writer formats them.
+A report publishes one closed round's aggregates under the recorded configuration keys of its family. The keys distinguish conditions that share a system ID, as described in [Systems](systems.md#retained-trial-identities). [`report.py`](../../src/assistant_bench/report.py) defines the strict Pydantic schema, mirrored by the site's Zod schema. [Testing](../conventions/testing.md#cross-checks-and-the-report-fixture) describes their shared synthetic fixtures. Prettier leaves generated reports and fixtures as their writer formats them.
 
 ## Closing a Round
 
@@ -24,4 +24,4 @@ Each round's output inventory determines its measurement denominators. Cost, lat
 
 ## Publication Boundaries
 
-Reports contain no case ID, instruction, output, route, request ID or session. Their only identifiers are categories, public system IDs, labels and configuration fingerprints. [Architecture](architecture.md#families-and-scorers) describes adding a scorer.
+Reports contain no case ID, instruction, output, route, request ID or session. Their only identifiers are categories, recorded configuration keys, labels and configuration fingerprints. [Architecture](architecture.md#families-and-scorers) describes adding a scorer.

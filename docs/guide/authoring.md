@@ -83,7 +83,7 @@ A private task is a directory under the private repository's `cases/<family>/`, 
 
 ## Systems
 
-[`systems.toml`](../../systems.toml) declares one system per table, keyed by a public model name plus a suffix for a prompt or effort variant. When one model name has covered several snapshots, the key includes the snapshot, as in `deepseek-v4.1-flash-1017-high`:
+Declare each model and effort once in [`systems.toml`](../../systems.toml). The table key names the public model and effort. Include the snapshot when the model name has covered several snapshots, as in `deepseek-v4.1-flash-1017-high`.
 
 ```toml
 ["opus-5.5-high"]
@@ -91,13 +91,6 @@ model = "claude-opus-5-5"
 api = "anthropic-messages"
 effort = "high"
 display_name = "Claude Opus 5.5 · High"
-
-["opus-5.5-nixos"]
-model = "claude-opus-5-5"
-api = "anthropic-messages"
-effort = "high"
-prompt = "nixos-config:claudeCode"
-display_name = "Claude Opus 5.5 · nixos-config"
 ```
 
 | Key            | Meaning                                                                                                                                 |
@@ -105,21 +98,28 @@ display_name = "Claude Opus 5.5 · nixos-config"
 | `model`        | A nixos-config catalog model, which supplies the route, vendor, capacities, and prices                                                  |
 | `api`          | `openai-chat-completions` by default, `openai-responses`, or `anthropic-messages`. The catalog must support the selected API and effort |
 | `effort`       | Required when the model has effort rules: one of its `thinking.efforts`. A model without them takes none                                |
-| `prompt`       | The system message, as `nixos-config:<client>` for a rendered instruction file                                                          |
-| `harness`      | An installed agent override, `claude-code` for native Messages or `codex` for Responses. Requires `version` and a task family           |
-| `version`      | The installed CLI's pinned `major.minor.patch` release. Requires `harness`                                                              |
-| `display_name` | The required public name that the site and reports show                                                                                 |
+| `display_name` | The public label for the default condition. Each global table needs a distinct label                                                    |
 
-The site shows the display name, while URLs and outputs keep the table name. Closed reports freeze their own public labels and fingerprints. Display names must be unique within the catalog and within each report, so variants and snapshots need distinct labels.
+List the table key in a family's `systems` to run its default condition. To compare another condition, define an alias in `family.toml` and list its key in `systems` too. This entry adds a system prompt to the same model and effort in `instructions-format`.
 
-Installed agents use table names of the form `<model>-<harness>-<effort>`, and their display names include the model and harness. They cannot accept `prompt`. Their task images need the libraries the vendor's Linux executable requires, and the host needs access to the vendor's public release downloads.
+```toml
+[system_aliases."opus-5.5-high-nixos"]
+model_effort = "opus-5.5-high"
+condition = "prompted"
+prompt = "nixos-config:claudeCode"
+display_name = "Claude Opus 5.5 · High · Instructions"
+```
 
-[Systems](../design/systems.md#fingerprints) decides whether a system whose fingerprint changes keeps its name. A rename alone keeps the fingerprint but reruns the system, since Harbor reuses a trial only under the same agent config.
+Both conditions run under the ID `instructions-format/opus-5.5-high`. The alias's `model_effort` names the global table. Give each condition a name unique within that ID, reserving `default` for configurations without `prompt` or `harness`. Give it a distinct `display_name` so readers can tell the conditions apart on the leaderboard. The family's `reference` and checker `pairs` use the keys listed in `systems`.
+
+An alias can add a system prompt, select an installed harness, or re-key a canonical configuration when a single family needs a new key after a fingerprint move. Set `prompt = "nixos-config:<client>"` to use a rendered instruction file with `generate`. In a task family, set `harness` and its pinned `version` together for an installed agent (`prompt` and `harness` cannot be set together). Claude Code uses native Messages and Codex uses Responses. Set the alias's `api` if the condition requires a different supported API from the model's default. Two conditions of the same canonical system in one family cannot resolve to the same fingerprint. For installed agents, the task image must supply the libraries the vendor's Linux executable needs, and the host needs access to the vendor's public release downloads.
+
+The family key identifies this configuration in Harbor trials, collected outputs and closed reports. Changing it reruns the configuration even when its fingerprint stays the same. See the [historical mappings](../design/systems.md#retained-trial-identities) when looking up earlier trials.
 
 When a change moves fingerprints:
 
 1. Run `uv run bench fingerprints` to find changed systems frozen in closed reports, and include any system flagged by `bench run` for retained-trial drift in its family.
-2. Where [Systems](../design/systems.md#fingerprints) requires a new name, add a new table in `systems.toml` with a suffix identifying its effort or snapshot and a distinct `display_name`. Check official voting publications even for a task family without closed reports.
-3. If a name changes, replace the old name in each affected family's `systems` list and in its `reference` or checker `pairs` where applicable. `bench close` anchors the board at the new reference once it ranks, and until then uses the most-voted system as the round's `anchor`.
-4. Keep the old table while any unaffected family still lists it under a matching fingerprint. Once no family lists a retired system, remove its runnable table while preserving its retained trials, closed reports, and task authorship.
+2. Where [Systems](../design/systems.md#fingerprints) requires a new family key, assign one to the changed configuration and give it a distinct `display_name`. An unreported task configuration can keep its key and start fresh trials under its new fingerprint, after checking official voting publications for existing ballots.
+3. If a family key changes, replace the old key in each affected family's `systems`, `reference`, and checker `pairs` where applicable. A board scored against the replacement reference has no ranked systems if that reference has no preference comparisons.
+4. Keep the old alias or table while any unaffected family still lists it under a matching fingerprint. Once no family lists a retired configuration, remove its unused alias or global table while preserving its retained trials, closed reports, and task authorship.
 5. Run `uv run pytest tests/test_repository.py -k manifest --update-fixtures` to rewrite `fingerprints.json`, then `uv run bench fingerprints` to confirm that it passes.

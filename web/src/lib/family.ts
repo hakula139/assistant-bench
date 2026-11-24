@@ -6,6 +6,7 @@ import { categories } from '@/lib/categories';
 const shared = {
   display_name: z.string(),
   systems: z.array(z.string()).default([]),
+  system_aliases: z.record(z.string(), z.object({ display_name: z.string().min(1) })).optional(),
   categories: z.array(z.enum(categories)).default([]),
   harness: z.enum(['terminus-2']).optional(),
   max_turns: z.int().optional(),

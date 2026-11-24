@@ -32,7 +32,13 @@ from assistant_bench.artifacts import (
     ArtifactRef,
     ArtifactRepository,
 )
-from assistant_bench.catalog import SYSTEMS_FILE, System
+from assistant_bench.catalog import (
+    SYSTEMS_FILE,
+    NixosConfigExport,
+    System,
+    SystemIdentity,
+    resolve_alias,
+)
 from assistant_bench.families import (
     CheckersSettings,
     Family,
@@ -98,16 +104,56 @@ def check_harness(family: Family) -> None:
         )
 
 
-def listed_systems(family: Family, systems: Mapping[str, System]) -> list[System]:
-    """Return the systems a family lists, refusing a name `systems.toml` lacks."""
-    unknown = [name for name in family.settings.systems if name not in systems]
+def listed_systems(
+    family: Family,
+    systems: Mapping[str, System],
+    export: NixosConfigExport,
+) -> list[System]:
+    """Resolve the family's listed storage keys against the canonical systems."""
+    aliases = family.settings.system_aliases
+    shadowed = aliases.keys() & systems.keys()
+    if shadowed:
+        raise InputError(
+            f'Family `{family.name}` has system aliases {code(sorted(shadowed))} '
+            f'that shadow canonical keys in `{SYSTEMS_FILE}`.'
+        )
+    unknown = list(
+        dict.fromkeys(
+            key
+            for name in family.settings.systems
+            if (key := aliases[name].model_effort if name in aliases else name)
+            not in systems
+        )
+    )
     if unknown:
         raise InputError(
             f'Family `{family.name}` lists {code(unknown)}, which '
             f'`{SYSTEMS_FILE}` does not define. Fix '
             f'`families/{family.name}/family.toml` or add the system table.'
         )
-    return [systems[name] for name in family.settings.systems]
+    listed: list[System] = []
+    conditions: set[tuple[str, str]] = set()
+    labels: set[str] = set()
+    for name in family.settings.systems:
+        if (alias := aliases.get(name)) is None:
+            system = systems[name]
+        else:
+            system = resolve_alias(name, alias, systems[alias.model_effort], export)
+
+        identity = (system.public_id(family.name), system.condition)
+        if identity in conditions:
+            raise InputError(
+                f'System `{identity[0]}` repeats the `{identity[1]}` condition.'
+            )
+        if system.display_name in labels:
+            raise InputError(
+                f'Family `{family.name}` repeats the display name '
+                f'`{system.display_name}`.'
+            )
+        conditions.add(identity)
+        labels.add(system.display_name)
+        listed.append(system)
+    return listed
 
 
 def check_systems(family: Family, systems: list[System]) -> None:
@@ -122,14 +168,14 @@ def check_systems(family: Family, systems: list[System]) -> None:
     check_harness(family)
     if isinstance(family.settings, CheckersSettings):
         by_name = {system.name: system for system in systems}
-        excluded = {'name', 'display_name', 'prompt', 'price', 'vendor'}
+        fields = SystemIdentity.model_fields.keys() - {'prompt'}
         for pair in family.settings.pairs:
             bare, instructed = by_name[pair.bare], by_name[pair.prompted]
             if (
                 bare.prompt is not None
                 or instructed.prompt is None
-                or bare.model_dump(exclude=excluded)
-                != instructed.model_dump(exclude=excluded)
+                or bare.model_dump(include=fields)
+                != instructed.model_dump(include=fields)
             ):
                 raise InputError(
                     f'Family `{family.name}`: `{pair.bare}` and `{pair.prompted}` '
@@ -147,10 +193,10 @@ def check_systems(family: Family, systems: list[System]) -> None:
                 f'System `{system.name}`: harness `{system.harness}` accepts '
                 f'{code(harness.apis)} (got `{system.api}`).'
             )
-        if system.harness in ('claude-code', 'codex') and system.version is None:
+        if harness.installed and system.version is None:
             raise InputError(
                 f'System `{system.name}`: set its `harness` and pinned `version` '
-                'in `systems.toml`.'
+                'in `family.toml`.'
             )
         if system.prompt is not None and not harness.sends_prompt:
             raise InputError(
@@ -163,24 +209,58 @@ def family_systems(family: Family, systems: list[System]) -> list[System]:
     """Return the systems as the family runs them.
 
     A task family's default harness applies to systems without an explicit
-    installed harness. A case family keeps each system as it resolves.
+    family-configured harness. A case family keeps each system as it resolves.
     """
     harness = family.settings.harness
     if harness is None:
         return systems
     return [
-        system if system.version else system.model_copy(update={'harness': harness})
+        system
+        if system.harness != 'generate'
+        else system.model_copy(update={'harness': harness})
         for system in systems
     ]
 
 
-def runnable_systems(systems: Mapping[str, System]) -> dict[str, list[System]]:
+def resolve_family_systems(
+    family: Family,
+    systems: Mapping[str, System],
+    export: NixosConfigExport,
+) -> list[System]:
+    """Resolve, validate, and finalize a family's runnable systems.
+
+    Raises
+    ------
+    InputError
+        A listed key is unknown, an alias shadows a canonical key, a display
+        name or `(public_id, condition)` repeats, a harness or pair check
+        fails, or two conditions of the same canonical system resolve to the
+        same fingerprint.
+    """
+    listed = listed_systems(family, systems, export)
+    check_systems(family, listed)
+    resolved = family_systems(family, listed)
+    bindings: dict[tuple[str, str], System] = {}
+    for system in resolved:
+        binding = (system.canonical_name, fingerprint(system))
+        previous = bindings.setdefault(binding, system)
+        if previous is not system:
+            raise InputError(
+                f'Family `{family.name}` binds `{system.public_id(family.name)}` '
+                f'conditions `{previous.condition}` and `{system.condition}` to the '
+                f'same fingerprint `{binding[1]}`.'
+            )
+    return resolved
+
+
+def runnable_systems(
+    systems: Mapping[str, System], export: NixosConfigExport
+) -> dict[str, list[System]]:
     """Map each family to its runnable systems as the family runs them."""
-    runnable: dict[str, list[System]] = {}
-    for name in family_names():
-        family = load_family(name)
-        runnable[name] = family_systems(family, listed_systems(family, systems))
-    return runnable
+    return {
+        name: resolve_family_systems(load_family(name), systems, export)
+        for name in family_names()
+    }
 
 
 def drifted_systems(
@@ -225,7 +305,7 @@ def _agent_config(system: System) -> trial_config.AgentConfig:
     return trial_config.AgentConfig(
         import_path=harness.import_path,
         model_name=f'{harness.model_prefix}{system.route}',
-        extra_allowed_hosts=['host.docker.internal'] if system.version else [],
+        extra_allowed_hosts=['host.docker.internal'] if harness.installed else [],
         n_concurrent=ROUTE_CONCURRENCY,
         concurrency_group=system.route,
         kwargs=agent_kwargs(system),
@@ -276,7 +356,7 @@ def _environment(
         return trial_config.EnvironmentConfig(
             import_path=HOST_ENVIRONMENT, kwargs={'auto_mounting': True}
         )
-    if any(system.version for system in systems):
+    if any(HARNESSES[system.harness].installed for system in systems):
         return trial_config.EnvironmentConfig(
             import_path='assistant_bench.harnesses.docker:InstalledDocker',
             extra_docker_compose=[
