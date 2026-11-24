@@ -571,6 +571,46 @@ class TestPreparation:
         assert publication.preparation(private_store, published.id) is None
 
 
+class TestRefuseFingerprintConflicts:
+    @pytest.mark.parametrize('changed_index', [0, 1], ids=['a-system', 'b-system'])
+    def test_refuses_a_changed_fingerprint_for_either_ballot_side(
+        self, arena_store: SQLiteDatabase, changed_index: int
+    ) -> None:
+        first = prepare(
+            make_votes_family(),
+            [make_case('first')],
+            [make_trial('first', system) for system in ARENA_SYSTEMS[:2]],
+        )
+        stage_and_activate(arena_store, first, NOW)
+        record_vote(arena_store, first, NOW, actor='reader', age=timedelta(hours=1))
+        changed_system = first.outputs[changed_index].system
+        replacement = prepare(
+            make_votes_family(),
+            [make_case('first')],
+            [
+                make_trial(
+                    'first',
+                    system,
+                    fingerprint=(
+                        f'new-{system}' if system == changed_system else f'fp-{system}'
+                    ),
+                )
+                for system in ARENA_SYSTEMS[:2]
+            ],
+        )
+
+        with pytest.raises(InputError) as raised:
+            publication.refuse_fingerprint_conflicts(
+                arena_store, replacement, 'production'
+            )
+
+        message = str(raised.value)
+        assert '`production`' in message
+        assert f'`{changed_system}`' in message
+        assert f'`fp-{changed_system}`' in message
+        assert f'`new-{changed_system}`' in message
+
+
 class TestStageAndActivate:
     def test_stages_and_activates_the_publication(
         self, arena_store: SQLiteDatabase
@@ -672,6 +712,45 @@ class TestStageAndActivate:
         assert not changed
         assert all(statement.startswith('SELECT') for statement in recording.statements)
 
+    def test_switches_once_when_activation_clears_a_pending_pair(
+        self, arena_store: SQLiteDatabase
+    ) -> None:
+        first = prepare(
+            make_votes_family(),
+            [make_case('first')],
+            [make_trial('first', system) for system in ARENA_SYSTEMS[:2]],
+        )
+        second = text_publication()
+        stage_and_activate(arena_store, first, NOW)
+        publication.stage(arena_store, second, NOW)
+        a, b = first.outputs
+        arena_store.execute("INSERT INTO actors (id, created_at) VALUES ('reader', 0)")
+        arena_store.execute(
+            'INSERT INTO pairs (id, actor_id, family, publication_id, case_key, '
+            'a_output, b_output, issued_at) '
+            "VALUES ('pair', 'reader', ?, ?, ?, ?, ?, 0)",
+            [first.family, first.id, a.case_key, a.key, b.key],
+        )
+        arena_store.execute(
+            'INSERT INTO batch_pairs (id, actor_id, family, publication_id, case_key, '
+            'a_output, b_output, issued_at, position) '
+            "VALUES ('batch-pair', 'reader', ?, ?, ?, ?, ?, 0, 0)",
+            [first.family, first.id, a.case_key, a.key, b.key],
+        )
+        assert rows(arena_store, 'SELECT publication_id FROM active') == [(first.id,)]
+        assert rows(arena_store, 'SELECT id FROM pending_pairs ORDER BY id') == [
+            ('batch-pair',),
+            ('pair',),
+        ]
+
+        assert publication.activate(arena_store, second.id, NOW)
+
+        assert rows(arena_store, 'SELECT publication_id FROM active') == [(second.id,)]
+        assert rows(arena_store, 'SELECT id FROM pending_pairs') == []
+        assert rows(arena_store, 'SELECT id FROM pairs') == []
+        assert rows(arena_store, 'SELECT id FROM batch_pairs') == []
+        assert not publication.activate(arena_store, second.id, NOW)
+
     @pytest.mark.parametrize(
         'statement',
         [
@@ -736,7 +815,7 @@ class TestStageAndActivate:
 
         assert rows(database, 'SELECT * FROM active') == []
 
-    def test_switches_the_active_publication_and_keeps_the_old_rows(
+    def test_switches_a_publication_without_votes_to_a_new_fingerprint(
         self, arena_store: SQLiteDatabase
     ) -> None:
         database = arena_store
@@ -745,7 +824,10 @@ class TestStageAndActivate:
         second = prepare(
             make_votes_family(),
             [make_case('first')],
-            [make_trial('first', system) for system in ARENA_SYSTEMS],
+            [
+                make_trial('first', system, fingerprint=f'new-{system}')
+                for system in ARENA_SYSTEMS
+            ],
         )
 
         stage_and_activate(database, second, NOW)

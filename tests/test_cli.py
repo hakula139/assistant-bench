@@ -19,8 +19,10 @@ from harbor.job_diff import DiffAction, compare_job_trials, load_source_trials
 from harbor.job_plan import JobPlan
 from harbor.models.agent.context import AgentContext
 from harbor.models.job.config import JobConfig, SourceJobConfig
+from harbor.models.task.artifacts import source_host_path
 from harbor.models.task.config import TaskConfig
 from harbor.models.trial.config import AgentConfig
+from harbor.models.trial.paths import TrialPaths
 from harbor.models.trial.result import TrialResult
 from rich.text import Text
 from typer.testing import CliRunner, Result
@@ -35,7 +37,7 @@ from assistant_bench import (
     report,
     runtime,
 )
-from assistant_bench.arena import publication, votes
+from assistant_bench.arena import commands, d1, publication, votes
 from assistant_bench.artifacts import MaterializedTrial, Publication, build_manifest
 from assistant_bench.catalog import (
     EXPORT_VAR,
@@ -48,7 +50,14 @@ from assistant_bench.catalog import (
 from assistant_bench.cli import app
 from assistant_bench.collection import Collection
 from assistant_bench.database import SQLiteDatabase
-from assistant_bench.families import Category, Family, Gate, load_cases, load_family
+from assistant_bench.families import (
+    Category,
+    Family,
+    Gate,
+    case_task,
+    load_cases,
+    load_family,
+)
 from assistant_bench.harnesses import fingerprint
 from assistant_bench.harnesses.docker import HOST_OVERLAY
 from assistant_bench.harnesses.endpoint import SDK_HEADERS_VAR, SECRET_HEADERS_FILE_VAR
@@ -58,11 +67,12 @@ from assistant_bench.outputs import Output, read_outputs, write_outputs
 from assistant_bench.runtime import PrivateSources, RunContext
 from assistant_bench.spend import Accounting, Entry
 from assistant_bench.state import Run
-from assistant_bench.tasks import render_task_config, render_tasks
+from assistant_bench.tasks import WORKSPACE, render_task_config, render_tasks
 from support import (
     FIXTURES,
     REPORT_FIXTURE,
     StubEndpoint,
+    break_setting,
     current_fingerprints,
     finish_job,
     make_output,
@@ -224,8 +234,14 @@ def archive_trials(
 def archive_stale_job(
     context: RunContext, family: Family, system: System, database: SQLiteDatabase
 ) -> None:
-    tasks = render_tasks(
-        family, load_cases(family, private_root=context.private_root), root=context.root
+    cases = load_cases(family, private_root=context.private_root)
+    tasks = (
+        [
+            case_task(family, case.id, private_root=context.private_root)
+            for case in cases
+        ]
+        if family.source == 'tasks'
+        else render_tasks(family, cases, root=context.root)
     )
     config = jobs.job(
         family,
@@ -1358,6 +1374,72 @@ class TestRun:
             HOST_OVERLAY.name
         ]
 
+    @pytest.mark.parametrize('minor_bump', [False, True], ids=['same-version', 'minor'])
+    def test_reruns_a_task_system_under_the_same_name_after_a_harbor_upgrade(
+        self,
+        families_dir: Path,
+        resolved: dict[str, System],
+        submitted: list[JobConfig],
+        cloud: RunContext,
+        private_store: SQLiteDatabase,
+        minor_bump: bool,
+    ) -> None:
+        name = 'opus-5.5-high'
+        write_task_family(
+            families_dir, 'echo', systems=(name,), author_vendor='anthropic'
+        )
+        current = load_systems(load_export())[name]
+        resolved[name] = current.model_copy(
+            update={
+                'generation': current.generation.model_copy(update={'harbor': '0.26.0'})
+            }
+        )
+        assert invoke('run', 'f').exit_code == 0
+        old_job = archive_job(cloud, submitted.pop(), private_store)
+        (old_artifact,) = cloud.state.artifact_generation('f').artifacts
+        task = families_dir / 'f' / 'tasks' / 'echo'
+        if minor_bump:
+            verifier = task / 'tests' / 'test.sh'
+            verifier.write_text(verifier.read_text() + '# A tests-only edit.\n')
+            break_setting(task, ('task', 'version'), '1.1.0')
+        resolved[name] = current
+
+        result = invoke('run', 'f')
+
+        assert result.exit_code == 0, result.output
+        (job,) = submitted
+        assert [source.path.name for source in job.source_jobs if source.path] == [
+            old_job.name
+        ]
+        assert planned_actions(job) == {name: {DiffAction.RERUN}}
+        family = load_family('f')
+        assert collection.collect(family, resolved, cloud).outputs == []
+
+        current_job = archive_job(cloud, submitted.pop(), private_store)
+        (agent,) = job.agents
+        path = write_closed_report('f', agent.kwargs['fingerprint'])
+        destination = cloud.public_root / 'reports' / 'f' / path.name
+        destination.parent.mkdir(parents=True)
+        shutil.copyfile(path, destination)
+
+        result = invoke('run', 'f')
+
+        assert result.exit_code == 0, result.output
+        assert planned_actions(submitted[0]) == {name: {DiffAction.REUSE}}
+        (output,) = collection.collect(family, resolved, cloud).outputs
+        assert (output.system, output.job) == (name, current_job.name)
+        assert old_artifact in cloud.state.artifact_generation('f').artifacts
+
+        verifier = task / 'tests' / 'test.sh'
+        verifier.write_text(verifier.read_text() + '# Another tests-only edit.\n')
+        break_setting(task, ('task', 'version'), '1.2.0')
+        submitted.clear()
+
+        result = invoke('run', 'f')
+
+        assert result.exit_code == 0, result.output
+        assert planned_actions(submitted[0]) == {name: {DiffAction.REGRADE}}
+
     def test_rejects_a_named_family_without_systems(
         self, submitted: list[JobConfig]
     ) -> None:
@@ -1558,9 +1640,10 @@ class TestRun:
         assert cloud.state.artifact_generation('f').artifacts
 
     @pytest.mark.parametrize(
-        ('reported', 'frozen', 'trial', 'expected'),
+        ('source', 'reported', 'frozen', 'trial', 'expected'),
         [
             pytest.param(
+                'cases',
                 False,
                 None,
                 True,
@@ -1568,6 +1651,7 @@ class TestRun:
                 id='unreported',
             ),
             pytest.param(
+                'cases',
                 True,
                 'fp-old',
                 True,
@@ -1575,6 +1659,7 @@ class TestRun:
                 id='moved',
             ),
             pytest.param(
+                'cases',
                 True,
                 'fp-old',
                 False,
@@ -1582,6 +1667,7 @@ class TestRun:
                 id='moved-without-trials',
             ),
             pytest.param(
+                'cases',
                 True,
                 '{current}',
                 True,
@@ -1589,11 +1675,28 @@ class TestRun:
                 id='restored',
             ),
             pytest.param(
+                'cases',
                 True,
                 None,
                 True,
                 [DRIFTED, REPORTED],
                 id='unrecorded',
+            ),
+            pytest.param(
+                'tasks',
+                True,
+                'fp-old',
+                True,
+                [MOVED, DRIFTED, REPORTED],
+                id='task-moved',
+            ),
+            pytest.param(
+                'tasks',
+                True,
+                None,
+                True,
+                [DRIFTED, REPORTED],
+                id='task-unrecorded',
             ),
         ],
     )
@@ -1604,6 +1707,7 @@ class TestRun:
         data_dir: Path,
         submitted: list[JobConfig],
         monkeypatch: pytest.MonkeyPatch,
+        source: Literal['cases', 'tasks'],
         reported: bool,
         frozen: str | None,
         trial: bool,
@@ -1611,8 +1715,16 @@ class TestRun:
         cloud: RunContext,
         private_store: SQLiteDatabase,
     ) -> None:
-        write_votes_family(families_dir, ['opus-5.5-high'], {'c1': 'message'}, name='f')
-        current = fingerprint(load_systems(load_export())['opus-5.5-high'])
+        name = 'opus-5.5-high'
+        if source == 'tasks':
+            write_task_family(
+                families_dir, 'echo', systems=(name,), author_vendor='anthropic'
+            )
+        else:
+            write_votes_family(families_dir, [name], {'c1': 'message'}, name='f')
+        family = load_family('f')
+        system = load_systems(load_export())[name]
+        current = fingerprint(jobs.family_systems(family, [system])[0])
         if reported:
             path = write_closed_report(
                 'f', None if frozen is None else frozen.format(current=current)
@@ -1621,12 +1733,7 @@ class TestRun:
             destination.parent.mkdir(parents=True)
             shutil.copyfile(path, destination)
         if trial:
-            archive_stale_job(
-                cloud,
-                load_family('f'),
-                load_systems(load_export())['opus-5.5-high'],
-                private_store,
-            )
+            archive_stale_job(cloud, family, system, private_store)
 
         result = invoke('run', 'f')
 
@@ -2596,6 +2703,134 @@ class TestClose:
         for cut in (saved.production, saved.private):
             assert cut.cutoff == 1
             assert len(cut.votes) == 1
+
+    @pytest.mark.parametrize(
+        ('old_target', 'age', 'exclusion'),
+        [
+            ('private', timedelta(hours=1), None),
+            ('private', timedelta(minutes=1), None),
+            ('private', timedelta(hours=1), 'Under review'),
+            ('production', timedelta(hours=1), None),
+        ],
+        ids=['mature', 'undo-window', 'restorable', 'former-production'],
+    )
+    def test_closes_original_ballot_after_a_harbor_upgrade(
+        self,
+        families_dir: Path,
+        resolved: dict[str, System],
+        submitted: list[JobConfig],
+        cloud: RunContext,
+        private_store: SQLiteDatabase,
+        arena_store: SQLiteDatabase,
+        reports_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        old_target: Literal['private', 'production'],
+        age: timedelta,
+        exclusion: str | None,
+    ) -> None:
+        name, peer = 'opus-5.5-high', 'kimi-k3.1-pro-high'
+        write_task_family(
+            families_dir, 'echo', systems=(name, peer), author_vendor='anthropic'
+        )
+        manifest = families_dir / 'f' / 'family.toml'
+        private_settings = manifest.read_text()
+        if old_target == 'production':
+            manifest.write_text(private_settings + 'public_voting = true\n')
+        systems = load_systems(load_export())
+        current = systems[name]
+        resolved.update(
+            {
+                name: current.model_copy(
+                    update={
+                        'generation': current.generation.model_copy(
+                            update={'harbor': '0.26.0'}
+                        )
+                    }
+                ),
+                peer: systems[peer],
+            }
+        )
+
+        def connect(target: str) -> AbstractContextManager[SQLiteDatabase]:
+            return nullcontext(private_store if target == 'private' else arena_store)
+
+        monkeypatch.setattr(cli, 'connect', connect)
+        monkeypatch.setattr(d1, 'connect', connect)
+        monkeypatch.setattr(commands, 'open_context', lambda: nullcontext(cloud))
+        monkeypatch.setattr(cli, 'implementation_revision', lambda: cloud.code_revision)
+
+        def prepare_round(target: Literal['private', 'production']) -> str:
+            result = invoke('run', 'f')
+            assert result.exit_code == 0, result.output
+            job = submitted.pop()
+            root = finish_job(job)
+            for trial in root.glob('*/result.json'):
+                recorded = TrialResult.model_validate_json(trial.read_text())
+                workspace = source_host_path(
+                    TrialPaths(trial.parent).artifacts_dir, WORKSPACE
+                )
+                workspace.mkdir(parents=True)
+                (workspace / 'greeting.txt').write_text(
+                    recorded.config.agent.kwargs['system']
+                )
+            archive_trials(cloud, root, 'f', private_store)
+            result = invoke('collect', 'f')
+            assert result.exit_code == 0, result.output
+            result = invoke('arena', 'prepare', 'f', target)
+            assert result.exit_code == 0, result.output
+            return result.stdout.split('`')[1]
+
+        original = prepare_round(old_target)
+        result = invoke('arena', 'publish', old_target, original)
+        assert result.exit_code == 0, result.output
+        source_store = private_store if old_target == 'private' else arena_store
+        published = publication.read(source_store, original)
+        now = datetime.now(UTC)
+        ballot = record_vote(
+            source_store, published, now, actor='reader', age=age, exclusion=exclusion
+        )
+        if old_target == 'production':
+            source_store.execute('DELETE FROM active WHERE family = ?', ['f'])
+        assert not reports_dir.exists()
+
+        resolved[name] = current
+        manifest.write_text(private_settings)
+        replacement = prepare_round('private')
+        assert replacement != original
+        previous = next(output for output in published.outputs if output.system == name)
+        candidate = publication.read(private_store, replacement)
+        new = next(output for output in candidate.outputs if output.system == name)
+        assert previous.fingerprint != new.fingerprint
+        ballots = source_store.execute('SELECT * FROM votes').rows
+        active = private_store.execute('SELECT publication_id FROM active').rows
+
+        result = invoke('arena', 'publish', 'private', replacement)
+
+        assert result.exit_code == 1, result.output
+        assert (
+            f'system `{name}` under fingerprint `{previous.fingerprint}`'
+            in result.stderr
+        )
+        assert new.fingerprint in result.stderr
+        assert 'docs/guide/authoring.md#systems' in result.stderr
+        assert private_store.execute('SELECT publication_id FROM active').rows == active
+        assert source_store.execute('SELECT * FROM votes').rows == ballots
+        assert not reports_dir.exists()
+
+        if exclusion is not None:
+            result = invoke('arena', 'restore', old_target, 'f', '--vote', str(ballot))
+            assert result.exit_code == 0, result.output
+        if age < timedelta(minutes=10):
+            return
+
+        result = invoke('close', 'f')
+
+        assert result.exit_code == 0, result.output
+        (path,) = (reports_dir / 'f').iterdir()
+        closed = report.Report.model_validate_json(path.read_text())
+        assert closed.results.scorer == 'votes'
+        assert closed.results.votes == 1
+        assert closed.systems[name].fingerprint == previous.fingerprint
 
     def test_names_publication_preparation_when_no_store_is_active(
         self,

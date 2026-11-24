@@ -30,8 +30,6 @@ class D1Error(Exception):
 @dataclass(frozen=True)
 class Result:
     rows: list[Row]
-    changes: int
-    """Rows the statement and its triggers inserted, updated, or deleted."""
 
 
 class Database(Protocol):
@@ -66,11 +64,10 @@ class SQLiteDatabase:
         self.connection = connection
 
     def execute(self, sql: str, params: Sequence[Param] = ()) -> Result:
-        before = self.connection.total_changes
         cursor = self.connection.execute(sql, list(params))
         columns = [column[0] for column in cursor.description or ()]
         rows: list[Row] = [dict(zip(columns, row, strict=True)) for row in cursor]
-        return Result(rows=rows, changes=self.connection.total_changes - before)
+        return Result(rows=rows)
 
 
 # ── REST Client ──
@@ -80,13 +77,8 @@ class _Message(BaseModel):
     message: str
 
 
-class _Meta(BaseModel):
-    changes: int = 0
-
-
 class _Statement(BaseModel):
     results: list[Row] = []
-    meta: _Meta = _Meta()
 
 
 class _Response(BaseModel):
@@ -125,4 +117,4 @@ class RestDatabase:
             )
 
         statement = payload.result[0]
-        return Result(rows=statement.results, changes=statement.meta.changes)
+        return Result(rows=statement.results)

@@ -15,6 +15,8 @@ Production votes on the public and synthetic cases of a family that sets `public
 
 Preparing an existing publication ID compares every published output's complete canonical record in the new and original collections. Identical records reuse the original preparation and provenance, which the command prints. Different measurements or gates require an explicit regrade or rerun before publishing. Outputs outside that publication do not affect this comparison.
 
+Publish a family's official rounds sequentially because the stores provide independent read views. Official publication refuses a different fingerprint under a system ID used by a valid ballot in either store, including ballots in the undo window and excluded ballots that can be restored. Give the changed configuration a distinct system ID before preparing it again. [Systems](systems.md#fingerprints) describes when a task system can keep its ID.
+
 `bench close` takes cuts at the same timestamp from production and private D1. Each cut reads inventory, ballots and exclusions in one SQL statement. The stores have independent read views. When a family no longer allows public voting, its past production votes still count and any remaining active production inventory is ignored. A store with neither active inventory nor eligible ballot history contributes no cut.
 
 Closing verifies the counts and canonical digest of both cuts before sealing them as content-addressed facts in private D1. A snapshot freezes the category order, closing code revision and each active publication's collection pin. `--snapshot <id>` recloses a sealed snapshot from its frozen facts.

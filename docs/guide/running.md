@@ -84,7 +84,7 @@ Deleting a local workspace does not reset completed trials. Reruns restore their
 
 Removing a system from the family's `systems` stops new trials and current collection. Closed reports keep their frozen identities, and a removed `reference` needs a replacement for later rounds.
 
-A run refuses a system whose earlier trials or closed reports recorded another fingerprint, as [Systems](../design/systems.md#fingerprints) describes, and [Authoring](authoring.md#systems) gives the fix.
+A run refuses a system that conflicts with its closed reports. [Systems](../design/systems.md#fingerprints) explains when retained trials also require a new name and when a task system keeps its name and starts fresh trials. [Authoring](authoring.md#systems) gives the repair steps.
 
 Add a system's table and list it in each family's `systems`, or add cases to `cases.toml`. Have new or edited cases [reviewed](authoring.md), merge the source changes, then run `uv run bench run --system <name>` or `uv run bench run`.
 

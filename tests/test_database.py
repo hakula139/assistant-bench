@@ -24,7 +24,7 @@ def answer(status: int, payload: Any) -> Callable[[httpx.Request], httpx.Respons
 
 
 class TestRestDatabase:
-    def test_posts_one_statement_and_reads_its_rows_and_changes(self) -> None:
+    def test_posts_one_statement_and_reads_its_rows(self) -> None:
         requests: list[httpx.Request] = []
 
         def handle(request: httpx.Request) -> httpx.Response:
@@ -50,7 +50,7 @@ class TestRestDatabase:
             [7, 'writing-zh'],
         )
 
-        assert result == Result(rows=[{'id': 7, 'family': 'writing-zh'}], changes=1)
+        assert result == Result(rows=[{'id': 7, 'family': 'writing-zh'}])
         (request,) = requests
         assert request.method == 'POST'
         assert str(request.url) == (
