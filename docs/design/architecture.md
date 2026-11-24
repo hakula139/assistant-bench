@@ -105,11 +105,11 @@ An [arena publication](arena.md) freezes a generation for voting. Closing uses t
 
 ## Reruns
 
-Each `bench run` job lists the family's earlier jobs as diff sources, so Harbor skips every trial that an earlier job completed with the same task version and agent config. Adding a system therefore generates only its trials.
+Each `bench run` job lists the family's earlier jobs as diff sources, so Harbor skips every trial that an earlier job completed with the same task version, agent config, and environment.
 
 Each rendered task's version carries a hash of its instruction, task name and agent timeout as build metadata on `tasks.TASK_VERSION`, and Harbor reruns a task whose build metadata changed, so an edited case reruns under its ID on every system. `bench check` and `bench run` render tasks in disposable workspaces. Collection derives the expected version from its pinned case source and render settings, so stale outputs cannot become current through an old local task directory.
 
-The diff also compares each trial's environment, which follows the job's harnesses as [Systems](systems.md#harnesses) describes, so changing it reruns every trial of the jobs it applies to. A Harbor upgrade that changes a `task.toml` default aborts the job, as [Harbor](../research/harbor.md#quirks-of-the-pinned-release) describes.
+Adding a system generates only its trials unless it changes the [family's environment](systems.md#harnesses), in which case Harbor reruns the family's trials. A Harbor upgrade that changes a `task.toml` default aborts the job, as [Harbor](../research/harbor.md#quirks-of-the-pinned-release) describes.
 
 Authored tasks follow the version bumps that [Authoring](../guide/authoring.md#tasks) lists, and `bench check` and `bench run` first name each task whose content differs from what an earlier trial recorded at the same version. Collection keeps only trials of current tasks at a version Harbor would reuse: the same version, or the same major and minor with another patch.
 

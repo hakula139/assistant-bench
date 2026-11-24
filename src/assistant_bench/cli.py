@@ -7,6 +7,7 @@ import tempfile
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from contextlib import nullcontext
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any, assert_never
@@ -236,8 +237,10 @@ def _run_families(
         families, names, systems, root=context.public_root / 'families'
     )
     pending = context.reconcile_publications(
-        scopes=[family.name for family, _ in targets],
-        canary_systems=[system.name for _, selected in targets for system in selected],
+        scopes=[target.family.name for target in targets],
+        canary_systems=[
+            system.name for target in targets for system in target.selected
+        ],
     )
     if pending:
         _echo_publications(pending)
@@ -602,9 +605,10 @@ def _prepare(
         private_root=context.private_root,
         families_root=context.public_root / 'families',
     )
-    for family, selected in _run_targets(
+    for target in _run_targets(
         families, names, systems, root=context.public_root / 'families'
     ):
+        family, selected = target.family, target.selected
         if not selected:
             raise InputError(
                 f'Family `{family.name}` lists no systems. Add them to `systems` in '
@@ -638,10 +642,24 @@ def _prepare(
             (
                 family,
                 selected,
-                jobs.job(family, selected, tasks, root=context.root, sources=sources),
+                jobs.job(
+                    family,
+                    target.roster,
+                    tasks,
+                    root=context.root,
+                    sources=sources,
+                    selected_names={system.name for system in selected},
+                ),
             )
         )
     return prepared
+
+
+@dataclass(frozen=True)
+class _RunTarget:
+    family: Family
+    roster: list[System]
+    selected: list[System]
 
 
 def _run_targets(
@@ -650,16 +668,15 @@ def _run_targets(
     systems: Mapping[str, System],
     *,
     root: Path | None = None,
-) -> list[tuple[Family, list[System]]]:
-    """Return each family to run with the systems to send it."""
+) -> list[_RunTarget]:
+    """Return each family to run with its roster and selected systems."""
+    targets: list[_RunTarget] = []
     if families is not None:
-        targets: list[tuple[Family, list[System]]] = []
         for name in families:
             family = load_family(name, root=root)
-            listed = _family_systems(family, systems)
-            targets.append(
-                (family, _named_systems(family, listed, names) if names else listed)
-            )
+            roster = _family_systems(family, systems)
+            selected = _named_systems(family, roster, names) if names else roster
+            targets.append(_RunTarget(family, roster, selected))
         return targets
 
     every = [
@@ -669,7 +686,10 @@ def _run_targets(
     ]
 
     if names is None:
-        return [(family, _family_systems(family, systems)) for family in every]
+        for family in every:
+            roster = _family_systems(family, systems)
+            targets.append(_RunTarget(family, roster, roster))
+        return targets
 
     known_names(
         names,
@@ -686,16 +706,12 @@ def _run_targets(
         param_hint="'--system'",
     )
 
-    targets = []
     for family in every:
         if not set(family.settings.systems) & set(wanted):
             continue
-        chosen = [
-            system
-            for system in _family_systems(family, systems)
-            if system.name in wanted
-        ]
-        targets.append((family, chosen))
+        roster = _family_systems(family, systems)
+        selected = [system for system in roster if system.name in wanted]
+        targets.append(_RunTarget(family, roster, selected))
     return targets
 
 
