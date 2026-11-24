@@ -2457,134 +2457,6 @@ class TestCollect:
 
 @pytest.mark.usefixtures('cloud')
 class TestClose:
-    @pytest.mark.parametrize(
-        ('old_target', 'age', 'exclusion'),
-        [
-            ('private', timedelta(hours=1), None),
-            ('private', timedelta(minutes=1), None),
-            ('private', timedelta(hours=1), 'Under review'),
-            ('production', timedelta(hours=1), None),
-        ],
-        ids=['mature', 'undo-window', 'restorable', 'former-production'],
-    )
-    def test_closes_original_ballot_after_a_harbor_upgrade(
-        self,
-        families_dir: Path,
-        resolved: dict[str, System],
-        submitted: list[JobConfig],
-        cloud: RunContext,
-        private_store: SQLiteDatabase,
-        arena_store: SQLiteDatabase,
-        reports_dir: Path,
-        monkeypatch: pytest.MonkeyPatch,
-        old_target: Literal['private', 'production'],
-        age: timedelta,
-        exclusion: str | None,
-    ) -> None:
-        name, peer = 'opus-5.5-high', 'kimi-k3.1-pro-high'
-        write_task_family(
-            families_dir, 'echo', systems=(name, peer), author_vendor='anthropic'
-        )
-        manifest = families_dir / 'f' / 'family.toml'
-        private_settings = manifest.read_text()
-        if old_target == 'production':
-            manifest.write_text(private_settings + 'public_voting = true\n')
-        systems = load_systems(load_export())
-        current = systems[name]
-        resolved.update(
-            {
-                name: current.model_copy(
-                    update={
-                        'generation': current.generation.model_copy(
-                            update={'harbor': '0.26.0'}
-                        )
-                    }
-                ),
-                peer: systems[peer],
-            }
-        )
-
-        def connect(target: str) -> AbstractContextManager[SQLiteDatabase]:
-            return nullcontext(private_store if target == 'private' else arena_store)
-
-        monkeypatch.setattr(cli, 'connect', connect)
-        monkeypatch.setattr(d1, 'connect', connect)
-        monkeypatch.setattr(commands, 'open_context', lambda: nullcontext(cloud))
-        monkeypatch.setattr(cli, 'implementation_revision', lambda: cloud.code_revision)
-
-        def prepare_round(target: Literal['private', 'production']) -> str:
-            result = invoke('run', 'f')
-            assert result.exit_code == 0, result.output
-            job = submitted.pop()
-            root = finish_job(job)
-            for trial in root.glob('*/result.json'):
-                recorded = TrialResult.model_validate_json(trial.read_text())
-                workspace = source_host_path(
-                    TrialPaths(trial.parent).artifacts_dir, WORKSPACE
-                )
-                workspace.mkdir(parents=True)
-                (workspace / 'greeting.txt').write_text(
-                    recorded.config.agent.kwargs['system']
-                )
-            archive_trials(cloud, root, 'f', private_store)
-            result = invoke('collect', 'f')
-            assert result.exit_code == 0, result.output
-            result = invoke('arena', 'prepare', 'f', target)
-            assert result.exit_code == 0, result.output
-            return result.stdout.split('`')[1]
-
-        original = prepare_round(old_target)
-        result = invoke('arena', 'publish', old_target, original)
-        assert result.exit_code == 0, result.output
-        source_store = private_store if old_target == 'private' else arena_store
-        published = publication.read(source_store, original)
-        now = datetime.now(UTC)
-        ballot = record_vote(
-            source_store, published, now, actor='reader', age=age, exclusion=exclusion
-        )
-        if old_target == 'production':
-            source_store.execute('DELETE FROM active WHERE family = ?', ['f'])
-        assert not reports_dir.exists()
-
-        resolved[name] = current
-        manifest.write_text(private_settings)
-        replacement = prepare_round('private')
-        assert replacement != original
-        previous = next(output for output in published.outputs if output.system == name)
-        candidate = publication.read(private_store, replacement)
-        new = next(output for output in candidate.outputs if output.system == name)
-        assert previous.fingerprint != new.fingerprint
-        ballots = source_store.execute('SELECT * FROM votes').rows
-        active = private_store.execute('SELECT publication_id FROM active').rows
-
-        result = invoke('arena', 'publish', 'private', replacement)
-
-        assert result.exit_code == 1, result.output
-        assert (
-            f'system `{name}` under fingerprint `{previous.fingerprint}`'
-            in result.stderr
-        )
-        assert new.fingerprint in result.stderr
-        assert 'docs/guide/authoring.md#systems' in result.stderr
-        assert private_store.execute('SELECT publication_id FROM active').rows == active
-        assert source_store.execute('SELECT * FROM votes').rows == ballots
-        assert not reports_dir.exists()
-
-        if exclusion is not None:
-            result = invoke('arena', 'restore', old_target, 'f', '--vote', str(ballot))
-            assert result.exit_code == 0, result.output
-        if age < timedelta(minutes=10):
-            return
-
-        result = invoke('close', 'f')
-
-        assert result.exit_code == 0, result.output
-        (path,) = (reports_dir / 'f').iterdir()
-        closed = report.Report.model_validate_json(path.read_text())
-        assert closed.results.scorer == 'votes'
-        assert closed.results.votes == 1
-        assert closed.systems[name].fingerprint == previous.fingerprint
-
     @pytest.fixture
     def store(
         self,
@@ -2831,6 +2703,134 @@ class TestClose:
         for cut in (saved.production, saved.private):
             assert cut.cutoff == 1
             assert len(cut.votes) == 1
+
+    @pytest.mark.parametrize(
+        ('old_target', 'age', 'exclusion'),
+        [
+            ('private', timedelta(hours=1), None),
+            ('private', timedelta(minutes=1), None),
+            ('private', timedelta(hours=1), 'Under review'),
+            ('production', timedelta(hours=1), None),
+        ],
+        ids=['mature', 'undo-window', 'restorable', 'former-production'],
+    )
+    def test_closes_original_ballot_after_a_harbor_upgrade(
+        self,
+        families_dir: Path,
+        resolved: dict[str, System],
+        submitted: list[JobConfig],
+        cloud: RunContext,
+        private_store: SQLiteDatabase,
+        arena_store: SQLiteDatabase,
+        reports_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        old_target: Literal['private', 'production'],
+        age: timedelta,
+        exclusion: str | None,
+    ) -> None:
+        name, peer = 'opus-5.5-high', 'kimi-k3.1-pro-high'
+        write_task_family(
+            families_dir, 'echo', systems=(name, peer), author_vendor='anthropic'
+        )
+        manifest = families_dir / 'f' / 'family.toml'
+        private_settings = manifest.read_text()
+        if old_target == 'production':
+            manifest.write_text(private_settings + 'public_voting = true\n')
+        systems = load_systems(load_export())
+        current = systems[name]
+        resolved.update(
+            {
+                name: current.model_copy(
+                    update={
+                        'generation': current.generation.model_copy(
+                            update={'harbor': '0.26.0'}
+                        )
+                    }
+                ),
+                peer: systems[peer],
+            }
+        )
+
+        def connect(target: str) -> AbstractContextManager[SQLiteDatabase]:
+            return nullcontext(private_store if target == 'private' else arena_store)
+
+        monkeypatch.setattr(cli, 'connect', connect)
+        monkeypatch.setattr(d1, 'connect', connect)
+        monkeypatch.setattr(commands, 'open_context', lambda: nullcontext(cloud))
+        monkeypatch.setattr(cli, 'implementation_revision', lambda: cloud.code_revision)
+
+        def prepare_round(target: Literal['private', 'production']) -> str:
+            result = invoke('run', 'f')
+            assert result.exit_code == 0, result.output
+            job = submitted.pop()
+            root = finish_job(job)
+            for trial in root.glob('*/result.json'):
+                recorded = TrialResult.model_validate_json(trial.read_text())
+                workspace = source_host_path(
+                    TrialPaths(trial.parent).artifacts_dir, WORKSPACE
+                )
+                workspace.mkdir(parents=True)
+                (workspace / 'greeting.txt').write_text(
+                    recorded.config.agent.kwargs['system']
+                )
+            archive_trials(cloud, root, 'f', private_store)
+            result = invoke('collect', 'f')
+            assert result.exit_code == 0, result.output
+            result = invoke('arena', 'prepare', 'f', target)
+            assert result.exit_code == 0, result.output
+            return result.stdout.split('`')[1]
+
+        original = prepare_round(old_target)
+        result = invoke('arena', 'publish', old_target, original)
+        assert result.exit_code == 0, result.output
+        source_store = private_store if old_target == 'private' else arena_store
+        published = publication.read(source_store, original)
+        now = datetime.now(UTC)
+        ballot = record_vote(
+            source_store, published, now, actor='reader', age=age, exclusion=exclusion
+        )
+        if old_target == 'production':
+            source_store.execute('DELETE FROM active WHERE family = ?', ['f'])
+        assert not reports_dir.exists()
+
+        resolved[name] = current
+        manifest.write_text(private_settings)
+        replacement = prepare_round('private')
+        assert replacement != original
+        previous = next(output for output in published.outputs if output.system == name)
+        candidate = publication.read(private_store, replacement)
+        new = next(output for output in candidate.outputs if output.system == name)
+        assert previous.fingerprint != new.fingerprint
+        ballots = source_store.execute('SELECT * FROM votes').rows
+        active = private_store.execute('SELECT publication_id FROM active').rows
+
+        result = invoke('arena', 'publish', 'private', replacement)
+
+        assert result.exit_code == 1, result.output
+        assert (
+            f'system `{name}` under fingerprint `{previous.fingerprint}`'
+            in result.stderr
+        )
+        assert new.fingerprint in result.stderr
+        assert 'docs/guide/authoring.md#systems' in result.stderr
+        assert private_store.execute('SELECT publication_id FROM active').rows == active
+        assert source_store.execute('SELECT * FROM votes').rows == ballots
+        assert not reports_dir.exists()
+
+        if exclusion is not None:
+            result = invoke('arena', 'restore', old_target, 'f', '--vote', str(ballot))
+            assert result.exit_code == 0, result.output
+        if age < timedelta(minutes=10):
+            return
+
+        result = invoke('close', 'f')
+
+        assert result.exit_code == 0, result.output
+        (path,) = (reports_dir / 'f').iterdir()
+        closed = report.Report.model_validate_json(path.read_text())
+        assert closed.results.scorer == 'votes'
+        assert closed.results.votes == 1
+        assert closed.systems[name].fingerprint == previous.fingerprint
 
     def test_names_publication_preparation_when_no_store_is_active(
         self,

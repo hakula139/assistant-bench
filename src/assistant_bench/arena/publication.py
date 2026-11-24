@@ -41,7 +41,6 @@ from assistant_bench.scoring.length import text_length
 
 PUBLIC_SOURCES: tuple[CaseSource, ...] = ('public', 'synthetic')
 type VotingTarget = Literal['production', 'private']
-type StoreName = Literal['staging', 'production', 'private']
 type CaseSplit = Literal['public', 'held-out', 'private']
 
 CASE_SPLITS: dict[CaseSource, CaseSplit] = {
@@ -60,7 +59,7 @@ _ELIGIBLE_CASES = (
 )
 
 
-def _ballot_outputs(family: str) -> str:
+def _ballot_outputs(family_param: int) -> str:
     return (
         'SELECT a.system, a.fingerprint, b.system AS peer, '  # noqa: S608
         'b.fingerprint AS peer_fingerprint '
@@ -69,7 +68,7 @@ def _ballot_outputs(family: str) -> str:
         'AND a.output_key = v.a_output '
         'JOIN outputs AS b ON b.publication_id = v.publication_id '
         'AND b.output_key = v.b_output '
-        f'WHERE v.family = {family} '
+        f'WHERE v.family = ?{family_param} '
         'AND a.case_key = v.case_key AND b.case_key = v.case_key '
         'AND a.system = v.a_system AND b.system = v.b_system AND a.system <> b.system '
         "AND a.verdict = 'pass' AND b.verdict = 'pass' "
@@ -77,7 +76,7 @@ def _ballot_outputs(family: str) -> str:
     )
 
 
-def _fingerprint_conflicts(fingerprints: str) -> str:
+def _fingerprint_conflicts(fingerprints_param: int) -> str:
     return (
         'SELECT prior.system, prior.fingerprint AS recorded, '  # noqa: S608
         'incoming.value AS candidate '
@@ -86,7 +85,8 @@ def _fingerprint_conflicts(fingerprints: str) -> str:
         'UNION ALL '
         'SELECT peer, peer_fingerprint FROM ballots'
         ') AS prior '
-        f'JOIN json_each({fingerprints}) AS incoming ON incoming.key = prior.system '
+        f'JOIN json_each(?{fingerprints_param}) AS incoming '
+        'ON incoming.key = prior.system '
         'WHERE incoming.value <> prior.fingerprint'
     )
 
@@ -638,12 +638,12 @@ def read_prepared(database: Database, publication_id: str) -> Publication:
 def refuse_fingerprint_conflicts(
     database: Database,
     publication: Publication,
-    store: StoreName,
+    store: VotingTarget,
 ) -> None:
     """Refuse evidence that could pool different fingerprints under one system."""
     rows = database.execute(
-        f'WITH ballots AS ({_ballot_outputs("?1")}) '
-        f'{_fingerprint_conflicts("?2")} ORDER BY prior.system, recorded LIMIT 1',
+        f'WITH ballots AS ({_ballot_outputs(1)}) '
+        f'{_fingerprint_conflicts(2)} ORDER BY prior.system, recorded LIMIT 1',
         [publication.family, _fingerprint_json(publication)],
     ).rows
     if rows:
@@ -671,7 +671,6 @@ def activate(
     now: datetime,
     *,
     preserve_ballots: bool = True,
-    store: StoreName | None = None,
 ) -> bool:
     """Atomically activate a complete verified publication for its family."""
     publication = read(database, publication_id)
@@ -685,14 +684,14 @@ def activate(
         f'WITH expected AS ({_ELIGIBLE_CASES}), stored AS ('  # noqa: S608
         'SELECT low_system, high_system, value AS case_key '
         'FROM publication_pair_cases, json_each(case_keys) '
-        f'WHERE publication_id = ?1), ballots AS ({_ballot_outputs("?2")}) '
+        f'WHERE publication_id = ?1), ballots AS ({_ballot_outputs(2)}) '
         'INSERT INTO active (family, publication_id, activated_at) '
         'SELECT ?2, ?1, ?3 '
         'WHERE (SELECT count(*) FROM cases WHERE publication_id = ?1) = ?4 '
         'AND (SELECT count(*) FROM outputs WHERE publication_id = ?1) = ?5 '
         'AND NOT EXISTS (SELECT * FROM expected EXCEPT SELECT * FROM stored) '
         'AND NOT EXISTS (SELECT * FROM stored EXCEPT SELECT * FROM expected) '
-        f'AND (NOT ?6 OR NOT EXISTS ({_fingerprint_conflicts("?7")})) '
+        f'AND (NOT ?6 OR NOT EXISTS ({_fingerprint_conflicts(7)})) '
         'ON CONFLICT (family) DO UPDATE SET '
         'publication_id = excluded.publication_id, '
         'activated_at = excluded.activated_at '
@@ -709,9 +708,7 @@ def activate(
     )
     if activated.rows != [{'publication_id': publication.id}]:
         if preserve_ballots:
-            refuse_fingerprint_conflicts(
-                database, publication, store or publication.target
-            )
+            refuse_fingerprint_conflicts(database, publication, publication.target)
         raise InputError(
             f'Publication `{publication.id}` is not completely staged, so it was '
             'not activated. Publish the same ID again.'

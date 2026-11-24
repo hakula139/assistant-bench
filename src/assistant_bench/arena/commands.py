@@ -155,9 +155,7 @@ def publish(
                 publication.refuse_fingerprint_conflicts(
                     production, prepared, 'production'
                 )
-            changed = publication.activate(
-                database, identity, datetime.now(UTC), store='private'
-            )
+            changed = publication.activate(database, identity, datetime.now(UTC))
         else:
             if target == 'production':
                 publication.refuse_fingerprint_conflicts(database, prepared, 'private')
@@ -173,7 +171,6 @@ def publish(
                     identity,
                     now,
                     preserve_ballots=target == 'production',
-                    store=target,
                 )
 
     if not changed:

@@ -50,6 +50,67 @@ def collected() -> list[Output]:
     ]
 
 
+def prepare_target(
+    database: SQLiteDatabase,
+    family: Family,
+    target: publication.VotingTarget,
+    *,
+    fingerprint_prefix: str = 'fp',
+) -> publication.Publication:
+    outputs = [
+        make_trial(
+            case,
+            system,
+            finish_reason='stop',
+            fingerprint=f'{fingerprint_prefix}-{system}',
+        )
+        for case in CATEGORIES
+        for system in SYSTEMS
+    ]
+    cases = load_cases(family)
+    if target == 'private':
+        cases = [case.model_copy(update={'source': 'transcript'}) for case in cases]
+    draft = publication.prepare(
+        family,
+        cases,
+        outputs,
+        {name: system.display_name for name, system in SYSTEMS.items()},
+        target=target,
+    )
+    publication.stage(database, draft, NOW)
+    state = State(database)
+    generation = write_outputs(
+        family.name,
+        outputs,
+        state,
+        previous=state.output_generation(family.name).id,
+        code_revision='a' * 40,
+        case_revision='b' * 40,
+        system_names={name: system.display_name for name, system in SYSTEMS.items()},
+    )
+    publication.record_preparation(
+        database,
+        publication.Preparation(
+            publication_id=draft.id,
+            target=target,
+            collection_id=generation,
+            case_revision='b' * 40,
+            prepared_at=NOW,
+        ),
+    )
+    return draft
+
+
+def connect_stores(
+    monkeypatch: pytest.MonkeyPatch,
+    stores: dict[str, SQLiteDatabase],
+) -> None:
+    def connect(target: str) -> AbstractContextManager[SQLiteDatabase]:
+        return nullcontext(stores[target])
+
+    monkeypatch.setattr(d1, 'connect', connect)
+
+
 @pytest.fixture
 def family(families_dir: Path) -> Family:
     write_votes_family(
@@ -80,34 +141,7 @@ def store(
 @pytest.fixture
 def prepared(family: Family, store: tuple[SQLiteDatabase, list[str]]) -> str:
     database, _ = store
-    draft = publication.prepare(
-        family,
-        load_cases(family),
-        collected(),
-        {name: system.display_name for name, system in SYSTEMS.items()},
-        target='production',
-    )
-    publication.stage(database, draft, NOW)
-    generation = write_outputs(
-        family.name,
-        collected(),
-        State(database),
-        previous=None,
-        code_revision='a' * 40,
-        case_revision='b' * 40,
-        system_names={name: system.display_name for name, system in SYSTEMS.items()},
-    )
-    publication.record_preparation(
-        database,
-        publication.Preparation(
-            publication_id=draft.id,
-            target='production',
-            collection_id=generation,
-            case_revision='b' * 40,
-            prepared_at=NOW,
-        ),
-    )
-    return draft.id
+    return prepare_target(database, family, 'production').id
 
 
 @pytest.fixture
@@ -378,146 +412,6 @@ class TestPublish:
         assert result.exit_code == 2
         assert "'staging'" in result.stderr and "'production'" in result.stderr
 
-    def _prepare_target(
-        self,
-        database: SQLiteDatabase,
-        family: Family,
-        target: publication.VotingTarget,
-        *,
-        fingerprint_prefix: str = 'fp',
-    ) -> publication.Publication:
-        outputs = [
-            make_trial(
-                case,
-                system,
-                finish_reason='stop',
-                fingerprint=f'{fingerprint_prefix}-{system}',
-            )
-            for case in CATEGORIES
-            for system in SYSTEMS
-        ]
-        cases = load_cases(family)
-        if target == 'private':
-            cases = [case.model_copy(update={'source': 'transcript'}) for case in cases]
-        draft = publication.prepare(
-            family,
-            cases,
-            outputs,
-            {name: system.display_name for name, system in SYSTEMS.items()},
-            target=target,
-        )
-        publication.stage(database, draft, NOW)
-        state = State(database)
-        generation = write_outputs(
-            family.name,
-            outputs,
-            state,
-            previous=state.output_generation(family.name).id,
-            code_revision='a' * 40,
-            case_revision='b' * 40,
-            system_names={
-                name: system.display_name for name, system in SYSTEMS.items()
-            },
-        )
-        publication.record_preparation(
-            database,
-            publication.Preparation(
-                publication_id=draft.id,
-                target=target,
-                collection_id=generation,
-                case_revision='b' * 40,
-                prepared_at=NOW,
-            ),
-        )
-        return draft
-
-    def _connect_stores(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        stores: dict[str, SQLiteDatabase],
-    ) -> None:
-        def connect(target: str) -> AbstractContextManager[SQLiteDatabase]:
-            return nullcontext(stores[target])
-
-        monkeypatch.setattr(d1, 'connect', connect)
-
-    def test_refuses_production_publish_when_private_has_a_conflicting_ballot(
-        self,
-        family: Family,
-        private_store: SQLiteDatabase,
-        arena_store: SQLiteDatabase,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        self._connect_stores(
-            monkeypatch, {'private': private_store, 'production': arena_store}
-        )
-        prior = self._prepare_target(private_store, family, 'private')
-        publication.activate(private_store, prior.id, NOW, store='private')
-        record_vote(private_store, prior, NOW, actor='reader', age=timedelta(hours=1))
-        incoming = self._prepare_target(
-            private_store, family, 'production', fingerprint_prefix='new'
-        )
-
-        result = invoke('publish', 'production', incoming.id)
-
-        assert result.exit_code == 1
-        assert 'voting evidence in `private`' in result.stderr
-        assert arena_store.execute('SELECT * FROM publications').rows == []
-        assert arena_store.execute('SELECT * FROM active').rows == []
-
-    def test_refuses_production_publish_without_staging_on_production_ballot(
-        self,
-        family: Family,
-        private_store: SQLiteDatabase,
-        arena_store: SQLiteDatabase,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        self._connect_stores(
-            monkeypatch, {'private': private_store, 'production': arena_store}
-        )
-        prior = self._prepare_target(private_store, family, 'production')
-        publication.stage(arena_store, prior, NOW)
-        publication.activate(arena_store, prior.id, NOW, store='production')
-        record_vote(arena_store, prior, NOW, actor='reader', age=timedelta(hours=1))
-        incoming = self._prepare_target(
-            private_store, family, 'production', fingerprint_prefix='new'
-        )
-
-        result = invoke('publish', 'production', incoming.id)
-
-        assert result.exit_code == 1
-        assert 'voting evidence in `production`' in result.stderr
-        assert arena_store.execute('SELECT id FROM publications').rows == [
-            {'id': prior.id}
-        ]
-        assert arena_store.execute('SELECT publication_id FROM active').rows == [
-            {'publication_id': prior.id}
-        ]
-
-    def test_refuses_private_publish_when_production_has_a_conflicting_ballot(
-        self,
-        family: Family,
-        private_store: SQLiteDatabase,
-        arena_store: SQLiteDatabase,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        self._connect_stores(
-            monkeypatch, {'private': private_store, 'production': arena_store}
-        )
-        prior = self._prepare_target(private_store, family, 'production')
-        publication.stage(arena_store, prior, NOW)
-        publication.activate(arena_store, prior.id, NOW, store='production')
-        record_vote(arena_store, prior, NOW, actor='reader', age=timedelta(hours=1))
-        incoming = self._prepare_target(
-            private_store, family, 'private', fingerprint_prefix='new'
-        )
-
-        result = invoke('publish', 'private', incoming.id)
-
-        assert result.exit_code == 1
-        assert 'voting evidence in `production`' in result.stderr
-        assert private_store.execute('SELECT * FROM active').rows == []
-
     def test_rotates_both_official_stores_sequentially_when_neither_has_votes(
         self,
         family: Family,
@@ -525,18 +419,18 @@ class TestPublish:
         arena_store: SQLiteDatabase,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        self._connect_stores(
+        connect_stores(
             monkeypatch, {'private': private_store, 'production': arena_store}
         )
-        first_private = self._prepare_target(private_store, family, 'private')
-        publication.activate(private_store, first_private.id, NOW, store='private')
-        first_production = self._prepare_target(private_store, family, 'production')
+        first_private = prepare_target(private_store, family, 'private')
+        publication.activate(private_store, first_private.id, NOW)
+        first_production = prepare_target(private_store, family, 'production')
         publication.stage(arena_store, first_production, NOW)
-        publication.activate(arena_store, first_production.id, NOW, store='production')
-        second_production = self._prepare_target(
+        publication.activate(arena_store, first_production.id, NOW)
+        second_production = prepare_target(
             private_store, family, 'production', fingerprint_prefix='new'
         )
-        second_private = self._prepare_target(
+        second_private = prepare_target(
             private_store, family, 'private', fingerprint_prefix='new'
         )
 
@@ -559,11 +453,11 @@ class TestPublish:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         with arena_database() as staging_store:
-            self._connect_stores(
+            connect_stores(
                 monkeypatch, {'private': private_store, 'staging': staging_store}
             )
-            prior_private = self._prepare_target(private_store, family, 'private')
-            publication.activate(private_store, prior_private.id, NOW, store='private')
+            prior_private = prepare_target(private_store, family, 'private')
+            publication.activate(private_store, prior_private.id, NOW)
             record_vote(
                 private_store,
                 prior_private,
@@ -571,14 +465,13 @@ class TestPublish:
                 actor='reader',
                 age=timedelta(hours=1),
             )
-            prior_staging = self._prepare_target(private_store, family, 'production')
+            prior_staging = prepare_target(private_store, family, 'production')
             publication.stage(staging_store, prior_staging, NOW)
             publication.activate(
                 staging_store,
                 prior_staging.id,
                 NOW,
                 preserve_ballots=False,
-                store='staging',
             )
             record_vote(
                 staging_store,
@@ -587,7 +480,7 @@ class TestPublish:
                 actor='tester',
                 age=timedelta(hours=1),
             )
-            incoming = self._prepare_target(
+            incoming = prepare_target(
                 private_store, family, 'production', fingerprint_prefix='new'
             )
 
@@ -597,6 +490,83 @@ class TestPublish:
             assert staging_store.execute('SELECT publication_id FROM active').rows == [
                 {'publication_id': incoming.id}
             ]
+
+    def test_refuses_production_publish_when_private_has_a_conflicting_ballot(
+        self,
+        family: Family,
+        private_store: SQLiteDatabase,
+        arena_store: SQLiteDatabase,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        connect_stores(
+            monkeypatch, {'private': private_store, 'production': arena_store}
+        )
+        prior = prepare_target(private_store, family, 'private')
+        publication.activate(private_store, prior.id, NOW)
+        record_vote(private_store, prior, NOW, actor='reader', age=timedelta(hours=1))
+        incoming = prepare_target(
+            private_store, family, 'production', fingerprint_prefix='new'
+        )
+
+        result = invoke('publish', 'production', incoming.id)
+
+        assert result.exit_code == 1
+        assert 'voting evidence in `private`' in result.stderr
+        assert arena_store.execute('SELECT * FROM publications').rows == []
+        assert arena_store.execute('SELECT * FROM active').rows == []
+
+    def test_refuses_production_publish_without_staging_on_production_ballot(
+        self,
+        family: Family,
+        private_store: SQLiteDatabase,
+        arena_store: SQLiteDatabase,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        connect_stores(
+            monkeypatch, {'private': private_store, 'production': arena_store}
+        )
+        prior = prepare_target(private_store, family, 'production')
+        publication.stage(arena_store, prior, NOW)
+        publication.activate(arena_store, prior.id, NOW)
+        record_vote(arena_store, prior, NOW, actor='reader', age=timedelta(hours=1))
+        incoming = prepare_target(
+            private_store, family, 'production', fingerprint_prefix='new'
+        )
+
+        result = invoke('publish', 'production', incoming.id)
+
+        assert result.exit_code == 1
+        assert 'voting evidence in `production`' in result.stderr
+        assert arena_store.execute('SELECT id FROM publications').rows == [
+            {'id': prior.id}
+        ]
+        assert arena_store.execute('SELECT publication_id FROM active').rows == [
+            {'publication_id': prior.id}
+        ]
+
+    def test_refuses_private_publish_when_production_has_a_conflicting_ballot(
+        self,
+        family: Family,
+        private_store: SQLiteDatabase,
+        arena_store: SQLiteDatabase,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        connect_stores(
+            monkeypatch, {'private': private_store, 'production': arena_store}
+        )
+        prior = prepare_target(private_store, family, 'production')
+        publication.stage(arena_store, prior, NOW)
+        publication.activate(arena_store, prior.id, NOW)
+        record_vote(arena_store, prior, NOW, actor='reader', age=timedelta(hours=1))
+        incoming = prepare_target(
+            private_store, family, 'private', fingerprint_prefix='new'
+        )
+
+        result = invoke('publish', 'private', incoming.id)
+
+        assert result.exit_code == 1
+        assert 'voting evidence in `production`' in result.stderr
+        assert private_store.execute('SELECT * FROM active').rows == []
 
 
 class TestStatus:
