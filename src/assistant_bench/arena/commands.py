@@ -153,19 +153,27 @@ def publish(
         if target == 'private':
             with d1.connect('production') as production:
                 publication.refuse_fingerprint_conflicts(
-                    production, prepared, 'production', include_active=True
+                    production, prepared, 'production'
                 )
-            changed = publication.activate(database, identity, datetime.now(UTC))
+            changed = publication.activate(
+                database, identity, datetime.now(UTC), store='private'
+            )
         else:
             if target == 'production':
-                publication.refuse_fingerprint_conflicts(
-                    database, prepared, 'private', include_active=True
-                )
+                publication.refuse_fingerprint_conflicts(database, prepared, 'private')
             with d1.connect(target) as destination:
+                if target == 'production':
+                    publication.refuse_fingerprint_conflicts(
+                        destination, prepared, 'production'
+                    )
                 now = datetime.now(UTC)
                 publication.stage(destination, prepared, now)
                 changed = publication.activate(
-                    destination, identity, now, preserve_ballots=target == 'production'
+                    destination,
+                    identity,
+                    now,
+                    preserve_ballots=target == 'production',
+                    store=target,
                 )
 
     if not changed:
