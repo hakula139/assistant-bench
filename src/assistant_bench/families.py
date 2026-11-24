@@ -154,10 +154,7 @@ class VotesSettings(_Settings):
     """Publish the public and synthetic cases for voting in production."""
 
     reference: str
-    """Listed system anchoring at `ranking.ANCHOR` when ranked.
-
-    The most-voted system anchors when the reference does not rank.
-    """
+    """Listed system against which expected net points are scored."""
 
     render: Literal['text', 'diff', 'html'] = 'text'
     """Output presentation. Only task families yield diffs."""

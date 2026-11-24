@@ -125,7 +125,7 @@ class Publication(_Model):
     render: Literal['text', 'diff', 'html']
     defects: tuple[Defect, ...]
     reference: str
-    """The system that anchors the round, frozen so closing uses what voters saw."""
+    """Reference for expected net points, frozen so closing uses what voters saw."""
 
     systems: dict[str, str]
     """Each published system's and the reference's display name, in family order."""
