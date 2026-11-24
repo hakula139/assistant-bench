@@ -154,9 +154,10 @@ class VotesSettings(_Settings):
     """Publish the public and synthetic cases for voting in production."""
 
     reference: str
-    """Listed system anchoring at `ranking.ANCHOR` when ranked.
+    """Listed system against which overall and category expected net points are scored.
 
-    The most-voted system anchors when the reference does not rank.
+    Archived Elo snapshots can use the most-voted system as the anchor when this
+    reference is outside the ranked component.
     """
 
     render: Literal['text', 'diff', 'html'] = 'text'
