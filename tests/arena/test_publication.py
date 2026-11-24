@@ -672,6 +672,34 @@ class TestStageAndActivate:
         assert not changed
         assert all(statement.startswith('SELECT') for statement in recording.statements)
 
+    def test_switches_once_when_activation_clears_a_pending_pair(
+        self, arena_store: SQLiteDatabase
+    ) -> None:
+        first = prepare(
+            make_votes_family(),
+            [make_case('first')],
+            [make_trial('first', system) for system in ARENA_SYSTEMS[:2]],
+        )
+        second = text_publication()
+        stage_and_activate(arena_store, first, NOW)
+        publication.stage(arena_store, second, NOW)
+        a, b = first.outputs
+        arena_store.execute("INSERT INTO actors (id, created_at) VALUES ('reader', 0)")
+        arena_store.execute(
+            'INSERT INTO pairs (id, actor_id, family, publication_id, case_key, '
+            'a_output, b_output, issued_at) '
+            "VALUES ('pair', 'reader', ?, ?, ?, ?, ?, 0)",
+            [first.family, first.id, a.case_key, a.key, b.key],
+        )
+        assert rows(arena_store, 'SELECT publication_id FROM active') == [(first.id,)]
+        assert rows(arena_store, 'SELECT id FROM pending_pairs') == [('pair',)]
+
+        assert publication.activate(arena_store, second.id, NOW)
+
+        assert rows(arena_store, 'SELECT publication_id FROM active') == [(second.id,)]
+        assert rows(arena_store, 'SELECT id FROM pending_pairs') == []
+        assert not publication.activate(arena_store, second.id, NOW)
+
     @pytest.mark.parametrize(
         'statement',
         [

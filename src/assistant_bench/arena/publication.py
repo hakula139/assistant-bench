@@ -696,7 +696,8 @@ def activate(
         f'AND (NOT ? OR NOT EXISTS ({_FINGERPRINT_CONFLICTS})) '
         'ON CONFLICT (family) DO UPDATE SET '
         'publication_id = excluded.publication_id, '
-        'activated_at = excluded.activated_at',
+        'activated_at = excluded.activated_at '
+        'RETURNING publication_id',
         [
             publication.id,
             publication.id,
@@ -714,7 +715,7 @@ def activate(
             _fingerprint_json(publication),
         ],
     )
-    if activated.changes != 1:
+    if activated.rows != [{'publication_id': publication.id}]:
         if preserve_ballots:
             refuse_fingerprint_conflicts(
                 database, publication, publication.target, include_active=False
