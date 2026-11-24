@@ -30,6 +30,7 @@ import {
   verifyChallenge,
 } from './actors';
 import { ApiError, type Api, type Bindings } from './api';
+import { all, queries } from './db';
 import { BODY_LIMIT_BYTES } from './limits';
 import { pairBatch, pairState, skip, type PairSnapshot } from './pairs';
 import { preview, previewHeaders, previewUnavailable } from './previews';
@@ -121,12 +122,15 @@ const api = new Hono<Api>()
     await next();
   })
   .get('/families', async (c) => {
-    const { results } = await c.env.DB.prepare(
-      `SELECT active.family, publications.display_name, publications.aspect
-       FROM active JOIN publications ON publications.id = active.publication_id
-       ORDER BY active.family`,
-    ).all<{ family: string; display_name: string; aspect: string | null }>();
-    return c.json({ families: results });
+    const families = await all(
+      c.env.DB,
+      queries
+        .selectFrom('active')
+        .innerJoin('publications', 'publications.id', 'active.publication_id')
+        .select(['active.family', 'publications.display_name', 'publications.aspect'])
+        .orderBy('active.family'),
+    );
+    return c.json({ families });
   })
   .post('/actors', sValidator('json', admissionRequest, rejectInvalid), async (c) => {
     const now = Date.now();

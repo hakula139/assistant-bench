@@ -3,6 +3,7 @@ import { getSignedCookie, setSignedCookie } from 'hono/cookie';
 import * as z from 'zod/mini';
 
 import { ApiError, type Api, type PublicBindings } from './api';
+import { first, queries, run } from './db';
 import { hex, signer } from './hmac';
 import { ACTOR_MAX_AGE_MS, ACTORS_PER_TAG, WINDOW_MS } from './limits';
 
@@ -58,15 +59,32 @@ export async function verifyChallenge(
 /** Creates an actor unless its tag already admitted `ACTORS_PER_TAG` browsers in the window. */
 export async function admit(db: D1Database, tag: string, now: number): Promise<string> {
   const id = crypto.randomUUID();
-  const { meta } = await db
-    .prepare(
-      `INSERT INTO actors (id, created_at, ip_tag)
-       SELECT ?1, ?2, ?3
-       WHERE (SELECT count(*) FROM actors WHERE ip_tag = ?3 AND created_at > ?4) < ?5`,
-    )
-    .bind(id, now, tag, now - WINDOW_MS, ACTORS_PER_TAG)
-    .run();
-  if (meta.changes === 0) {
+  const { changes } = await run(
+    db,
+    queries
+      .insertInto('actors')
+      .columns(['id', 'created_at', 'ip_tag'])
+      .expression(
+        queries
+          .selectNoFrom((eb) => [
+            eb.val(id).as('id'),
+            eb.val(now).as('created_at'),
+            eb.val(tag).as('ip_tag'),
+          ])
+          .where((eb) =>
+            eb(
+              eb
+                .selectFrom('actors')
+                .select((sub) => sub.fn.countAll<number>().as('count'))
+                .where('ip_tag', '=', tag)
+                .where('created_at', '>', now - WINDOW_MS),
+              '<',
+              ACTORS_PER_TAG,
+            ),
+          ),
+      ),
+  );
+  if (changes === 0) {
     throw new ApiError(429, 'daily_limit');
   }
   return id;
@@ -74,10 +92,13 @@ export async function admit(db: D1Database, tag: string, now: number): Promise<s
 
 /** Preserves the private owner's identity and original creation time across browsers. */
 export async function admitOwner(db: D1Database, actor: string, now: number): Promise<void> {
-  await db
-    .prepare('INSERT INTO actors (id, created_at) VALUES (?, ?) ON CONFLICT DO NOTHING')
-    .bind(actor, now)
-    .run();
+  await run(
+    db,
+    queries
+      .insertInto('actors')
+      .values({ id: actor, created_at: now, ip_tag: null })
+      .onConflict((oc) => oc.doNothing()),
+  );
 }
 
 /** The actor ID the cookie carries under a valid signature, before any lookup. */
@@ -102,10 +123,14 @@ export async function knownActor(db: D1Database, actor: string | null, now: numb
   if (actor === null) {
     return false;
   }
-  const row = await db
-    .prepare('SELECT 1 FROM actors WHERE id = ? AND created_at > ?')
-    .bind(actor, now - ACTOR_MAX_AGE_MS)
-    .first();
+  const row = await first(
+    db,
+    queries
+      .selectFrom('actors')
+      .select('id')
+      .where('id', '=', actor)
+      .where('created_at', '>', now - ACTOR_MAX_AGE_MS),
+  );
   return row !== null;
 }
 
@@ -115,7 +140,8 @@ export async function requireActor(c: Context<Api>, now: number): Promise<string
   if (c.env.STORE === 'private') {
     if (
       actor !== c.env.PRIVATE_ACTOR_ID ||
-      (await c.env.DB.prepare('SELECT 1 FROM actors WHERE id = ?').bind(actor).first()) === null
+      (await first(c.env.DB, queries.selectFrom('actors').select('id').where('id', '=', actor))) ===
+        null
     ) {
       throw new ApiError(401, 'reload_required');
     }

@@ -10,6 +10,7 @@ declare global {
       IP_TAG_KEY: string;
       TEST_MIGRATIONS: D1Migration[];
       TEST_PUBLICATION: string;
+      TEST_SCHEMA: string;
       TURNSTILE_HOSTNAME: string;
     }
 

@@ -1,16 +1,22 @@
+import { batch, queries } from './db';
 import { PAIR_RETENTION_MS, TAG_RETENTION_MS } from './limits';
 
 /** Clears IP tags and deletes pending pairs past their retention. */
 export async function retain(db: D1Database, now: number): Promise<void> {
   const tagged = now - TAG_RETENTION_MS;
-  await db.batch([
-    db
-      .prepare('UPDATE votes SET ip_tag = NULL WHERE ip_tag IS NOT NULL AND recorded_at <= ?')
-      .bind(tagged),
-    db
-      .prepare('UPDATE actors SET ip_tag = NULL WHERE ip_tag IS NOT NULL AND created_at <= ?')
-      .bind(tagged),
-    db.prepare('DELETE FROM pairs WHERE issued_at <= ?').bind(now - PAIR_RETENTION_MS),
-    db.prepare('DELETE FROM batch_pairs WHERE issued_at <= ?').bind(now - PAIR_RETENTION_MS),
+  const expired = now - PAIR_RETENTION_MS;
+  await batch(db, [
+    queries
+      .updateTable('votes')
+      .set({ ip_tag: null })
+      .where('ip_tag', 'is not', null)
+      .where('recorded_at', '<=', tagged),
+    queries
+      .updateTable('actors')
+      .set({ ip_tag: null })
+      .where('ip_tag', 'is not', null)
+      .where('created_at', '<=', tagged),
+    queries.deleteFrom('pairs').where('issued_at', '<=', expired),
+    queries.deleteFrom('batch_pairs').where('issued_at', '<=', expired),
   ]);
 }

@@ -42,7 +42,7 @@ function duringPlacement(action: () => Promise<void>) {
   let interrupted = false;
   vi.spyOn(env.DB, 'prepare').mockImplementation((query) => {
     const statement = prepare(query);
-    if (query.includes('system IN (?, ?)')) {
+    if (query.includes('"system" in (?, ?)')) {
       const bind = statement.bind.bind(statement);
       vi.spyOn(statement, 'bind').mockImplementation((...values) => {
         const bound = bind(...values);
@@ -515,9 +515,7 @@ describe('POST /api/pair/skip', () => {
     const response = await call(from, 'POST', '/pair/skip', { pair: pair?.id });
 
     expect(response.status).toBe(200);
-    expect(prepare.mock.calls.filter(([query]) => query.includes("verdict = 'pass'"))).toHaveLength(
-      1,
-    );
+    expect(prepare.mock.calls.filter(([query]) => query.includes('"verdict" = ?'))).toHaveLength(1);
   });
 
   test('keeps the pair when its system pair has no other case', async () => {

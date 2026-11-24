@@ -38,6 +38,7 @@ export default getViteConfig({
                   new URL('../tests/fixtures/arena-publication.sql', import.meta.url),
                   'utf8',
                 ),
+                TEST_SCHEMA: await readFile(new URL('worker/schema.ts', import.meta.url), 'utf8'),
               },
             },
           })),
