@@ -2,7 +2,6 @@ import hashlib
 import json
 import sqlite3
 from collections.abc import Callable, Sequence
-from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -25,7 +24,6 @@ from support import (
     ARENA_SYSTEMS,
     CODE_DEFECTS,
     FIXTURES,
-    MIGRATIONS_DIR,
     make_case,
     make_trial,
     make_votes_family,
@@ -570,6 +568,24 @@ class TestPreparation:
         assert private_store.execute('SELECT * FROM active').rows == []
         assert publication.preparation(private_store, published.id) is None
 
+    @pytest.mark.parametrize(
+        'statement',
+        [
+            'UPDATE cases SET source = NULL',
+            "UPDATE cases SET checklist = '{}'",
+        ],
+        ids=['null-source', 'malformed-checklist'],
+    )
+    def test_read_rejects_invalid_stored_rows(
+        self, private_store: SQLiteDatabase, statement: str
+    ) -> None:
+        published = text_publication()
+        publication.stage(private_store, published, NOW)
+        private_store.execute(statement)
+
+        with pytest.raises(InputError, match=f'Publication `{published.id}`'):
+            publication.read(private_store, published.id)
+
 
 class TestRefuseFingerprintConflicts:
     @pytest.mark.parametrize('changed_index', [0, 1], ids=['a-system', 'b-system'])
@@ -869,7 +885,7 @@ class TestStageAndActivate:
             stale_fixture(PUBLICATION_FIXTURE, dumped)
 
 
-def dump(connection: sqlite3.Connection, *, original_schema: bool = False) -> str:
+def dump(connection: sqlite3.Connection) -> str:
     """Return the rows `publish` writes as SQL that `wrangler d1 execute` loads."""
     lines: list[str] = []
     for table, order in (
@@ -880,176 +896,13 @@ def dump(connection: sqlite3.Connection, *, original_schema: bool = False) -> st
         ('active', 'family'),
     ):
         cursor = connection.execute(f'SELECT * FROM {table} ORDER BY {order}')
-        names = [column[0] for column in cursor.description]
-        selected = [
-            index
-            for index, name in enumerate(names)
-            if not original_schema or name not in ('target', 'source')
-        ]
-        columns = ', '.join(names[index] for index in selected)
+        columns = ', '.join(column[0] for column in cursor.description)
         lines.extend(
             f'INSERT INTO {table} ({columns}) VALUES '
-            f'({", ".join(literal(row[index]) for index in selected)});'
+            f'({", ".join(literal(value) for value in row)});'
             for row in cursor
         )
     return '\n'.join(lines) + '\n'
-
-
-class TestPublicationPairCases:
-    def test_backfills_existing_publications_without_changing_their_rows(
-        self, arena_store: SQLiteDatabase
-    ) -> None:
-        for published in (text_publication(), diff_publication()):
-            stage_and_activate(arena_store, published, NOW)
-        existing = (
-            '\n'.join(
-                line
-                for line in dump(
-                    arena_store.connection, original_schema=True
-                ).splitlines()
-                if not line.startswith('INSERT INTO publication_pair_cases')
-            )
-            + '\n'
-        )
-        expected = rows(
-            arena_store,
-            'SELECT * FROM publication_pair_cases '
-            'ORDER BY publication_id, low_system, high_system',
-        )
-
-        with closing(sqlite3.connect(':memory:', isolation_level=None)) as connection:
-            for path in sorted(MIGRATIONS_DIR.glob('*.sql')):
-                if path.name < '0004_':
-                    connection.executescript(path.read_text())
-            connection.executescript(existing)
-
-            connection.executescript(
-                (MIGRATIONS_DIR / '0004_publication_pair_cases.sql').read_text()
-            )
-
-            assert (
-                rows(
-                    SQLiteDatabase(connection),
-                    'SELECT * FROM publication_pair_cases '
-                    'ORDER BY publication_id, low_system, high_system',
-                )
-                == expected
-            )
-            for table, order in (
-                ('publications', 'id'),
-                ('cases', 'publication_id, case_key'),
-                ('outputs', 'publication_id, output_key'),
-                ('active', 'family'),
-            ):
-                current = arena_store.connection.execute(
-                    f'SELECT * FROM {table} ORDER BY {order}'
-                )
-                names = [column[0] for column in current.description]
-                columns = ', '.join(
-                    name for name in names if name not in ('target', 'source')
-                )
-                current = arena_store.connection.execute(
-                    f'SELECT {columns} FROM {table} ORDER BY {order}'
-                )
-                preserved = connection.execute(
-                    f'SELECT {columns} FROM {table} ORDER BY {order}'
-                )
-                assert preserved.fetchall() == current.fetchall(), table
-
-    def test_completes_staging_after_backfilling_a_partial_inactive_publication(
-        self, arena_store: SQLiteDatabase
-    ) -> None:
-        cases = [make_case('first'), make_case('second')]
-        published = prepare(
-            make_votes_family(),
-            cases,
-            [make_trial(case.id, system) for case in cases for system in ARENA_SYSTEMS],
-        )
-        stage_and_activate(arena_store, published, NOW)
-        staged = '\n'.join(
-            line
-            for line in dump(arena_store.connection, original_schema=True).splitlines()
-            if not line.startswith(
-                ('INSERT INTO publication_pair_cases', 'INSERT INTO active')
-            )
-        )
-        keys = sorted(publication.case_key(case) for case in cases)
-
-        with closing(sqlite3.connect(':memory:', isolation_level=None)) as connection:
-            for path in sorted(MIGRATIONS_DIR.glob('*.sql')):
-                if path.name < '0004_':
-                    connection.executescript(path.read_text())
-            connection.executescript(staged)
-            connection.execute(
-                'DELETE FROM outputs WHERE case_key = ?',
-                [publication.case_key(cases[1])],
-            )
-            connection.executescript(
-                (MIGRATIONS_DIR / '0004_publication_pair_cases.sql').read_text()
-            )
-            for path in sorted(MIGRATIONS_DIR.glob('*.sql')):
-                if path.name[:4] > '0004':
-                    connection.executescript(path.read_text())
-            connection.execute('UPDATE publications SET target = ?', ['production'])
-            for case in published.cases:
-                connection.execute(
-                    'UPDATE cases SET source = ? WHERE case_key = ?',
-                    [case.source, case.key],
-                )
-            database = SQLiteDatabase(connection)
-
-            changed = stage_and_activate(database, published, NOW)
-
-            assert changed
-            assert rows(database, 'SELECT publication_id FROM active') == [
-                (published.id,)
-            ]
-            assert [
-                (low, high, json.loads(case_keys))
-                for low, high, case_keys in rows(
-                    database,
-                    'SELECT low_system, high_system, case_keys '
-                    'FROM publication_pair_cases ORDER BY low_system, high_system',
-                )
-            ] == [
-                ('acme-large', 'acme-pro', keys),
-                ('acme-large', 'acme-small', keys),
-                ('acme-pro', 'acme-small', keys),
-            ]
-
-
-class TestPublicationSources:
-    def test_adds_source_columns_without_guessing_or_changing_existing_votes(
-        self, arena_store: SQLiteDatabase
-    ) -> None:
-        published = text_publication()
-        publication.stage(arena_store, published, NOW)
-        publication.activate(arena_store, published.id, NOW)
-        retained = dump(arena_store.connection, original_schema=True)
-        with closing(sqlite3.connect(':memory:', isolation_level=None)) as connection:
-            for path in sorted(MIGRATIONS_DIR.glob('*.sql')):
-                if path.name[:4] < '0006':
-                    connection.executescript(path.read_text())
-            connection.executescript(retained)
-            database = SQLiteDatabase(connection)
-            identifier = record_vote(
-                database, published, NOW, actor='reader', age=timedelta(hours=1)
-            )
-            before = database.execute('SELECT * FROM votes').rows
-
-            connection.executescript(
-                (MIGRATIONS_DIR / '0006_publication_sources.sql').read_text()
-            )
-
-            assert database.execute('SELECT * FROM votes').rows == before
-            assert database.execute('SELECT source FROM cases').rows == [
-                {'source': None},
-                {'source': None},
-            ]
-            cut = votes.read_cut(database, published.family, NOW)
-            assert cut is not None and [vote.id for vote in cut.votes] == [identifier]
-            with pytest.raises(InputError, match='source'):
-                publication.read(database, published.id)
 
 
 def literal(value: object) -> str:

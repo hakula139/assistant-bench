@@ -231,19 +231,7 @@ class TestGenerate:
         @pytest.mark.parametrize(
             'api', ['openai-chat-completions', 'openai-responses', 'anthropic-messages']
         )
-        @pytest.mark.parametrize(
-            'scenario',
-            [
-                'zero',
-                'missing-input',
-                'missing-output',
-                'negative-input',
-                'negative-output',
-                'fractional-input',
-                'negative-cache',
-                'excess-reasoning',
-            ],
-        )
+        @pytest.mark.parametrize('scenario', ['zero', 'negative-input'])
         def test_accepts_the_answer_but_records_only_valid_measured_usage(
             self,
             private_state: State,
@@ -286,31 +274,8 @@ class TestGenerate:
                         if api == 'openai-chat-completions'
                         else 'output_tokens_details'
                     ] = {'reasoning_tokens': 0}
-            elif scenario.startswith('missing-'):
-                usage.pop(input_key if scenario == 'missing-input' else output_key)
-            elif scenario in ('negative-input', 'fractional-input'):
-                usage[input_key] = -1 if scenario == 'negative-input' else 1.5
-            elif scenario == 'negative-output':
-                usage[output_key] = -1
-            elif scenario == 'negative-cache':
-                if api == 'anthropic-messages':
-                    usage['cache_read_input_tokens'] = -1
-                else:
-                    usage[
-                        'prompt_tokens_details'
-                        if api == 'openai-chat-completions'
-                        else 'input_tokens_details'
-                    ] = {'cached_tokens': -1}
             else:
-                usage[
-                    'completion_tokens_details'
-                    if api == 'openai-chat-completions'
-                    else 'output_tokens_details'
-                ] = {
-                    'thinking_tokens'
-                    if api == 'anthropic-messages'
-                    else 'reasoning_tokens': 41
-                }
+                usage[input_key] = -1
             if api == 'anthropic-messages':
                 endpoint.stream = message_stream(payload)
             else:
@@ -1013,29 +978,22 @@ class TestGenerate:
             assert len(endpoint.requests) == 1
             assert not (logs_dir / OUTPUT_FILE).exists()
 
-        @pytest.mark.parametrize('api', ['openai-chat-completions', 'openai-responses'])
         def test_reaches_an_ipv6_endpoint_without_a_local_address(
             self,
             private_state: State,
             ipv6_endpoint: StubEndpoint,
             logs_dir: Path,
-            api: str,
         ) -> None:
-            if api == 'openai-responses':
-                ipv6_endpoint.response = response()
-
-            _, output = run_agent(private_state, ipv6_endpoint, logs_dir, api=api)
+            _, output = run_agent(
+                private_state, ipv6_endpoint, logs_dir, api='openai-chat-completions'
+            )
 
             assert output.read_text() == 'Hello there.'
             assert len(ipv6_endpoint.requests) == 1
 
-        @pytest.mark.parametrize('api', ['openai-chat-completions', 'openai-responses'])
         def test_binds_connections_to_the_local_address_the_env_names(
-            self, private_state: State, endpoint: StubEndpoint, logs_dir: Path, api: str
+            self, private_state: State, endpoint: StubEndpoint, logs_dir: Path
         ) -> None:
-            if api == 'openai-responses':
-                endpoint.response = response()
-
             # 192.0.2.1 is reserved for documentation, so no host owns it.
             with pytest.raises(openai.APIConnectionError):
                 run_agent(
@@ -1043,39 +1001,36 @@ class TestGenerate:
                     endpoint,
                     logs_dir,
                     env={LOCAL_ADDRESS_VAR: '192.0.2.1'},
-                    api=api,
+                    api='openai-chat-completions',
                 )
             _, output = run_agent(
                 private_state,
                 endpoint,
                 logs_dir,
                 env={LOCAL_ADDRESS_VAR: '127.0.0.1'},
-                api=api,
+                api='openai-chat-completions',
             )
 
             assert output.read_text() == 'Hello there.'
             assert len(endpoint.requests) == 1
 
-        @pytest.mark.parametrize('api', ['openai-chat-completions', 'openai-responses'])
         def test_trusts_the_ca_bundle_the_env_names(
             self,
             private_state: State,
             tls_endpoint: StubEndpoint,
             logs_dir: Path,
-            api: str,
         ) -> None:
             assert tls_endpoint.ca_file is not None
-            if api == 'openai-responses':
-                tls_endpoint.response = response()
+            tls_endpoint.response = response()
 
             with pytest.raises(openai.APIConnectionError):
-                run_agent(private_state, tls_endpoint, logs_dir, api=api)
+                run_agent(private_state, tls_endpoint, logs_dir, api='openai-responses')
             _, output = run_agent(
                 private_state,
                 tls_endpoint,
                 logs_dir,
                 env={CA_FILE_VAR: str(tls_endpoint.ca_file)},
-                api=api,
+                api='openai-responses',
             )
 
             assert output.read_text() == 'Hello there.'

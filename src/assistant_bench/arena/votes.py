@@ -1,6 +1,5 @@
 """A store's vote cuts and moderation, production's cut snapshots, and rounds."""
 
-import hashlib
 import json
 from collections import defaultdict
 from collections.abc import Iterator, Mapping, Sequence
@@ -12,7 +11,6 @@ from typing import Literal, NamedTuple, get_args
 from pydantic import (
     AwareDatetime,
     BaseModel,
-    ConfigDict,
     Field,
     Json,
     ValidationError,
@@ -33,10 +31,14 @@ from sqlalchemy.dialects import sqlite
 
 from assistant_bench import schema
 from assistant_bench.arena.publication import (
+    ArenaModel,
     CaseFacts,
     Inventory,
     OutputFacts,
+    VotingTarget,
+    canonical_digest,
     output_key,
+    timestamp_ms,
 )
 from assistant_bench.database import (
     Database,
@@ -68,16 +70,12 @@ It must equal `UNDO_MS` in `web/worker/limits.ts`, so no cut holds an undoable v
 PAGE_ROWS = 1000
 
 
-class _Model(BaseModel):
-    model_config = ConfigDict(extra='forbid', frozen=True)
-
-
-class TaggedDefects(_Model):
+class TaggedDefects(ArenaModel):
     a: tuple[Defect, ...] = ()
     b: tuple[Defect, ...] = ()
 
 
-class BallotPublication(_Model):
+class BallotPublication(ArenaModel):
     """Original facts of a ballot outside the active publication."""
 
     id: str
@@ -88,7 +86,7 @@ class BallotPublication(_Model):
     b_name: str
 
 
-class Vote(_Model):
+class Vote(ArenaModel):
     id: int
     actor: str
     case_key: str
@@ -106,7 +104,7 @@ class Vote(_Model):
     """Omitted for active ballots so existing sealed snapshot digests still verify."""
 
 
-class Cut(_Model):
+class Cut(ArenaModel):
     """A store's counted votes that can no longer change, with what they rate."""
 
     cutoff: int
@@ -123,7 +121,7 @@ class Cut(_Model):
     """The immutable collection prepared for this publication, when known."""
 
 
-class Snapshot(_Model):
+class Snapshot(ArenaModel):
     """The self-contained cuts and closing policy of one voted round."""
 
     family: FamilyName
@@ -203,8 +201,8 @@ class Snapshot(_Model):
             inventories[0],
         )
 
-    def cuts(self) -> tuple[tuple[Literal['production', 'private'], Cut], ...]:
-        cuts: list[tuple[Literal['production', 'private'], Cut]] = []
+    def cuts(self) -> tuple[tuple[VotingTarget, Cut], ...]:
+        cuts: list[tuple[VotingTarget, Cut]] = []
         if self.production is not None:
             cuts.append(('production', self.production))
         if self.private is not None:
@@ -239,7 +237,7 @@ def read_cut(
     outputs_table = schema.Outputs
     cases_table = schema.Cases
 
-    cutoff_ms = int(now.timestamp() * 1000) - UNDO_WINDOW_MS
+    cutoff_ms = timestamp_ms(now) - UNDO_WINDOW_MS
     active_publication = (
         select(active.publication_id.label('id'))
         .where(active.family == family, literal(int(include_active)) != 0)
@@ -510,7 +508,7 @@ def read_cut(
     )
 
 
-class FamilyStatus(_Model):
+class FamilyStatus(ArenaModel):
     family: str
     publication_id: str
     activated_at: int
@@ -530,7 +528,6 @@ class FamilyStatus(_Model):
 
 
 def status(database: Database, family: str | None) -> list[FamilyStatus]:
-    """Summarize each active family, or only the named one, in name order."""
     active = schema.Active
     publications = schema.Publications
     votes_table = schema.Votes
@@ -583,7 +580,7 @@ Grouping = Literal['ip', 'actor']
 CHOICES: tuple[Choice, ...] = get_args(Choice.__value__)
 
 
-class Selector(_Model):
+class Selector(ArenaModel):
     """The votes of one network tag or one browser, or the votes with given IDs."""
 
     column: Literal['ip_tag', 'actor_id', 'id']
@@ -602,7 +599,7 @@ class Selector(_Model):
                 return schema.Votes.id.in_(subquery)
 
 
-class ListedVote(_Model):
+class ListedVote(ArenaModel):
     id: int
     actor: str
     ip_tag: str | None
@@ -618,7 +615,7 @@ class ListedVote(_Model):
     exclusion: str | None
 
 
-class Group(_Model):
+class Group(ArenaModel):
     """One network tag's or one browser's votes in a family, excluded ones included."""
 
     subject: str | None
@@ -638,7 +635,6 @@ class Group(_Model):
 def listed(
     database: Database, family: str, selector: Selector | None
 ) -> list[ListedVote]:
-    """Return the family's votes, or only the selected ones, in ID order."""
     votes_table = schema.Votes
     filters: list[ColumnElement[bool]] = [votes_table.family == family]
     if selector is not None:
@@ -670,7 +666,6 @@ def listed(
 
 
 def groups(database: Database, family: str, by: Grouping) -> list[Group]:
-    """Summarize the family's votes per network tag or per browser, most votes first."""
     grouped: defaultdict[str | None, list[ListedVote]] = defaultdict(list)
     for vote in listed(database, family, None):
         grouped[vote.ip_tag if by == 'ip' else vote.actor].append(vote)
@@ -707,41 +702,31 @@ def check_reason(reason: str) -> None:
 
 
 def exclude(database: Database, family: str, selector: Selector, reason: str) -> int:
-    """Exclude the selected votes for `reason`, returning how many changed.
-
-    A vote excluded earlier keeps its first reason.
-
-    Raises
-    ------
-    InputError
-        The reason is blank.
-    """
+    """Exclude the selected votes for `reason`, keeping any earlier reason."""
     check_reason(reason)
-    votes_table = schema.Votes
-    result = execute(
-        database,
-        update(votes_table)
-        .values(exclusion=reason)
-        .where(
-            votes_table.family == family,
-            votes_table.exclusion.is_(None),
-            selector.condition(),
-        )
-        .returning(votes_table.id),
-    )
-    return len(result.rows)
+    return _set_exclusion(database, family, selector, reason)
 
 
 def restore(database: Database, family: str, selector: Selector) -> int:
-    """Count the selected excluded votes again, returning how many changed."""
+    return _set_exclusion(database, family, selector, None)
+
+
+def _set_exclusion(
+    database: Database, family: str, selector: Selector, exclusion: str | None
+) -> int:
     votes_table = schema.Votes
+    predicate = (
+        votes_table.exclusion.is_(None)
+        if exclusion is not None
+        else votes_table.exclusion.is_not(None)
+    )
     result = execute(
         database,
         update(votes_table)
-        .values(exclusion=None)
+        .values(exclusion=exclusion)
         .where(
             votes_table.family == family,
-            votes_table.exclusion.is_not(None),
+            predicate,
             selector.condition(),
         )
         .returning(votes_table.id),
@@ -752,7 +737,7 @@ def restore(database: Database, family: str, selector: Selector) -> int:
 # ── Snapshots ──
 
 
-class _SnapshotHeader(_Model):
+class _SnapshotHeader(ArenaModel):
     id: str
     family: FamilyName
     taken_at: AwareDatetime
@@ -768,8 +753,8 @@ class _SnapshotHeader(_Model):
     sealed: bool
 
 
-class _SnapshotStore(_Model):
-    target: Literal['production', 'private']
+class _SnapshotStore(ArenaModel):
+    target: VotingTarget
     publication_id: str
     reference: str
     systems_json: Json[dict[str, str]]
@@ -779,23 +764,13 @@ class _SnapshotStore(_Model):
     output_generation_id: str | None
 
 
-def _snapshot_digest(snapshot: Snapshot) -> str:
-    canonical = json.dumps(
-        snapshot.model_dump(mode='json'),
-        sort_keys=True,
-        separators=(',', ':'),
-        ensure_ascii=False,
-    )
-    return hashlib.sha256(canonical.encode()).hexdigest()
-
-
 def save_snapshot(database: Database, snapshot: Snapshot) -> str:
     """Stage immutable fact rows, verify their digest and counts, then seal them.
 
     Interrupted staging can resume with the same content. A sealed snapshot is
     readable by its content ID, and no row can be added or changed after sealing.
     """
-    identity = _snapshot_digest(snapshot)
+    identity = canonical_digest(snapshot.model_dump(mode='json'))
     snapshots = schema.VoteSnapshots
     if fetch_scalar(
         database,
@@ -892,7 +867,7 @@ def save_snapshot(database: Database, snapshot: Snapshot) -> str:
     if _read_snapshot(database, identity, sealed=False) != snapshot:
         raise InputError(f'Snapshot `{identity}` conflicts with its stored facts.')
 
-    execute(
+    sealed_id = fetch_scalar(
         database,
         update(snapshots)
         .values(sealed=1)
@@ -919,14 +894,16 @@ def save_snapshot(database: Database, snapshot: Snapshot) -> str:
             .select_from(schema.VoteSnapshotVotes)
             .where(schema.VoteSnapshotVotes.snapshot_id == identity)
             .scalar_subquery(),
-        ),
+        )
+        .returning(snapshots.id),
+        str,
     )
-    read_snapshot(database, identity)
+    if sealed_id != identity:
+        read_snapshot(database, identity)
     return identity
 
 
 def read_snapshot(database: Database, identity: str) -> Snapshot:
-    """Read only a sealed snapshot and verify its canonical digest and row counts."""
     return _read_snapshot(database, identity, sealed=True)
 
 
@@ -960,7 +937,7 @@ def _read_snapshot(database: Database, identity: str, *, sealed: bool) -> Snapsh
         case_table = schema.VoteSnapshotCases
         output_table = schema.VoteSnapshotOutputs
         vote_table = schema.VoteSnapshotVotes
-        cuts: dict[Literal['production', 'private'], Cut] = {}
+        cuts: dict[VotingTarget, Cut] = {}
         for store in stores:
             cases = tuple(
                 CaseFacts.model_validate_json(str(row['facts_json']))
@@ -1039,7 +1016,7 @@ def _read_snapshot(database: Database, identity: str, *, sealed: bool) -> Snapsh
     )
     if (
         expected != actual
-        or _snapshot_digest(snapshot) != identity
+        or canonical_digest(snapshot.model_dump(mode='json')) != identity
         or header.manifest_digest != identity
     ):
         raise InputError(f'Snapshot `{identity}` has incomplete or conflicting facts.')
@@ -1057,7 +1034,6 @@ class _CountedVote(NamedTuple):
     case: CaseFacts | None
 
     def receipt_facts(self) -> tuple[object, ...]:
-        """Identify the evidence graded by a submission in either official store."""
         return (
             self.vote.case_key,
             self.vote.choice,
@@ -1071,7 +1047,7 @@ class _CountedVote(NamedTuple):
 
 def voting_input(
     snapshot: Snapshot,
-    outputs_by_cut: Mapping[Literal['production', 'private'], Sequence[Output]],
+    outputs_by_cut: Mapping[VotingTarget, Sequence[Output]],
 ) -> AnalysisInput:
     """Use original ballot facts and measure outputs from pinned active collections."""
     cuts = snapshot.cuts()

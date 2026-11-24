@@ -17,7 +17,6 @@ def capture(
     taken_at: datetime,
     revision: str | None,
 ) -> votes.Snapshot | None:
-    """Read the official stores at a shared cutoff and recover their collection pins."""
     assert isinstance(family.settings, VotesSettings)
     published = _pin(
         private,
@@ -54,7 +53,6 @@ def _pin(database: Database, cut: votes.Cut | None) -> votes.Cut | None:
 
 
 def analysis(database: Database, snapshot: votes.Snapshot) -> report.AnalysisInput:
-    """Read measurements only from each cut's immutable collection generation."""
     state = State(database)
     outputs: dict[publication.VotingTarget, list[Output]] = {}
     for target, cut in snapshot.cuts():
@@ -69,7 +67,6 @@ def analysis(database: Database, snapshot: votes.Snapshot) -> report.AnalysisInp
 
 
 def score(snapshot: votes.Snapshot, evidence: report.AnalysisInput) -> report.Report:
-    """Report standings using the rules and system identity frozen with each cut."""
     return report.close_votes(
         evidence,
         snapshot.closed_at,

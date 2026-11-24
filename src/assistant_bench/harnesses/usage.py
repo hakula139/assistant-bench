@@ -27,13 +27,11 @@ class MeasuredUsage:
 
     @classmethod
     def from_details(cls, details: Mapping[str, Any]) -> Self | None:
-        """Return the details' usage, `None` when they hold no valid usage."""
         if 'input_tokens' not in details:
             return None
         return cls(**{field.name: details[field.name] for field in fields(cls)})
 
     def cost(self, price: Price) -> float | None:
-        """Return the USD cost at the price, `None` if a cache write has no price."""
         if self.cache_write_unpriced:
             return None
         return price.cost(
@@ -71,7 +69,6 @@ class MeasuredUsage:
 
 
 def combined_usage(responses: Sequence[MeasuredUsage | None]) -> MeasuredUsage | None:
-    """Sum usage only when every possible response has measured usage."""
     if not responses or any(usage is None for usage in responses):
         return None
     measured = [usage for usage in responses if usage is not None]
@@ -139,7 +136,6 @@ def record_calls(context: AgentContext, calls: list[dict[str, Any]]) -> None:
 
 
 def measured_usage(api: Api, reported: object) -> MeasuredUsage | None:
-    """Return inclusive counters only when every reported count is consistent."""
     try:
         reported = _reported.validate_python(_payload(reported), strict=True)
         write_value: object

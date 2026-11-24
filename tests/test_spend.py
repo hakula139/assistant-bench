@@ -260,16 +260,17 @@ class TestReadLedger:
         assert spend.responses == 2
         assert spend.known_usd == pytest.approx(3.00014)
 
+    @pytest.mark.parametrize('usage', [USAGE, None], ids=['known', 'unknown'])
     def test_a_concurrent_final_entry_neither_drops_nor_duplicates_pending_spend(
-        self, tmp_path: Path
+        self, tmp_path: Path, usage: MeasuredUsage | None
     ) -> None:
         path = tmp_path / 'state.sqlite'
         with private_database(path) as database, private_database(path) as other:
             original = State(database)
             writer = State(other)
-            frozen = entry()
+            frozen = entry(responses=(usage,))
             owner, start = started(original, frozen, 'concurrent')
-            admitted(original, start, 'request-concurrent', USAGE)
+            admitted(original, start, 'request-concurrent', usage)
 
             class CommitEntryAfterRead:
                 committed = False
@@ -284,11 +285,12 @@ class TestReadLedger:
             snapshot = read_ledger('f', State(CommitEntryAfterRead()))
             following = read_ledger('f', original)
 
-        assert [item.responses for item in snapshot] == [[USAGE]]
+        assert [item.responses for item in snapshot] == [[usage]]
         assert isinstance(snapshot[0], PendingAttempt)
         assert following == [frozen]
-        assert spend_of(*snapshot).known_usd == pytest.approx(3)
-        assert spend_of(*following).known_usd == pytest.approx(3)
+        expected_usd = 3 if usage is not None else 0
+        assert spend_of(*snapshot).known_usd == pytest.approx(expected_usd)
+        assert spend_of(*following).known_usd == pytest.approx(expected_usd)
         assert spend_of(*snapshot).responses == spend_of(*following).responses == 1
 
 

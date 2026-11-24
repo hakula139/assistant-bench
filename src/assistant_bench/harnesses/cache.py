@@ -19,10 +19,13 @@ InstalledHarness = Literal['claude-code', 'codex']
 CLAUDE_RELEASES = 'https://downloads.claude.ai/claude-code-releases'
 CODEX_RELEASES = 'https://api.github.com/repos/openai/codex/releases/tags'
 PLATFORMS = {'aarch64': 'arm64', 'x86_64': 'x64'}
+COMMANDS: dict[InstalledHarness, str] = {
+    'claude-code': 'claude',
+    'codex': 'codex',
+}
 
 
 def artifact(harness: InstalledHarness, version: str, architecture: str) -> Path:
-    """Cache a pinned vendor artifact, verifying its published SHA-256 first."""
     if not re.fullmatch(r'\d+\.\d+\.\d+', version):
         raise InputError(
             'An installed agent needs a pinned `major.minor.patch` version.'
@@ -32,7 +35,7 @@ def artifact(harness: InstalledHarness, version: str, architecture: str) -> Path
             f'Installed agents do not support architecture `{architecture}`.'
         )
     platform = f'linux-{PLATFORMS[architecture]}'
-    command = 'claude' if harness == 'claude-code' else 'codex'
+    command = COMMANDS[harness]
     path = data_dir() / 'agents' / harness / version / platform / command
     path.parent.mkdir(parents=True, exist_ok=True)
     with FileLock(str(path.with_suffix('.lock'))):

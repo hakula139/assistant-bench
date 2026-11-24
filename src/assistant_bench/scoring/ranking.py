@@ -3,7 +3,7 @@
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import NamedTuple
+from typing import Literal, NamedTuple
 
 import numpy as np
 import numpy.typing as npt
@@ -15,6 +15,13 @@ from assistant_bench.families import Choice
 
 type Floats = npt.NDArray[np.float64]
 type Indices = npt.NDArray[np.intp]
+SplitUnavailable = Literal[
+    'insufficient_cases',
+    'no_common_field',
+    'disconnected_field',
+    'unidentifiable_field',
+    'separated_fit',
+]
 
 ELO_PER_LOGIT = 400 / math.log(10)
 ANCHOR = 1000.0
@@ -59,7 +66,6 @@ class Matchups:
 
     @classmethod
     def build(cls, comparisons: Sequence[Comparison]) -> Matchups:
-        """Index the systems and the cases in name order."""
         systems = tuple(
             sorted({c.left for c in comparisons} | {c.right for c in comparisons})
         )
@@ -135,8 +141,6 @@ class Fit:
 
 @dataclass(frozen=True)
 class PointRatings:
-    """Fitted scores on the Elo-like scale."""
-
     systems: tuple[str, ...]
     score: Floats
 
@@ -153,7 +157,6 @@ class Uncertainty:
     critical: float
 
     def half_widths(self) -> Floats:
-        """Return each system's half-width in score points, the anchor's included."""
         widths: Floats = (
             self.critical * ELO_PER_LOGIT * np.sqrt(np.diag(self.covariance))
         )
@@ -196,13 +199,12 @@ class SplitComparison:
 
     cases: tuple[int, int]
     difference: SplitDifference | None = None
-    unavailable: str | None = None
+    unavailable: SplitUnavailable | None = None
 
 
 def split_difference(
     public: Sequence[Comparison], held_out: Sequence[Comparison]
 ) -> SplitComparison:
-    """Compare centered strengths on one common field with independent case clusters."""
     splits = [[row for row in split if row.weight > 0] for split in (public, held_out)]
     counts = [len({row.case for row in split}) for split in splits]
     fields = [

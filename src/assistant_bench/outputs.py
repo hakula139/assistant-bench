@@ -81,7 +81,6 @@ class Output(BaseModel):
 
 
 def tests_pass(reward: float | None) -> bool:
-    """Return whether the verifier awarded at least 1."""
     return reward is not None and reward >= 1
 
 
@@ -159,13 +158,6 @@ def pool_conflicts(family: Family, outputs: Iterable[Output]) -> list[str]:
 
 
 def refuse_pool_conflicts(family: Family, outputs: Iterable[Output]) -> None:
-    """Refuse a family whose outputs pool several models.
-
-    Raises
-    ------
-    InputError
-        `pool_conflicts` names a conflict.
-    """
     conflicts = pool_conflicts(family, outputs)
     if conflicts:
         raise InputError(
@@ -189,7 +181,6 @@ class _Spread(NamedTuple):
 
 
 def _token_spreads(pool: Iterable[Output]) -> list[_Spread]:
-    """Return each case whose input tokens spread past the tolerance."""
     counts: defaultdict[str, list[tuple[int, str]]] = defaultdict(list)
     for output in pool:
         if output.input_tokens is not None:
@@ -211,8 +202,7 @@ def read_outputs(
     Raises
     ------
     InputError
-        A line does not validate as an output, for example one an older
-        collection wrote.
+        A line does not validate as an output.
     """
     snapshot = state.output_generation(family) if generation is None else generation
     try:
@@ -234,7 +224,6 @@ def write_outputs(
     case_revision: str,
     system_names: dict[str, str],
 ) -> str:
-    """Seal a complete generation and activate it only against the pinned base."""
     values = [output.model_dump_json() for output in outputs]
     generation = str(uuid4())
     state.begin_collection(

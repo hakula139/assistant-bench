@@ -1099,11 +1099,13 @@ def serve_stub(
             if stub.gzip:
                 payload = gzip.compress(payload)
             self.send_response(stub.statuses.pop(0) if stub.statuses else stub.status)
-            self.send_header(
-                'Content-Type',
+            content_type = (
                 stub.content_type
-                or ('text/event-stream' if stream is not None else 'application/json'),
+                if stub.content_type is not None
+                else ('text/event-stream' if stream is not None else 'application/json')
             )
+            if content_type:
+                self.send_header('Content-Type', content_type)
             self.send_header('Content-Length', str(len(payload)))
             self.send_header('x-request-id', 'req-1')
             self.send_header('request-id', 'req-1')

@@ -1,10 +1,10 @@
 """Trial-scoped admission and durable usage receipts for model requests."""
 
-from collections.abc import Iterable
-from contextlib import suppress
+from collections.abc import Generator, Iterable
+from contextlib import contextmanager, suppress
 from contextvars import ContextVar, Token
 from datetime import UTC, datetime
-from typing import Annotated, Literal, NoReturn
+from typing import Annotated, Literal, NoReturn, Self
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
@@ -81,15 +81,10 @@ class TrialAccounting:
         return self._claim.id
 
     @property
-    def started_at(self) -> datetime | None:
-        return self._started_at
-
-    @property
     def fatal(self) -> bool:
         return self._fatal
 
     def begin(self, started_at: datetime) -> None:
-        """Persist a unique start before any model request can be admitted."""
         if self._fatal or self._attempt is not None:
             self._fail('The paid attempt cannot start again.')
         self._started_at = started_at
@@ -106,7 +101,6 @@ class TrialAccounting:
             self._fail('The paid attempt start was not granted.')
 
     async def admit(self, api: Api) -> str:
-        """Grant one real HTTP request with a single-use identity."""
         if self._fatal or self._attempt is None or self._finished_at is not None:
             self._fail('The paid attempt cannot admit another request.')
         request_id = str(uuid4())
@@ -128,7 +122,6 @@ class TrialAccounting:
         return request_id
 
     async def confirm(self, request_id: str, receipt: Receipt) -> None:
-        """Persist the terminal outcome before returning it to the caller."""
         if request_id not in self._requests or self._apis[request_id] != receipt.api:
             self._fail('The model receipt does not match an admitted request.')
         if isinstance(receipt, RequestReceipt):
@@ -161,6 +154,14 @@ class TrialAccounting:
         self._finished_at = finished_at
         if any(receipt is None for receipt in self._requests.values()):
             self._mark_uncertain()
+
+    @contextmanager
+    def track(self) -> Generator[Self]:
+        self.begin(datetime.now(UTC))
+        try:
+            yield self
+        finally:
+            self.finish(datetime.now(UTC))
 
     def attempt(self) -> Attempt | None:
         if self._started_at is None:

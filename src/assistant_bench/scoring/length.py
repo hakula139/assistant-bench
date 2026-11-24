@@ -10,5 +10,4 @@ _UNIT = re.compile(f'[{hanzi.characters}]|[^\\s{hanzi.characters}]+')
 
 
 def text_length(text: str) -> int:
-    """Count each Han character and each other whitespace-separated run as one."""
     return len(_UNIT.findall(text))

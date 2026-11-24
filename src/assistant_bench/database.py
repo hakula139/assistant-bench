@@ -3,8 +3,9 @@
 import sqlite3
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from functools import cache
 from itertools import batched, chain
-from typing import Protocol
+from typing import Any, Protocol, cast
 
 import httpx
 from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
@@ -44,6 +45,14 @@ class Database(Protocol):
         ...
 
 
+# ── Core Helpers ──
+
+
+@cache
+def _scalar_adapter(scalar_type: Any) -> TypeAdapter[Any]:
+    return TypeAdapter(scalar_type)
+
+
 def compile_statement(statement: ClauseElement) -> tuple[str, list[Param]]:
     """Compile a SQLAlchemy Core statement to qmark SQL and D1-safe parameters."""
     compiled = statement.compile(
@@ -72,7 +81,6 @@ def compile_statement(statement: ClauseElement) -> tuple[str, list[Param]]:
 
 
 def execute(database: Database, statement: ClauseElement) -> Result:
-    """Compile and execute one SQLAlchemy Core statement."""
     sql, params = compile_statement(statement)
     return database.execute(sql, params)
 
@@ -80,14 +88,12 @@ def execute(database: Database, statement: ClauseElement) -> Result:
 def fetch_all[T: BaseModel](
     database: Database, statement: ClauseElement, model: type[T]
 ) -> list[T]:
-    """Execute a statement and validate every returned row with `model`."""
     return [model.model_validate(row) for row in execute(database, statement).rows]
 
 
 def fetch_one[T: BaseModel](
     database: Database, statement: ClauseElement, model: type[T]
 ) -> T | None:
-    """Execute a statement and validate its first row, or None when empty."""
     rows = execute(database, statement).rows
     return model.model_validate(rows[0]) if rows else None
 
@@ -95,14 +101,13 @@ def fetch_one[T: BaseModel](
 def fetch_scalar[T](
     database: Database, statement: ClauseElement, scalar_type: type[T]
 ) -> T | None:
-    """Validate the first column of the first row, or None when empty or NULL."""
     rows = execute(database, statement).rows
     if not rows:
         return None
     value = next(iter(rows[0].values()))
     if value is None:
         return None
-    return TypeAdapter(scalar_type).validate_python(value)
+    return cast(T, _scalar_adapter(cast(Any, scalar_type)).validate_python(value))
 
 
 def insert_missing(
@@ -123,9 +128,10 @@ def insert_missing(
         )
 
 
-class SQLiteDatabase:
-    """The database protocol on an autocommit SQLite connection."""
+# ── Adapters ──
 
+
+class SQLiteDatabase:
     def __init__(self, connection: sqlite3.Connection) -> None:
         self.connection = connection
 
@@ -134,9 +140,6 @@ class SQLiteDatabase:
         columns = [column[0] for column in cursor.description or ()]
         rows: list[Row] = [dict(zip(columns, row, strict=True)) for row in cursor]
         return Result(rows=rows)
-
-
-# ── REST Client ──
 
 
 class _Message(BaseModel):

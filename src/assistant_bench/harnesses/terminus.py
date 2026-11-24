@@ -1,7 +1,6 @@
 """Harbor's terminus-2 agent, sending its model calls to the bench endpoint."""
 
 from collections.abc import Callable, Mapping
-from datetime import UTC, datetime
 from importlib import metadata
 from inspect import unwrap
 from pathlib import Path
@@ -28,7 +27,6 @@ from assistant_bench.catalog import load_export
 from assistant_bench.generation import load_generation
 from assistant_bench.harnesses.accounting import current_trial
 from assistant_bench.harnesses.endpoint import Endpoint, preflight
-from assistant_bench.harnesses.labels import Labels
 from assistant_bench.harnesses.messages import MessagesLLM
 from assistant_bench.harnesses.native import (
     NativeChat,
@@ -37,7 +35,7 @@ from assistant_bench.harnesses.native import (
     NativeSettings,
     attach_items,
 )
-from assistant_bench.harnesses.options import ApiOptions
+from assistant_bench.harnesses.options import ApiOptions, Labels
 from assistant_bench.harnesses.responses import ResponsesLLM
 from assistant_bench.harnesses.usage import (
     MeasuredUsage,
@@ -279,14 +277,8 @@ class Terminus(Terminus2):
         environment: BaseEnvironment,
         context: AgentContext,
     ) -> None:
-        assert isinstance(self.options, TerminusOptions)
-        started_at = datetime.now(UTC)
-        recorder = current_trial()
-        recorder.begin(started_at)
-        try:
+        with current_trial().track():
             await self._run(instruction, environment, context)
-        finally:
-            recorder.finish(datetime.now(UTC))
 
     async def _run(
         self,

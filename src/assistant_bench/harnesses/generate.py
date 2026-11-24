@@ -2,7 +2,6 @@
 
 import time
 from collections.abc import Mapping
-from datetime import UTC, datetime
 from typing import Any, assert_never, override
 
 from harbor.agents.base import BaseAgent
@@ -16,9 +15,8 @@ from assistant_bench.catalog import load_export
 from assistant_bench.generation import load_generation
 from assistant_bench.harnesses.accounting import current_trial
 from assistant_bench.harnesses.endpoint import Endpoint, preflight
-from assistant_bench.harnesses.labels import Labels
 from assistant_bench.harnesses.messages import MessageResult, request_messages
-from assistant_bench.harnesses.options import ApiOptions
+from assistant_bench.harnesses.options import ApiOptions, Labels
 from assistant_bench.harnesses.responses import ResponseResult
 from assistant_bench.harnesses.usage import MeasuredUsage, measure
 
@@ -72,48 +70,32 @@ class Generate(BaseAgent):
         environment: BaseEnvironment,
         context: AgentContext,
     ) -> None:
-        assert isinstance(self.options, GenerateOptions)
-        started_at = datetime.now(UTC)
-        recorder = current_trial()
-        recorder.begin(started_at)
-        try:
+        with current_trial().track():
             await self._generate(instruction, context)
-        finally:
-            recorder.finish(datetime.now(UTC))
 
     async def _generate(self, instruction: str, context: AgentContext) -> None:
         assert isinstance(self.options, GenerateOptions)
         nixos_config_rev = load_export(self._get_env).rev
         endpoint = Endpoint.read(self._get_env, self.options.api)
-
-        if self.options.api == 'anthropic-messages':
-            try:
-                await self._native_messages(endpoint, instruction, context)
-            finally:
-                context.metadata = (context.metadata or {}) | {
-                    'nixos_config_rev': nixos_config_rev
-                }
-            return
-
-        async with endpoint.client(self.options.api) as client:
-            started = time.monotonic()
-            try:
-                match self.options.api:
-                    case 'openai-chat-completions':
-                        context.metadata = await self._chat(
-                            client, instruction, context
-                        )
-                    case 'openai-responses':
-                        context.metadata = await self._responses(
-                            client, instruction, context
-                        )
-                    case _:
-                        assert_never(self.options.api)
-            finally:
-                context.metadata = (context.metadata or {}) | {
-                    'latency_sec': round(time.monotonic() - started, 3),
-                    'nixos_config_rev': nixos_config_rev,
-                }
+        started = time.monotonic()
+        try:
+            match self.options.api:
+                case 'anthropic-messages':
+                    await self._native_messages(endpoint, instruction, context)
+                case 'openai-chat-completions':
+                    async with endpoint.client('openai-chat-completions') as client:
+                        await self._chat(client, instruction, context)
+                case 'openai-responses':
+                    async with endpoint.client('openai-responses') as client:
+                        await self._responses(client, instruction, context)
+                case _:
+                    assert_never(self.options.api)
+        finally:
+            details = dict(context.metadata or {})
+            if details.get('latency_sec') is None:
+                details['latency_sec'] = round(time.monotonic() - started, 3)
+            details['nixos_config_rev'] = nixos_config_rev
+            context.metadata = details
 
     async def _native_messages(
         self, endpoint: Endpoint, instruction: str, context: AgentContext
@@ -136,13 +118,12 @@ class Generate(BaseAgent):
             (self.logs_dir / OUTPUT_FILE).write_text(result.text)
         finally:
             context.metadata = result.details
-            usage = MeasuredUsage.from_details(context.metadata)
-            if result.complete and usage is not None:
-                usage.record(context)
+            if result.complete:
+                _record_usage(context, result.details)
 
     async def _chat(
         self, client: AsyncOpenAI, instruction: str, context: AgentContext
-    ) -> dict[str, Any]:
+    ) -> None:
         assert isinstance(self.options, GenerateOptions)
         assert self.model_name is not None
         extra_body = (
@@ -163,13 +144,11 @@ class Generate(BaseAgent):
             'request_id': raw.headers.get('x-request-id'),
         }
         context.metadata = details
-        usage = MeasuredUsage.from_details(details)
-        if usage is not None:
-            usage.record(context)
+        _record_usage(context, details)
 
         choice = completion.choices[0]
         (self.logs_dir / OUTPUT_FILE).write_text(choice.message.content or '')
-        return {
+        context.metadata = {
             **details,
             'finish_reason': 'refusal'
             if choice.message.refusal
@@ -179,7 +158,7 @@ class Generate(BaseAgent):
 
     async def _responses(
         self, client: AsyncOpenAI, instruction: str, context: AgentContext
-    ) -> dict[str, Any]:
+    ) -> None:
         assert isinstance(self.options, GenerateOptions)
         assert self.model_name is not None
         extra_body = (
@@ -201,13 +180,9 @@ class Generate(BaseAgent):
         (self.logs_dir / OUTPUT_FILE).write_text(response.output_text)
 
         details = result.details
-        usage = MeasuredUsage.from_details(details)
-        if usage is not None:
-            usage.record(context)
-
+        _record_usage(context, details)
         context.metadata = details
         result.check(complete=False)
-        return details
 
     def _messages(self, instruction: str) -> list[ChatCompletionMessageParam]:
         assert isinstance(self.options, GenerateOptions)
@@ -215,3 +190,9 @@ class Generate(BaseAgent):
         if self.options.system_prompt is None:
             return [user]
         return [{'role': 'system', 'content': self.options.system_prompt}, user]
+
+
+def _record_usage(context: AgentContext, details: Mapping[str, Any]) -> None:
+    usage = MeasuredUsage.from_details(details)
+    if usage is not None:
+        usage.record(context)

@@ -45,7 +45,6 @@ def workspace_diff(base: Path, workspace: Path) -> str:
 
 
 def _entries(root: Path) -> dict[str, Entry]:
-    """Return the mode and content of each file and symlink under `root`."""
     if not root.is_dir():
         return {}
 

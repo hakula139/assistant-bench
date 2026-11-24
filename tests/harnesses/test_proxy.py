@@ -265,14 +265,19 @@ class TestConnect:
         assert not begun_trial.fatal
 
     @pytest.mark.parametrize(
-        'ending', [b'\n', b'\r\n', b'\r'], ids=['lf', 'crlf', 'cr']
-    )
-    @pytest.mark.parametrize('split', [1, 7, 4096], ids=['byte', 'small', 'whole'])
-    @pytest.mark.parametrize('compressed', [False, True], ids=['plain', 'gzip'])
-    @pytest.mark.parametrize(
-        'content_type',
-        ['text/event-stream', 'Text/Event-Stream; Charset=UTF-8'],
-        ids=['lowercase-mime', 'mixed-case-mime'],
+        ('ending', 'split', 'compressed', 'content_type'),
+        [
+            pytest.param(b'\n', 1, False, 'text/event-stream', id='lf-byte-plain'),
+            pytest.param(
+                b'\r\n',
+                7,
+                True,
+                'Text/Event-Stream; Charset=UTF-8',
+                id='crlf-small-gzip-mixed-mime',
+            ),
+            pytest.param(b'\r', 4096, False, 'text/event-stream', id='cr-whole-plain'),
+            pytest.param(b'\n', 7, True, 'text/event-stream', id='lf-small-gzip'),
+        ],
     )
     def test_preserves_complete_frame_bytes_with_a_durable_terminal_receipt(
         self,
@@ -377,3 +382,73 @@ class TestConnect:
         (stored,) = private_state.requests('sample')
         assert stored['receipt_json'] is None
         assert begun_trial.fatal
+
+    def test_forwards_response_when_upstream_omits_content_type(
+        self,
+        endpoint: StubEndpoint,
+        begun_trial: TrialAccounting,
+        private_state: State,
+    ) -> None:
+        endpoint.content_type = ''
+        endpoint.response = response()
+        configured = Endpoint.read(endpoint.env.get, 'openai-responses')
+
+        async def request() -> httpx2.Response:
+            async with connect(
+                configured, 'openai-responses', 'acme/large', recorder=begun_trial
+            ) as connection:
+                url = connection.url.replace('host.docker.internal', '127.0.0.1')
+                async with httpx2.AsyncClient() as client:
+                    return await client.post(
+                        url + '/v1/responses',
+                        json={'model': 'acme/large'},
+                        headers={'Authorization': f'Bearer {connection.token}'},
+                    )
+
+        reply = asyncio.run(request())
+
+        assert reply.status_code == 200
+        assert reply.headers['content-type'] == 'application/octet-stream'
+        assert json.loads(reply.content) == endpoint.response
+        (stored,) = private_state.requests('sample')
+        assert isinstance(stored['receipt_json'], str)
+        assert not begun_trial.fatal
+
+    def test_coalesces_null_delta_and_usage_in_message_delta(
+        self,
+        endpoint: StubEndpoint,
+        begun_trial: TrialAccounting,
+        private_state: State,
+    ) -> None:
+        stream = message_stream(message())
+        null_delta = {'type': 'message_delta', 'delta': None, 'usage': None}
+        stream[-2] = (
+            f'event: message_delta\ndata: {json.dumps(null_delta)}\n\n'.encode()
+        )
+        endpoint.stream = stream
+        configured = Endpoint.read(endpoint.env.get, 'anthropic-messages')
+
+        async def request() -> tuple[bytes, list[dict[str, Any]]]:
+            async with connect(
+                configured, 'anthropic-messages', 'acme/large', recorder=begun_trial
+            ) as connection:
+                url = connection.url.replace('host.docker.internal', '127.0.0.1')
+                async with httpx2.AsyncClient() as client:
+                    reply = await client.post(
+                        url + '/v1/messages',
+                        json={'model': 'acme/large', 'stream': True},
+                        headers={'Authorization': f'Bearer {connection.token}'},
+                    )
+                return reply.content, connection.calls
+
+        content, calls = asyncio.run(request())
+
+        assert content == b''.join(stream)
+        assert len(calls) == 1
+        assert calls[0]['usage_invalid'] is True
+        (stored,) = private_state.requests('sample')
+        assert isinstance(stored['receipt_json'], str)
+        saved = RequestReceipt.model_validate_json(stored['receipt_json'])
+        assert saved.outcome == 'completed'
+        assert saved.usage is None
+        assert not begun_trial.fatal

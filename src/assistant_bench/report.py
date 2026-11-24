@@ -247,16 +247,7 @@ class SplitDiagnostic(_Model):
 
     public_cases: int
     held_out_cases: int
-    unavailable: (
-        Literal[
-            'insufficient_cases',
-            'no_common_field',
-            'disconnected_field',
-            'unidentifiable_field',
-            'separated_fit',
-        ]
-        | None
-    )
+    unavailable: ranking.SplitUnavailable | None
     scores: list[SplitScoreDifference]
 
 
@@ -376,11 +367,9 @@ class TestsStanding(_Model):
 
     @model_validator(mode='after')
     def validate_cost_gap(self) -> TestsStanding:
-        finished = self.trials - self.errored
-        if (self.cost_gap is None) != (self.mean_cost_usd is not None or finished == 0):
-            raise ValueError(
-                'A cost gap is present exactly when finished trials lack a mean cost.'
-            )
+        _validate_cost_gap(
+            self.cost_gap, self.mean_cost_usd, self.trials - self.errored
+        )
         return self
 
 
@@ -415,15 +404,7 @@ class TestsResults(_Model):
             raise ValueError('pass^k is present exactly when tasks run several times.')
 
         _validate_decision(self.decision, self.standings)
-
-        systems = {row.system for row in self.standings}
-        names = [board.category for board in self.categories]
-        if len(set(names)) != len(names) or any(
-            not {row.system for row in board.standings} <= systems
-            for board in self.categories
-        ):
-            raise ValueError('Categories must be unique and list standing systems.')
-
+        _validate_categories(self.categories, {row.system for row in self.standings})
         return self
 
 
@@ -439,11 +420,9 @@ class CheckersStanding(_Model):
 
     @model_validator(mode='after')
     def validate_cost_gap(self) -> CheckersStanding:
-        finished = self.responses - self.errored
-        if (self.cost_gap is None) != (self.mean_cost_usd is not None or finished == 0):
-            raise ValueError(
-                'A cost gap is present exactly when finished trials lack a mean cost.'
-            )
+        _validate_cost_gap(
+            self.cost_gap, self.mean_cost_usd, self.responses - self.errored
+        )
         return self
 
 
@@ -493,12 +472,7 @@ class CheckersResults(_Model):
     def validate_members(self) -> CheckersResults:
         _validate_decision(self.decision, self.standings)
         systems = {row.system for row in self.standings}
-        names = [board.category for board in self.categories]
-        if len(set(names)) != len(names) or any(
-            not {row.system for row in board.standings} <= systems
-            for board in self.categories
-        ):
-            raise ValueError('Categories must be unique and list standing systems.')
+        _validate_categories(self.categories, systems)
         if any(row.system not in systems for row in self.rules) or any(
             pair.bare not in systems or pair.prompted not in systems
             for pair in self.prompt_effects
@@ -558,6 +532,25 @@ class Report(_Model):
         _validate_memberships([row.system for row in self.results.standings], unranked)
 
         return self
+
+
+def _validate_cost_gap(
+    cost_gap: CostGap | None, mean_cost_usd: float | None, finished: int
+) -> None:
+    if (cost_gap is None) != (mean_cost_usd is not None or finished == 0):
+        raise ValueError(
+            'A cost gap is present exactly when finished trials lack a mean cost.'
+        )
+
+
+def _validate_categories(
+    categories: Sequence[TestsCategory | CheckersCategory], systems: set[str]
+) -> None:
+    names = [board.category for board in categories]
+    if len(set(names)) != len(names) or any(
+        not {row.system for row in board.standings} <= systems for board in categories
+    ):
+        raise ValueError('Categories must be unique and list standing systems.')
 
 
 def _validate_decision(
@@ -689,16 +682,11 @@ def close_checkers(
         )
     standings.sort(key=lambda row: (-row.pass_rate.rate, row.system))
     leader = standings[0].system
+    rules: list[CheckRule] = sorted(
+        {rule for case in cases.values() if case.checks for rule in case.checks.rules}
+    )
     diagnostics: list[RuleDiagnostic] = []
     for system in family.settings.systems:
-        rules: list[CheckRule] = sorted(
-            {
-                rule
-                for case in cases.values()
-                if case.checks
-                for rule in case.checks.rules
-            }
-        )
         for rule in rules:
             values = [
                 output.checks.rules[rule]
@@ -1106,30 +1094,28 @@ def _split_diagnostic(
         [row for row in held_out if row.case not in shared],
     )
     difference = compared.difference
-    return SplitDiagnostic.model_validate(
-        {
-            'public_cases': compared.cases[0],
-            'held_out_cases': compared.cases[1],
-            'unavailable': compared.unavailable,
-            'scores': []
-            if difference is None
-            else [
-                {
-                    'system': system,
-                    'difference': float(gap),
-                    'interval': {
-                        'lower': float(gap - width),
-                        'upper': float(gap + width),
-                    },
-                }
-                for system, gap, width in zip(
-                    difference.systems,
-                    difference.difference,
-                    difference.half_width,
-                    strict=True,
-                )
-            ],
-        }
+    return SplitDiagnostic(
+        public_cases=compared.cases[0],
+        held_out_cases=compared.cases[1],
+        unavailable=compared.unavailable,
+        scores=[]
+        if difference is None
+        else [
+            SplitScoreDifference(
+                system=system,
+                difference=float(gap),
+                interval=ScoreInterval(
+                    lower=float(gap - width),
+                    upper=float(gap + width),
+                ),
+            )
+            for system, gap, width in zip(
+                difference.systems,
+                difference.difference,
+                difference.half_width,
+                strict=True,
+            )
+        ],
     )
 
 

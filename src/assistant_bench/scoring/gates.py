@@ -18,7 +18,7 @@ _TRADITIONAL_ONLY = frozenset(TRADITIONAL) - frozenset(SIMPLIFIED)
 
 _MARKDOWN = MarkdownIt('commonmark')
 # Fence info strings whose block holds Markdown or prose.
-_PROSE_FENCES = frozenset({'markdown', 'md', 'text', 'txt'})
+PROSE_FENCES = frozenset({'markdown', 'md', 'text', 'txt'})
 # A URL, which ends at whitespace, Han characters, or Chinese punctuation.
 _URL = re.compile(f'https?://[^\\s{hanzi.characters}{re.escape(hanzi.punctuation)}]+')
 # A comment to the line's end, opened by `#` and whitespace or by `//` at line
@@ -86,20 +86,9 @@ class _Fragment(HTMLParser):
 def failed_gates(
     settings: VotesSettings, text: str, finish_reason: str | None, instruction: str
 ) -> list[Gate]:
-    """Return the gates an output fails, empty when the output may reach the owner.
+    """Return the gates an output fails, empty when it may reach the owner.
 
-    Parameters
-    ----------
-    settings
-        The family's settings, whose `language` and `gates` select the checks
-        beyond the empty and truncation checks every voted family applies.
-    text
-        The output as the agent wrote it.
-    finish_reason
-        The endpoint's finish reason, or `None` when it reported none.
-    instruction
-        The case instruction, whose own Traditional characters an output may
-        repeat. Only the script gate reads it.
+    The script gate allows Traditional characters that already appear in `instruction`.
     """
     failures = [] if finish_reason == 'stop' else [Gate.TRUNCATED]
     stripped = text.strip()
@@ -166,7 +155,7 @@ def _collect(prose: _Prose, markdown: str) -> None:
                 prose.feed(token.content)
         elif (
             token.type == 'fence'
-            and (token.info.split() or [''])[0].lower() in _PROSE_FENCES
+            and (token.info.split() or [''])[0].lower() in PROSE_FENCES
         ):
             for text in _natural_language(token.content):
                 prose.data(text)

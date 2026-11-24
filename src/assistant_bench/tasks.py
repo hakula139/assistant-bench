@@ -182,7 +182,6 @@ def author_vendors(
     *,
     private_root: Path | None = None,
 ) -> dict[str, str]:
-    """Validate author provenance independently of runnable systems."""
     known = {model.vendor for model in export.catalog.models.values()}
     authors: dict[str, str] = {}
     problems: list[str] = []
@@ -252,7 +251,6 @@ def changed_tasks(
 def current_versions(
     family: Family, cases: dict[str, Case], *, private_root: Path | None = None
 ) -> dict[str, str | None]:
-    """Return expected current task versions without changing rendered tasks."""
     match family.source:
         case 'cases':
             return {case.id: _rendered_version(family, case) for case in cases.values()}

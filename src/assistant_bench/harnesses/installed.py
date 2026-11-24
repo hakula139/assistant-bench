@@ -6,11 +6,10 @@ import os
 import re
 import shlex
 from collections import ChainMap
-from collections.abc import Mapping
-from datetime import UTC, datetime
+from collections.abc import Awaitable, Callable, Mapping
 from importlib import metadata
 from pathlib import Path
-from typing import Any, ClassVar, override
+from typing import Any, ClassVar, Literal, override
 
 from harbor.agents.agent_auth_resolution import ResolvedModelConnection
 from harbor.agents.installed.claude_code import (
@@ -30,8 +29,11 @@ from assistant_bench.harnesses import cache, proxy
 from assistant_bench.harnesses.accounting import TrialAccounting, current_trial
 from assistant_bench.harnesses.docker import check_local_context
 from assistant_bench.harnesses.endpoint import Endpoint, preflight
-from assistant_bench.harnesses.labels import Labels
+from assistant_bench.harnesses.options import Labels
 from assistant_bench.harnesses.usage import record_calls
+
+
+# ── Options ──
 
 
 class PinnedVersion(BaseModel):
@@ -62,30 +64,7 @@ class _SessionKey(BaseModel):
     pid_domain: str = Field(default='', alias='pidDomain')
 
 
-async def _install(
-    environment: BaseEnvironment,
-    harness: cache.InstalledHarness,
-    version: str,
-) -> str:
-    await check_local_context()
-    result = await environment.exec(command='uname -m')
-    if result.return_code or result.stdout is None:
-        raise RuntimeError('Could not determine the task container architecture.')
-    path = await asyncio.to_thread(
-        cache.artifact, harness, version, result.stdout.strip()
-    )
-    command = 'claude' if harness == 'claude-code' else 'codex'
-    destination = f'/usr/local/bin/{command}'
-    await environment.upload_file(path, destination)
-    result = await environment.exec(
-        command=f'chmod 755 {shlex.quote(destination)} && {command} --version',
-        user='root',
-    )
-    if result.return_code or version not in (result.stdout or '').split():
-        raise RuntimeError(
-            f'The installed `{command}` does not report version `{version}`.'
-        )
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+# ── Agents ──
 
 
 class ClaudeCode(HarborClaudeCode):
@@ -121,37 +100,30 @@ class ClaudeCode(HarborClaudeCode):
             'CLAUDE_CODE_MAX_OUTPUT_TOKENS': str(self.options.max_output_tokens),
         }
 
+    def _configure_connection(self, connection: proxy.Connection) -> None:
+        self._base_url = connection.url
+        self._extra_env.update(
+            {
+                'ANTHROPIC_BASE_URL': connection.url,
+                'ANTHROPIC_AUTH_TOKEN': connection.token,
+            }
+        )
+
     @override
     async def run(
         self, instruction: str, environment: BaseEnvironment, context: AgentContext
     ) -> None:
-        endpoint = Endpoint.read(self._get_env, 'anthropic-messages')
-        assert isinstance(self.options, ClaudeCodeOptions)
-        started_at = datetime.now(UTC)
-        recorder = current_trial()
-        recorder.begin(started_at)
-        model = self.model_name.removeprefix('anthropic/') if self.model_name else ''
-        calls: list[dict[str, Any]] = []
-        failed = True
-        try:
-            async with proxy.connect(
-                endpoint, 'anthropic-messages', model, recorder=recorder
-            ) as connection:
-                calls = connection.calls
-                self._base_url = connection.url
-                self._extra_env.update(
-                    {
-                        'ANTHROPIC_BASE_URL': connection.url,
-                        'ANTHROPIC_AUTH_TOKEN': connection.token,
-                    }
-                )
-                await super().run(instruction, environment, context)
-            failed = False
-        finally:
-            try:
-                await _finish(self, environment, context, calls, failed=failed)
-            finally:
-                recorder.finish(datetime.now(UTC))
+        await _run_installed(
+            self,
+            'anthropic-messages',
+            'anthropic/',
+            instruction,
+            environment,
+            context,
+            self._get_env,
+            self._configure_connection,
+            super().run,
+        )
 
 
 class Codex(HarborCodex):
@@ -180,60 +152,30 @@ class Codex(HarborCodex):
     def _resolve_auth_json_path(self) -> Path | None:
         return None
 
+    def _configure_connection(self, connection: proxy.Connection) -> None:
+        self._base_url = f'{connection.url}/v1'
+        self._extra_env.update(
+            {
+                'OPENAI_BASE_URL': self._base_url,
+                'OPENAI_API_KEY': connection.token,
+            }
+        )
+
     @override
     async def run(
         self, instruction: str, environment: BaseEnvironment, context: AgentContext
     ) -> None:
-        endpoint = Endpoint.read(self._get_env, 'openai-responses')
-        assert isinstance(self.options, CodexOptions)
-        started_at = datetime.now(UTC)
-        recorder = current_trial()
-        recorder.begin(started_at)
-        model = self.model_name.removeprefix('openai/') if self.model_name else ''
-        calls: list[dict[str, Any]] = []
-        failed = True
-        try:
-            async with proxy.connect(
-                endpoint, 'openai-responses', model, recorder=recorder
-            ) as connection:
-                calls = connection.calls
-                self._base_url = f'{connection.url}/v1'
-                self._extra_env.update(
-                    {
-                        'OPENAI_BASE_URL': self._base_url,
-                        'OPENAI_API_KEY': connection.token,
-                    }
-                )
-                await super().run(instruction, environment, context)
-            failed = False
-        finally:
-            try:
-                await _finish(self, environment, context, calls, failed=failed)
-            finally:
-                recorder.finish(datetime.now(UTC))
-
-
-async def _finish(
-    agent: ClaudeCode | Codex,
-    environment: BaseEnvironment,
-    context: AgentContext,
-    calls: list[dict[str, Any]],
-    *,
-    failed: bool,
-) -> None:
-    try:
-        await environment.download_dir(
-            agent.environment_logs_dir.as_posix(), agent.logs_dir
+        await _run_installed(
+            self,
+            'openai-responses',
+            'openai/',
+            instruction,
+            environment,
+            context,
+            self._get_env,
+            self._configure_connection,
+            super().run,
         )
-        agent.populate_context_post_run(context)
-    except Exception:
-        if not failed:
-            raise
-        agent.logger.warning(
-            'Native agent logs could not be synchronized after a failed run.'
-        )
-    finally:
-        _record(agent, context, calls)
 
 
 def discard_session_keys(logs: Path, recorder: TrialAccounting) -> None:
@@ -259,12 +201,91 @@ def discard_session_keys(logs: Path, recorder: TrialAccounting) -> None:
         path.unlink()
 
 
+# ── Lifecycle Helpers ──
+
+
+async def _install(
+    environment: BaseEnvironment,
+    harness: cache.InstalledHarness,
+    version: str,
+) -> str:
+    await check_local_context()
+    result = await environment.exec(command='uname -m')
+    if result.return_code or result.stdout is None:
+        raise RuntimeError('Could not determine the task container architecture.')
+    path = await asyncio.to_thread(
+        cache.artifact, harness, version, result.stdout.strip()
+    )
+    command = cache.COMMANDS[harness]
+    destination = f'/usr/local/bin/{command}'
+    await environment.upload_file(path, destination)
+    result = await environment.exec(
+        command=f'chmod 755 {shlex.quote(destination)} && {command} --version',
+        user='root',
+    )
+    if result.return_code or version not in (result.stdout or '').split():
+        raise RuntimeError(
+            f'The installed `{command}` does not report version `{version}`.'
+        )
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+async def _run_installed(
+    agent: ClaudeCode | Codex,
+    api: Literal['anthropic-messages', 'openai-responses'],
+    prefix: str,
+    instruction: str,
+    environment: BaseEnvironment,
+    context: AgentContext,
+    env: Callable[[str], str | None],
+    configure: Callable[[proxy.Connection], None],
+    run_super: Callable[[str, BaseEnvironment, AgentContext], Awaitable[None]],
+) -> None:
+    endpoint = Endpoint.read(env, api)
+    model = agent.model_name.removeprefix(prefix) if agent.model_name else ''
+    calls: list[dict[str, Any]] = []
+    failed = True
+    with current_trial().track() as recorder:
+        try:
+            async with proxy.connect(
+                endpoint, api, model, recorder=recorder
+            ) as connection:
+                calls = connection.calls
+                configure(connection)
+                await run_super(instruction, environment, context)
+            failed = False
+        finally:
+            await _finish(agent, environment, context, calls, failed=failed)
+
+
+async def _finish(
+    agent: ClaudeCode | Codex,
+    environment: BaseEnvironment,
+    context: AgentContext,
+    calls: list[dict[str, Any]],
+    *,
+    failed: bool,
+) -> None:
+    try:
+        await environment.download_dir(
+            agent.environment_logs_dir.as_posix(), agent.logs_dir
+        )
+        agent.populate_context_post_run(context)
+    except Exception:
+        if not failed:
+            raise
+        agent.logger.warning(
+            'Native agent logs could not be synchronized after a failed run.'
+        )
+    finally:
+        _record(agent, context, calls)
+
+
 def _record(
     agent: ClaudeCode | Codex,
     context: AgentContext,
     calls: list[dict[str, Any]],
 ) -> None:
-    assert isinstance(agent.options, ClaudeCodeOptions | CodexOptions)
     context.metadata = {
         **(context.metadata or {}),
         'binary_sha256': agent.binary_sha256,
