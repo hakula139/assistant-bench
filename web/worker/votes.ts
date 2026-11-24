@@ -248,14 +248,12 @@ export async function recordBatch(
       );
     }
   }
-  if (writes.length > 0) {
-    const results = await batch(db, writes);
-    for (const { index, offset } of offsets) {
-      const miss = results[offset + 1].results.at(0);
-      const receipt = miss !== undefined && 'choice' in miss ? miss : null;
-      statuses[index] =
-        results[offset].results.length > 0 ? 'recorded' : receiptStatus(requests[index], receipt);
-    }
+  const results = await batch(db, writes);
+  for (const { index, offset } of offsets) {
+    const miss = results[offset + 1].results.at(0);
+    const receipt = miss !== undefined && 'choice' in miss ? miss : null;
+    statuses[index] =
+      results[offset].results.length > 0 ? 'recorded' : receiptStatus(requests[index], receipt);
   }
   return requests.map(({ pair }, index) => ({ pair, status: statuses[index] }));
 }

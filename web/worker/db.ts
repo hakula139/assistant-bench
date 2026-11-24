@@ -5,6 +5,9 @@ import {
   SqliteIntrospector,
   SqliteQueryCompiler,
   type Compilable,
+  type DeleteResult,
+  type InsertResult,
+  type UpdateResult,
 } from 'kysely';
 
 import type { Database } from './schema';
@@ -19,8 +22,10 @@ export const queries = new Kysely<Database>({
   },
 });
 
+type RowOf<R> = Exclude<R, InsertResult | UpdateResult | DeleteResult>;
+
 export interface RunResult<R> {
-  results: R[];
+  results: RowOf<R>[];
   changes: number;
 }
 
@@ -28,7 +33,7 @@ export type BatchResults<T extends readonly Compilable[]> = {
   -readonly [K in keyof T]: T[K] extends Compilable<infer R> ? RunResult<R> : never;
 };
 
-function prepare<R>(db: D1Database, query: Compilable<R>): D1PreparedStatement {
+function prepare(db: D1Database, query: Compilable): D1PreparedStatement {
   const { sql, parameters } = query.compile();
   return db.prepare(sql).bind(...parameters);
 }
@@ -46,7 +51,7 @@ export async function first<R>(db: D1Database, query: Compilable<R>): Promise<R 
 
 /** Runs a compiled write (or returning write) and returns its rows and affected row count. */
 export async function run<R>(db: D1Database, query: Compilable<R>): Promise<RunResult<R>> {
-  const { results, meta } = await prepare(db, query).all<R>();
+  const { results, meta } = await prepare(db, query).all<RowOf<R>>();
   return { results, changes: meta.changes };
 }
 
@@ -55,10 +60,6 @@ export async function batch<const T extends readonly Compilable[]>(
   db: D1Database,
   items: T,
 ): Promise<BatchResults<T>>;
-export async function batch<R>(
-  db: D1Database,
-  items: readonly Compilable<R>[],
-): Promise<RunResult<R>[]>;
 export async function batch(
   db: D1Database,
   items: readonly Compilable[],

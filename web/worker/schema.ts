@@ -6,8 +6,9 @@ import type { Category } from '@/lib/categories';
 /**
  * Vote-store tables and views across `web/migrations/*.sql`.
  *
- * `schema.test.ts` parses this interface directly to check table, view, column, type, nullability,
- * and default parity against the migrated D1 schema.
+ * Keep each table and view as an inline `name: { ... };` block: `schema.test.ts` parses this
+ * interface directly to check table column names, types, nullability, and defaults, and view names
+ * and columns, against the migrated D1 schema.
  */
 export interface Database {
   publications: {

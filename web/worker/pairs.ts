@@ -67,7 +67,7 @@ function pendingQuery(actor: string, family: string) {
         .onRef('b.publication_id', '=', 'pairs.publication_id')
         .onRef('b.output_key', '=', 'pairs.b_output'),
     )
-    .select((eb) => [
+    .select([
       'pairs.id',
       'pairs.publication_id',
       'pairs.case_key',
@@ -77,9 +77,10 @@ function pendingQuery(actor: string, family: string) {
       'cases.instruction',
       'cases.checklist',
       'cases.category',
-      eb.fn.coalesce('a.content', eb.val('')).as('a'),
-      eb.fn.coalesce('b.content', eb.val('')).as('b'),
+      'a.content as a',
+      'b.content as b',
     ])
+    .$narrowType<{ a: string; b: string }>()
     .where('pairs.actor_id', '=', actor)
     .where('pairs.family', '=', family)
     .where((eb) =>
@@ -130,10 +131,8 @@ function pairCasesQuery(family: string) {
   return queries
     .selectFrom('publication_pair_cases')
     .select(['low_system', 'high_system', 'case_keys'])
-    .where(
-      'publication_id',
-      '=',
-      queries.selectFrom('active').select('publication_id').where('family', '=', family),
+    .where('publication_id', '=', (eb) =>
+      eb.selectFrom('active').select('publication_id').where('family', '=', family),
     );
 }
 
@@ -327,8 +326,16 @@ function replaceQuery(
             .where('actor_id', '=', actor)
             .whereRef('family', '=', 'chosen.family')
             .where('case_key', '=', drawn.caseKey)
-            .where(sql<string>`min(a_system, b_system)`, '=', lowSystem)
-            .where(sql<string>`max(a_system, b_system)`, '=', highSystem),
+            .where((sub) =>
+              sub(sql<string>`min(${sub.ref('a_system')}, ${sub.ref('b_system')})`, '=', lowSystem),
+            )
+            .where((sub) =>
+              sub(
+                sql<string>`max(${sub.ref('a_system')}, ${sub.ref('b_system')})`,
+                '=',
+                highSystem,
+              ),
+            ),
         ),
       ),
     );

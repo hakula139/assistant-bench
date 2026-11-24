@@ -44,8 +44,9 @@ export async function preview(
       .where('pairs.id', '=', pair)
       .where('pairs.actor_id', '=', actor),
   );
-  if (row?.content === undefined || row.content === null) {
+  const content = row?.content ?? null;
+  if (content === null) {
     throw new ApiError(404, 'not_found');
   }
-  return row.content;
+  return content;
 }

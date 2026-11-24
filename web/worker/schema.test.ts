@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:workers';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, test } from 'vitest';
 
 interface ParsedColumn {
   affinity: 'INTEGER' | 'TEXT';
@@ -46,11 +46,27 @@ function classifyType(rawType: string): ParsedColumn {
 
 function parseDatabaseSchema(source: string): Map<string, Map<string, ParsedColumn>> {
   const withoutComments = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*/g, '');
-  const start = withoutComments.indexOf('export interface Database {');
+  const marker = 'export interface Database {';
+  const start = withoutComments.indexOf(marker);
   if (start === -1) {
     throw new Error('Could not locate export interface Database in schema.ts.');
   }
-  const body = withoutComments.slice(start + 'export interface Database {'.length);
+  const bodyStart = start + marker.length;
+  let depth = 1;
+  let end = bodyStart;
+  while (end < withoutComments.length && depth > 0) {
+    const ch = withoutComments[end];
+    if (ch === '{') {
+      depth++;
+    } else if (ch === '}') {
+      depth--;
+    }
+    end++;
+  }
+  if (depth !== 0) {
+    throw new Error('Could not locate closing brace of export interface Database in schema.ts.');
+  }
+  const body = withoutComments.slice(bodyStart, end - 1);
   const tables = new Map<string, Map<string, ParsedColumn>>();
   const tablePattern = /(\w+)\s*:\s*\{([\s\S]*?)\};/g;
   for (const tableMatch of body.matchAll(tablePattern)) {
@@ -67,7 +83,7 @@ function parseDatabaseSchema(source: string): Map<string, Map<string, ParsedColu
 }
 
 describe('schema.ts parity with D1 migrations', () => {
-  it('matches every table, view, column, type, nullability, and default', async () => {
+  test('matches table columns, types, nullability, and defaults, and view names and columns', async () => {
     const schema = parseDatabaseSchema(env.TEST_SCHEMA);
     const { results: objects } = await env.DB.prepare(
       `SELECT name, type, sql FROM sqlite_master
