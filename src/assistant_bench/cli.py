@@ -168,7 +168,7 @@ def _check(
     export, systems = _catalog()
     task_families: list[tuple[Family, list[Path]]] = []
     for family in map(load_family, families or family_names()):
-        _family_systems(family, systems)
+        jobs.resolve_family_systems(family, systems, export)
         if family.source == 'cases':
             if task_names:
                 raise InputError(
@@ -216,8 +216,8 @@ def _check(
 @app.command()
 def systems(families: FamilyArguments = None) -> None:
     """List runnable system IDs, conditions, and display names by family."""
-    _, catalog = _catalog()
-    for target in _run_targets(families, None, catalog):
+    export, catalog = _catalog()
+    for target in _run_targets(families, None, catalog, export):
         for system in target.selected:
             typer.echo(
                 f'{system.public_id(target.family.name)}\t{system.condition}\t'
@@ -244,6 +244,7 @@ def run(
             families,
             names,
             systems,
+            export,
             condition=condition,
             root=context.public_root / 'families',
         )
@@ -277,10 +278,7 @@ def _run_families(
 
     probes = canaries.prepare(
         (
-            (
-                job,
-                {system.name: systems.get(system.name, system) for system in selected},
-            )
+            (job, {system.name: system for system in selected})
             for _, selected, job in prepared
         ),
         root=context.root,
@@ -290,7 +288,7 @@ def _run_families(
         ceiling = probe.ceiling_usd
         cost = f'${ceiling:.4f}' if ceiling is not None else 'unknown'
         typer.echo(
-            f'Canary `{probe.original.name}`: one request with a '
+            f'Canary {_system_label(probe.original)}: one request with a '
             f'`{probe.actual.max_output_tokens}`-token completion allowance '
             f'including reasoning. Full-context cost ceiling: {cost}.'
         )
@@ -377,13 +375,18 @@ def spend(
             families,
             names,
             systems,
+            export,
             condition=condition,
             root=context.public_root / 'families',
         )
         for family, selected, job in _prepare(targets, export, context):
+            labels = {
+                system.name: _system_label(system, family.name)
+                for system in jobs.resolve_family_systems(family, systems, export)
+            }
             spent, projections = _projection(family, selected, job, context)
             for entry in spent:
-                typer.echo(_spend_line(entry))
+                typer.echo(_spend_line(entry, labels))
             _echo_projection(family, selected, spent, projections)
             if (problem := budget_problem(family, spent, projections)) is not None:
                 typer.echo(problem)
@@ -404,7 +407,7 @@ def reset_canary(
     """
     contexts: list[tuple[str, str | None]] = [(system, None)]
     if '/' in system:
-        _, catalog = _catalog()
+        export, catalog = _catalog()
         contexts = [
             (
                 member.name,
@@ -412,7 +415,9 @@ def reset_canary(
                     member.model_copy(update={'harness': 'generate', 'version': None})
                 ),
             )
-            for target in _run_targets(None, [system], catalog, condition=condition)
+            for target in _run_targets(
+                None, [system], catalog, export, condition=condition
+            )
             for member in target.selected
         ]
     elif condition is not None:
@@ -428,7 +433,8 @@ def reset_canary(
             for key, source in contexts
         )
     typer.echo(
-        f'System `{system}`: cleared {count_of(count, "canary baseline context")}.'
+        f'System {_format_label(system, condition)}: '
+        f'cleared {count_of(count, "canary baseline context")}.'
     )
 
 
@@ -551,10 +557,10 @@ def _close_tests(family: Family) -> report.Report:
 @app.command()
 def fingerprints() -> None:
     """Fail when a system left the fingerprint its family's closed reports froze."""
-    _, systems = _catalog()
+    export, systems = _catalog()
     moved = [
         _moved_line(family, *change)
-        for family, members in jobs.runnable_systems(systems).items()
+        for family, members in jobs.runnable_systems(systems, export).items()
         for change in _moved(report.reported_fingerprints(family), members)
     ]
     if moved:
@@ -631,12 +637,6 @@ def _check_problems(tasks: list[Path], outputs: list[Output]) -> list[str]:
         if missing:
             problems.append(f'{label} left no trial of {code(missing)}')
     return problems
-
-
-def _family_systems(family: Family, systems: Mapping[str, System]) -> list[System]:
-    listed = jobs.listed_systems(family, systems)
-    jobs.check_systems(family, listed)
-    return jobs.family_systems(family, listed)
 
 
 def _families_with_jobs(context: RunContext) -> list[str]:
@@ -717,24 +717,41 @@ def _run_targets(
     families: list[str] | None,
     names: list[str] | None,
     systems: Mapping[str, System],
+    export: NixosConfigExport,
     *,
     condition: str | None = None,
     root: Path | None = None,
 ) -> list[_RunTarget]:
     """Return each family to run with its roster and selected systems."""
-    if condition is not None and not names:
-        raise typer.BadParameter(
-            'Specify a system with `--system`.', param_hint="'--condition'"
-        )
-
     family_scope = families if families is not None else family_names(root=root)
     targets: list[_RunTarget] = []
     if not names:
         for name in family_scope:
             family = load_family(name, root=root)
-            if families is not None or family.settings.systems:
-                roster = _family_systems(family, systems)
-                targets.append(_RunTarget(family, roster, roster))
+            if families is None and not family.settings.systems:
+                continue
+            roster = jobs.resolve_family_systems(family, systems, export)
+            selected = roster
+            if condition is not None:
+                selected = [
+                    system for system in roster if system.condition == condition
+                ]
+                if not selected:
+                    if families is not None:
+                        raise typer.BadParameter(
+                            f'Family `{family.name}` has no system with condition '
+                            f'`{condition}`. See the available conditions in '
+                            '`bench systems`.',
+                            param_hint="'--condition'",
+                        )
+                    continue
+            targets.append(_RunTarget(family, roster, selected))
+        if condition is not None and not targets:
+            raise typer.BadParameter(
+                f'No family lists a system with condition `{condition}`. '
+                'See the available conditions in `bench systems`.',
+                param_hint="'--condition'",
+            )
         return targets
 
     bare: list[str] = []
@@ -773,7 +790,7 @@ def _run_targets(
         if not bare and not local:
             continue
         family = load_family(family_name, root=root)
-        members = _family_systems(family, systems)
+        members = jobs.resolve_family_systems(family, systems, export)
         short = dict.fromkeys(system.canonical_name for system in members)
         full = dict.fromkeys(system.public_id(family_name) for system in members)
         known_names(
@@ -842,15 +859,16 @@ def _refuse_drift(family: Family, systems: list[System], context: RunContext) ->
     moved = _moved(frozen, systems)
     if not drifted and not moved:
         return
-    reported = {name for name, _, _ in moved} | {
+    labels = {system.name: _system_label(system) for system in systems}
+    reported = {system.name for system, _, _ in moved} | {
         name for name, _, _ in drifted if name in frozen and frozen[name] is None
     }
     lines = [
         f'Family `{family.name}` has systems that changed their fingerprints:',
         *(_moved_line(family.name, *change) for change in moved),
         *(
-            f'System `{name}` ran under fingerprint `{recorded}` but now resolves '
-            f'to `{current}`.'
+            f'System {labels[name]} ran under fingerprint `{recorded}` but now '
+            f'resolves to `{current}`.'
             for name, recorded, current in drifted
         ),
     ]
@@ -862,21 +880,21 @@ def _refuse_drift(family: Family, systems: list[System], context: RunContext) ->
 
 def _moved(
     frozen: Mapping[str, str | None], systems: list[System]
-) -> list[tuple[str, str, str]]:
+) -> list[tuple[System, str, str]]:
     """Return each system whose fingerprint differs from a frozen one, with both."""
-    moved: list[tuple[str, str, str]] = []
+    moved: list[tuple[System, str, str]] = []
     for system in systems:
         recorded = frozen.get(system.name)
         current = fingerprint(system)
         if recorded is not None and recorded != current:
-            moved.append((system.name, recorded, current))
+            moved.append((system, recorded, current))
     return moved
 
 
-def _moved_line(family: str, name: str, recorded: str, current: str) -> str:
+def _moved_line(family: str, system: System, recorded: str, current: str) -> str:
     return (
-        f'Closed reports of `{family}` froze `{name}` under fingerprint '
-        f'`{recorded}`, but it now resolves to `{current}`.'
+        f'Closed reports of `{family}` froze {_system_label(system)} under '
+        f'fingerprint `{recorded}`, but it now resolves to `{current}`.'
     )
 
 
@@ -886,7 +904,8 @@ def _collect(
     export: NixosConfigExport,
     context: RunContext,
 ) -> collection.Collection:
-    resolved = _family_systems(family, systems)
+    resolved = jobs.resolve_family_systems(family, systems, export)
+    labels = {system.name: _system_label(system, family.name) for system in resolved}
     collected = collection.collect(
         family, {system.name: system for system in resolved}, context
     )
@@ -900,7 +919,7 @@ def _collect(
         typer.echo(f'  Error `{error}`: {count_of(count, "output")}.')
 
     for entry in collected.spend:
-        typer.echo(_spend_line(entry))
+        typer.echo(_spend_line(entry, labels))
 
     gated = [output for output in outputs if output.gate_failures]
     if gated:
@@ -950,13 +969,14 @@ def _echo_conflicts(family: Family, outputs: list[Output]) -> None:
         typer.echo(conflict)
 
 
-def _spend_line(entry: Spend) -> str:
+def _spend_line(entry: Spend, labels: Mapping[str, str]) -> str:
+    label = labels.get(entry.system, f'`{entry.system}`')
     attempts = (
         f'{count_of(entry.trials, "trial")} and {count_of(entry.responses, "response")}'
     )
     if not entry.priced:
         line = (
-            f'System `{entry.system}` is unpriced: {attempts} used '
+            f'System {label} is unpriced: {attempts} used '
             f'{entry.tokens.input_tokens:,.0f} input and '
             f'{entry.tokens.output_tokens:,.0f} output tokens'
         )
@@ -964,7 +984,7 @@ def _spend_line(entry: Spend) -> str:
             line += f', besides {count_of(entry.unknown, "unmeasured response")}'
         return f'{line}.'
 
-    line = f'System `{entry.system}`: {attempts} cost ${entry.known_usd:.2f}'
+    line = f'System {label}: {attempts} cost ${entry.known_usd:.2f}'
     for basis, share in sorted(entry.imputed.items()):
         line += (
             f', plus ${share.usd:.2f} for {count_of(share.responses, "response")} '
@@ -990,11 +1010,15 @@ def _projection(
     return spent, project(jobs.pending_trials(job), spent, selected)
 
 
-def _system_label(family: Family, system: System) -> str:
-    label = f'`{system.public_id(family.name)}`'
-    if system.model_effort is None:
-        return label
-    return f'{label} (condition `{system.condition}`)'
+def _format_label(name: str, condition: str | None = None) -> str:
+    label = f'`{name}`'
+    return label if condition is None else f'{label} (condition `{condition}`)'
+
+
+def _system_label(system: System, family: str | None = None) -> str:
+    name = system.public_id(family) if family is not None else system.canonical_name
+    condition = system.condition if system.model_effort is not None else None
+    return _format_label(name, condition)
 
 
 def _echo_projection(
@@ -1003,7 +1027,7 @@ def _echo_projection(
     spent: list[Spend],
     projections: list[Projection],
 ) -> None:
-    labels = {system.name: _system_label(family, system) for system in systems}
+    labels = {system.name: _system_label(system, family.name) for system in systems}
     for projection in projections:
         if not projection.pending:
             continue
@@ -1069,7 +1093,8 @@ def _author_rates(
             rates.append(f'{label} tasks {rate}')
 
         typer.echo(
-            f'System {_system_label(family, system)}: pass rate on {", ".join(rates)}.'
+            f'System {_system_label(system, family.name)}: '
+            f'pass rate on {", ".join(rates)}.'
         )
 
 

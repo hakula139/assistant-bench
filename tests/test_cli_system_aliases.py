@@ -101,6 +101,18 @@ class TestRunTargets:
                 [('comparison', ['acme-large-prompted'])],
                 id='spend-selects-requested-condition',
             ),
+            pytest.param(
+                'run',
+                ['comparison', '--condition', 'prompted'],
+                [('comparison', ['acme-large-prompted'])],
+                id='run-family-condition-without-system',
+            ),
+            pytest.param(
+                'spend',
+                ['comparison', '--condition', 'prompted'],
+                [('comparison', ['acme-large-prompted'])],
+                id='spend-family-condition-without-system',
+            ),
         ],
     )
     def test_selects_the_requested_bindings(
@@ -116,8 +128,8 @@ class TestRunTargets:
         prepared.assert_called_once()
         targets = prepared.call_args.args[0]
         assert [
-            (family.name, [system.name for system in members])
-            for family, members in targets
+            (target.family.name, [system.name for system in target.selected])
+            for target in targets
         ] == expected
 
     @pytest.mark.parametrize(
@@ -135,6 +147,10 @@ class TestRunTargets:
                 ['--system', 'writing/acme-large-medium', '--condition', 'prompted'],
                 'No system with condition `prompted` matches '
                 '`writing/acme-large-medium`.',
+            ),
+            (
+                ['writing', '--condition', 'prompted'],
+                'Family `writing` has no system with condition `prompted`.',
             ),
         ],
     )
@@ -221,7 +237,7 @@ class TestResetCanary:
 
         assert result.exit_code == 0, result.output
         assert result.stdout == (
-            'System `comparison/acme-large-medium`: '
+            'System `comparison/acme-large-medium` (condition `prompted`): '
             'cleared 1 canary baseline context.\n'
         )
         for (key, context), (record, cleared) in records.items():

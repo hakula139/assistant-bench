@@ -28,6 +28,7 @@ class Harness:
         'anthropic-messages',
     )
     harbor_loop: bool = False
+    installed: bool = False
     model_prefix: str = ''
 
     sends_prompt: bool = False
@@ -58,6 +59,7 @@ HARNESSES: dict[str, Harness] = {
         options=options.claude_code,
         apis=('anthropic-messages',),
         harbor_loop=True,
+        installed=True,
         model_prefix='anthropic/',
     ),
     'codex': Harness(
@@ -65,6 +67,7 @@ HARNESSES: dict[str, Harness] = {
         options=options.codex,
         apis=('openai-responses',),
         harbor_loop=True,
+        installed=True,
         model_prefix='openai/',
     ),
 }

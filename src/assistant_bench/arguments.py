@@ -73,7 +73,7 @@ ConditionOption = Annotated[
     str | None,
     typer.Option(
         '--condition',
-        help='Select one condition of the systems given with --system. '
+        help='Select one condition of the selected families or systems. '
         'See `bench systems`.',
     ),
 ]

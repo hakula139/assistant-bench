@@ -37,7 +37,6 @@ from assistant_bench.catalog import (
     NixosConfigExport,
     System,
     SystemIdentity,
-    load_export,
     resolve_alias,
 )
 from assistant_bench.families import (
@@ -108,8 +107,7 @@ def check_harness(family: Family) -> None:
 def listed_systems(
     family: Family,
     systems: Mapping[str, System],
-    *,
-    export: NixosConfigExport | None = None,
+    export: NixosConfigExport,
 ) -> list[System]:
     """Resolve the family's listed storage keys against the canonical systems."""
     aliases = family.settings.system_aliases
@@ -138,7 +136,6 @@ def listed_systems(
         if (alias := aliases.get(name)) is None:
             system = systems[name]
         else:
-            export = load_export() if export is None else export
             system = resolve_alias(name, alias, systems[alias.model_effort], export)
 
         identity = (system.public_id(family.name), system.condition)
@@ -194,7 +191,7 @@ def check_systems(family: Family, systems: list[System]) -> None:
                 f'System `{system.name}`: harness `{system.harness}` accepts '
                 f'{code(harness.apis)} (got `{system.api}`).'
             )
-        if system.harness in ('claude-code', 'codex') and system.version is None:
+        if harness.installed and system.version is None:
             raise InputError(
                 f'System `{system.name}`: set its `harness` and pinned `version` '
                 'in `family.toml`.'
@@ -210,26 +207,49 @@ def family_systems(family: Family, systems: list[System]) -> list[System]:
     """Return the systems as the family runs them.
 
     A task family's default harness applies to systems without an explicit
-    installed harness. A case family keeps each system as it resolves.
+    family-configured harness. A case family keeps each system as it resolves.
     """
     harness = family.settings.harness
     if harness is None:
         return systems
     return [
-        system if system.version else system.model_copy(update={'harness': harness})
+        system
+        if system.harness != 'generate'
+        else system.model_copy(update={'harness': harness})
         for system in systems
     ]
 
 
-def runnable_systems(systems: Mapping[str, System]) -> dict[str, list[System]]:
+def resolve_family_systems(
+    family: Family,
+    systems: Mapping[str, System],
+    export: NixosConfigExport,
+) -> list[System]:
+    """Resolve, check, and finalize a family's systems."""
+    listed = listed_systems(family, systems, export)
+    check_systems(family, listed)
+    resolved = family_systems(family, listed)
+    bindings: dict[tuple[str, str], System] = {}
+    for system in resolved:
+        binding = (system.canonical_name, fingerprint(system))
+        previous = bindings.setdefault(binding, system)
+        if previous is not system:
+            raise InputError(
+                f'Family `{family.name}` binds `{system.public_id(family.name)}` '
+                f'conditions `{previous.condition}` and `{system.condition}` to the '
+                f'same fingerprint `{binding[1]}`.'
+            )
+    return resolved
+
+
+def runnable_systems(
+    systems: Mapping[str, System], export: NixosConfigExport
+) -> dict[str, list[System]]:
     """Map each family to its runnable systems as the family runs them."""
-    runnable: dict[str, list[System]] = {}
-    for name in family_names():
-        family = load_family(name)
-        listed = listed_systems(family, systems)
-        check_systems(family, listed)
-        runnable[name] = family_systems(family, listed)
-    return runnable
+    return {
+        name: resolve_family_systems(load_family(name), systems, export)
+        for name in family_names()
+    }
 
 
 def drifted_systems(
@@ -274,7 +294,7 @@ def _agent_config(system: System) -> trial_config.AgentConfig:
     return trial_config.AgentConfig(
         import_path=harness.import_path,
         model_name=f'{harness.model_prefix}{system.route}',
-        extra_allowed_hosts=['host.docker.internal'] if system.version else [],
+        extra_allowed_hosts=['host.docker.internal'] if harness.installed else [],
         n_concurrent=ROUTE_CONCURRENCY,
         concurrency_group=system.route,
         kwargs=agent_kwargs(system),
@@ -325,7 +345,7 @@ def _environment(
         return trial_config.EnvironmentConfig(
             import_path=HOST_ENVIRONMENT, kwargs={'auto_mounting': True}
         )
-    if any(system.version for system in systems):
+    if any(HARNESSES[system.harness].installed for system in systems):
         return trial_config.EnvironmentConfig(
             import_path='assistant_bench.harnesses.docker:InstalledDocker',
             extra_docker_compose=[
@@ -386,7 +406,9 @@ def current_inputs(
     )
     source_root = family.source_root.parent
     full = _environment_lock(_environment(resolved, source_root))
-    standard_systems = [system for system in resolved if system.version is None]
+    standard_systems = [
+        system for system in resolved if not HARNESSES[system.harness].installed
+    ]
     standard = (
         _environment_lock(_environment(standard_systems, source_root))
         if 0 < len(standard_systems) < len(resolved)
@@ -397,7 +419,7 @@ def current_inputs(
             (_agent_config(system), environment, family.source != 'tasks')
             for environment in (
                 (full, standard)
-                if system.version is None and full != standard
+                if not HARNESSES[system.harness].installed and full != standard
                 else (full,)
             )
         )

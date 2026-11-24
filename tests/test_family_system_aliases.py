@@ -16,6 +16,7 @@ from assistant_bench.paths import FAMILIES_DIR
 from assistant_bench.runtime import RunContext
 from support import (
     FIXTURES,
+    VOTES,
     break_setting,
     finish_job,
     make_system,
@@ -109,6 +110,7 @@ class TestListedSystems:
         )
         family = with_settings(
             family,
+            pairs=[],
             systems=['first', 'second'],
             system_aliases={
                 'first': alias,
@@ -118,6 +120,30 @@ class TestListedSystems:
 
         with pytest.raises(ValueError, match='repeats the `prompted` condition'):
             jobs.listed_systems(family, {base.name: base}, export=load_export())
+
+    def test_refuses_duplicate_canonical_fingerprint_bindings(self) -> None:
+        base = make_system()
+        alias = SystemAlias(
+            model_effort=base.name,
+            condition='first',
+            display_name='First',
+            prompt='nixos-config:claudeCode',
+        )
+        family = with_settings(
+            VOTES,
+            systems=['first', 'second'],
+            system_aliases={
+                'first': alias,
+                'second': alias.model_copy(
+                    update={'condition': 'second', 'display_name': 'Second'}
+                ),
+            },
+        )
+
+        with pytest.raises(
+            ValueError, match='conditions `first` and `second` to the same fingerprint'
+        ):
+            jobs.resolve_family_systems(family, {base.name: base}, load_export())
 
 
 class TestJob:

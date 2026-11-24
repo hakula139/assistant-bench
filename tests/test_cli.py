@@ -1327,6 +1327,7 @@ class TestRun:
         resolved['acme-large'] = make_system(vendor='openai')
         resolved['acme-small'] = make_system(
             name='acme-small',
+            display_name='Acme Small',
             route='acme/small',
             api='openai-responses',
             harness='codex',
@@ -2051,7 +2052,7 @@ class TestSpend:
 
         assert result.exit_code == 0, result.output
         assert result.stdout == (
-            'System `large`: 1 trial and 2 responses cost $3.00, plus $3.00 for 1 '
+            'System `f/large`: 1 trial and 2 responses cost $3.00, plus $3.00 for 1 '
             'response without a known cost, imputed from its own usage.\n'
             'System `f/large`: 1 pending trial at $6.00 each from its own usage, '
             '$6.00 in all.\n'
@@ -2086,7 +2087,7 @@ class TestSpend:
 
         assert result.exit_code == 0, result.output
         assert result.stdout == (
-            'System `small` is unpriced: 1 trial and 1 response used 0 input and 0 '
+            'System `f/small` is unpriced: 1 trial and 1 response used 0 input and 0 '
             'output tokens, besides 1 unmeasured response.\n'
             'System `f/large`: 1 pending trial with no usage to estimate a cost from, '
             'so this run can exceed the budget.\n'
@@ -2101,10 +2102,10 @@ class TestSpend:
             pytest.param(
                 [('job-1', 'large', (None,)), ('job-2', 'small', (None, None))],
                 [
-                    'System `large`: 1 trial and 1 response cost $0.00, besides 1 '
+                    'System `f/large`: 1 trial and 1 response cost $0.00, besides 1 '
                     'response without a known cost or usage to impute from, $7.00 at '
                     'its ceiling, which the budget leaves out.',
-                    'System `small`: 1 trial and 2 responses cost $0.00, besides 2 '
+                    'System `f/small`: 1 trial and 2 responses cost $0.00, besides 2 '
                     'responses without a known cost or usage to impute from, $14.00 '
                     'at their ceilings, which the budget leaves out.',
                 ],
@@ -2120,7 +2121,7 @@ class TestSpend:
                     ('job-2', 'small', (None, None)),
                 ],
                 [
-                    'System `small`: 1 trial and 2 responses cost $0.00, plus $6.00 '
+                    'System `f/small`: 1 trial and 2 responses cost $0.00, plus $6.00 '
                     'for 2 responses without a known cost, imputed from another '
                     "system's usage."
                 ],
@@ -2175,7 +2176,7 @@ class TestCollect:
 
         assert result.exit_code == 0, result.output
         assert (
-            'System `large`: 1 trial and 2 responses cost $3.00, plus $3.00 for 1 '
+            'System `f/large`: 1 trial and 2 responses cost $3.00, plus $3.00 for 1 '
             'response without a known cost, imputed from its own usage.\n'
         ) in result.output
 
