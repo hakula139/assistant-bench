@@ -184,7 +184,7 @@ describe('GET /api/previews/:pair/:side', () => {
     let switched = false;
     vi.spyOn(env.DB, 'prepare').mockImplementation((query) => {
       const statement = prepare(query);
-      if (query.includes('system IN (?, ?)')) {
+      if (query.includes('"system" in (?, ?)')) {
         const bind = statement.bind.bind(statement);
         vi.spyOn(statement, 'bind').mockImplementation((...values) => {
           const bound = bind(...values);

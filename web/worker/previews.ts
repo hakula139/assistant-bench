@@ -1,4 +1,5 @@
 import { ApiError } from './api';
+import { first, queries } from './db';
 
 export const previewUnavailable = 'Preview unavailable. Reload the voting page to try again.';
 
@@ -19,20 +20,33 @@ export async function preview(
   pair: string,
   side: 'a' | 'b',
 ): Promise<string> {
-  const row = await db
-    .prepare(
-      `SELECT outputs.content FROM pending_pairs AS pairs
-       JOIN active ON active.family = pairs.family
-         AND active.publication_id = pairs.publication_id
-       JOIN publications ON publications.id = pairs.publication_id AND publications.render = 'html'
-       JOIN outputs ON outputs.publication_id = pairs.publication_id
-         AND outputs.output_key = CASE ? WHEN 'a' THEN pairs.a_output ELSE pairs.b_output END
-       WHERE pairs.id = ? AND pairs.actor_id = ?`,
-    )
-    .bind(side, pair, actor)
-    .first<{ content: string }>();
-  if (row === null) {
+  const outputKey = side === 'a' ? 'pairs.a_output' : 'pairs.b_output';
+  const row = await first(
+    db,
+    queries
+      .selectFrom('pending_pairs as pairs')
+      .innerJoin('active', (join) =>
+        join
+          .onRef('active.family', '=', 'pairs.family')
+          .onRef('active.publication_id', '=', 'pairs.publication_id'),
+      )
+      .innerJoin('publications', (join) =>
+        join
+          .onRef('publications.id', '=', 'pairs.publication_id')
+          .on('publications.render', '=', 'html'),
+      )
+      .innerJoin('outputs', (join) =>
+        join
+          .onRef('outputs.publication_id', '=', 'pairs.publication_id')
+          .onRef('outputs.output_key', '=', outputKey),
+      )
+      .select('outputs.content')
+      .where('pairs.id', '=', pair)
+      .where('pairs.actor_id', '=', actor),
+  );
+  const content = row?.content ?? null;
+  if (content === null) {
     throw new ApiError(404, 'not_found');
   }
-  return row.content;
+  return content;
 }

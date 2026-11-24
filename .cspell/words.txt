@@ -27,6 +27,7 @@ dateutil
 dedupe
 delenv
 devkit
+dflt
 direnv
 dists
 dotenv
@@ -62,6 +63,7 @@ killpg
 kimi
 kwarg
 kwargs
+Kysely
 lastrowid
 libstdc
 linkify

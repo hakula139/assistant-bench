@@ -1,7 +1,10 @@
 import { env, exports } from 'cloudflare:workers';
+import { sql, type Compilable } from 'kysely';
 import { vi } from 'vitest';
 
 import type { PairState, PairView } from '@/lib/arena';
+
+import { all, batch, first, queries } from '../db';
 
 export const ORIGIN = 'http://localhost:8790';
 export const WRITING = 'writing-fixture';
@@ -77,9 +80,11 @@ export async function admitted(ip?: string): Promise<Browser> {
 }
 
 export async function actorOf(from: Browser): Promise<string> {
-  const row = await env.DB.prepare('SELECT id FROM actors ORDER BY created_at DESC')
-    .all<{ id: string }>()
-    .then(({ results }) => results.find(({ id }) => from.cookie?.includes(id)));
+  const rows = await all(
+    env.DB,
+    queries.selectFrom('actors').select('id').orderBy('created_at', 'desc'),
+  );
+  const row = rows.find(({ id }) => from.cookie?.includes(id));
   if (row === undefined) {
     throw new Error('The browser names no actor.');
   }
@@ -96,15 +101,23 @@ export async function pairOf(from: Browser, family = WRITING): Promise<PairState
 
 /** The pending pair's case and its systems as A and B, read from the store. */
 export async function pendingRow(pair: string) {
-  return env.DB.prepare(
-    `SELECT pairs.case_key, a.system AS a_system, b.system AS b_system, pairs.issued_at
-     FROM pairs
-     JOIN outputs AS a ON a.publication_id = pairs.publication_id AND a.output_key = pairs.a_output
-     JOIN outputs AS b ON b.publication_id = pairs.publication_id AND b.output_key = pairs.b_output
-     WHERE pairs.id = ?`,
-  )
-    .bind(pair)
-    .first<{ case_key: string; a_system: string; b_system: string; issued_at: number }>();
+  return first(
+    env.DB,
+    queries
+      .selectFrom('pairs')
+      .innerJoin('outputs as a', (join) =>
+        join
+          .onRef('a.publication_id', '=', 'pairs.publication_id')
+          .onRef('a.output_key', '=', 'pairs.a_output'),
+      )
+      .innerJoin('outputs as b', (join) =>
+        join
+          .onRef('b.publication_id', '=', 'pairs.publication_id')
+          .onRef('b.output_key', '=', 'pairs.b_output'),
+      )
+      .select(['pairs.case_key', 'a.system as a_system', 'b.system as b_system', 'pairs.issued_at'])
+      .where('pairs.id', '=', pair),
+  );
 }
 
 export async function vote(from: Browser, pair: string, choice = 'a') {
@@ -121,65 +134,106 @@ export async function publish(
   id = `${family}-publication`,
   render: PairView['render'] = 'text',
 ): Promise<void> {
-  const statements = [
-    env.DB.prepare(
-      `INSERT INTO publications (id, family, display_name, aspect, render, defects, reference,
-         systems, case_count, output_count, created_at)
-       VALUES (?, ?, 'Synthetic', 'writing', ?, '["facts", "tone"]', 'acme-large', '{}', 0, 0, 0)`,
-    ).bind(id, family, render),
+  const statements: Compilable[] = [
+    queries.insertInto('publications').values({
+      id,
+      family,
+      display_name: 'Synthetic',
+      aspect: 'writing',
+      render,
+      defects: '["facts", "tone"]',
+      reference: 'acme-large',
+      systems: '{}',
+      case_count: 0,
+      output_count: 0,
+      created_at: 0,
+    }),
   ];
   for (const [caseKey, systems] of Object.entries(cases)) {
     statements.push(
-      env.DB.prepare(
-        `INSERT INTO cases (publication_id, case_key, category, instruction, checklist)
-         VALUES (?, ?, 'reply', ?, '[]')`,
-      ).bind(id, caseKey, `Instruction ${caseKey}`),
+      queries.insertInto('cases').values({
+        publication_id: id,
+        case_key: caseKey,
+        category: 'reply',
+        instruction: `Instruction ${caseKey}`,
+        checklist: '[]',
+        source: null,
+      }),
     );
     for (const [system, contents] of Object.entries(systems)) {
       contents.forEach((content, index) => {
         statements.push(
-          env.DB.prepare(
-            `INSERT INTO outputs (publication_id, output_key, case_key, system, fingerprint,
-               verdict, errored, length, content_digest, content)
-             VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
-          ).bind(
-            id,
-            `${caseKey}/${system}/${index}`,
-            caseKey,
+          queries.insertInto('outputs').values({
+            publication_id: id,
+            output_key: `${caseKey}/${system}/${index}`,
+            case_key: caseKey,
             system,
-            `fp-${system}`,
-            content === null ? 'fail' : 'pass',
-            render === 'html' ? null : 1,
-            content ?? `failed ${caseKey}/${system}/${index}`,
+            fingerprint: `fp-${system}`,
+            verdict: content === null ? 'fail' : 'pass',
+            errored: 0,
+            length: render === 'html' ? null : 1,
+            content_digest: content ?? `failed ${caseKey}/${system}/${index}`,
             content,
-          ),
+          }),
         );
       });
     }
   }
   statements.push(
-    env.DB.prepare(
-      `INSERT INTO publication_pair_cases (publication_id, low_system, high_system, case_keys)
-       SELECT publication_id, low_system, high_system, json_group_array(case_key)
-       FROM (
-         SELECT DISTINCT a.publication_id, a.system AS low_system,
-           b.system AS high_system, a.case_key
-         FROM outputs AS a
-         JOIN outputs AS b
-           ON b.publication_id = a.publication_id AND b.case_key = a.case_key
-         WHERE a.publication_id = ? AND a.verdict = 'pass' AND b.verdict = 'pass'
-           AND a.system < b.system AND a.content_digest <> b.content_digest
-         ORDER BY low_system, high_system, a.case_key
-       ) GROUP BY publication_id, low_system, high_system`,
-    ).bind(id),
+    queries
+      .insertInto('publication_pair_cases')
+      .columns(['publication_id', 'low_system', 'high_system', 'case_keys'])
+      .expression((eb) =>
+        eb
+          .selectFrom(
+            eb
+              .selectFrom('outputs as a')
+              .innerJoin('outputs as b', (join) =>
+                join
+                  .onRef('b.publication_id', '=', 'a.publication_id')
+                  .onRef('b.case_key', '=', 'a.case_key'),
+              )
+              .select([
+                'a.publication_id',
+                'a.system as low_system',
+                'b.system as high_system',
+                'a.case_key',
+              ])
+              .distinct()
+              .where('a.publication_id', '=', id)
+              .where('a.verdict', '=', 'pass')
+              .where('b.verdict', '=', 'pass')
+              .whereRef('a.system', '<', 'b.system')
+              .whereRef('a.content_digest', '<>', 'b.content_digest')
+              .orderBy('low_system')
+              .orderBy('high_system')
+              .orderBy('a.case_key')
+              .as('distinct_cases'),
+          )
+          .select((sub) => [
+            'distinct_cases.publication_id',
+            'distinct_cases.low_system',
+            'distinct_cases.high_system',
+            sql<string>`json_group_array(${sub.ref('distinct_cases.case_key')})`.as('case_keys'),
+          ])
+          .groupBy([
+            'distinct_cases.publication_id',
+            'distinct_cases.low_system',
+            'distinct_cases.high_system',
+          ]),
+      ),
   );
   statements.push(
-    env.DB.prepare(
-      `INSERT INTO active (family, publication_id, activated_at) VALUES (?, ?, 0)
-       ON CONFLICT (family) DO UPDATE SET publication_id = excluded.publication_id`,
-    ).bind(family, id),
+    queries
+      .insertInto('active')
+      .values({ family, publication_id: id, activated_at: 0 })
+      .onConflict((oc) =>
+        oc.column('family').doUpdateSet((eb) => ({
+          publication_id: eb.ref('excluded.publication_id'),
+        })),
+      ),
   );
-  await env.DB.batch(statements);
+  await batch(env.DB, statements);
 }
 
 /** Records a counted vote from a separate actor, for coverage. */
@@ -190,34 +244,64 @@ export async function seedVote(
   options: { actor?: string; ipTag?: string; recordedAt?: number; exclusion?: string } = {},
 ) {
   const actor = options.actor ?? crypto.randomUUID();
-  await env.DB.batch([
-    env.DB.prepare(
-      'INSERT OR IGNORE INTO actors (id, created_at, ip_tag) VALUES (?, 0, NULL)',
-    ).bind(actor),
-    env.DB.prepare(
-      `INSERT INTO votes (pair_id, actor_id, family, publication_id, case_key, a_output, b_output,
-         a_system, b_system, choice, defects, elapsed_ms, recorded_at, ip_tag, exclusion)
-       SELECT ?, ?, ?, active.publication_id, ?, a.output_key, b.output_key, a.system, b.system,
-         'a', '{"a": [], "b": []}', 0, ?, ?, ?
-       FROM active
-       JOIN outputs AS a ON a.publication_id = active.publication_id AND a.case_key = ?
-         AND a.system = ?
-       JOIN outputs AS b ON b.publication_id = active.publication_id AND b.case_key = ?
-         AND b.system = ?
-       WHERE active.family = ? LIMIT 1`,
-    ).bind(
-      crypto.randomUUID(),
-      actor,
-      family,
-      caseKey,
-      options.recordedAt ?? Date.now(),
-      options.ipTag ?? null,
-      options.exclusion ?? null,
-      caseKey,
-      systems[0],
-      caseKey,
-      systems[1],
-      family,
-    ),
+  await batch(env.DB, [
+    queries
+      .insertInto('actors')
+      .values({ id: actor, created_at: 0, ip_tag: null })
+      .onConflict((oc) => oc.doNothing()),
+    queries
+      .insertInto('votes')
+      .columns([
+        'pair_id',
+        'actor_id',
+        'family',
+        'publication_id',
+        'case_key',
+        'a_output',
+        'b_output',
+        'a_system',
+        'b_system',
+        'choice',
+        'defects',
+        'elapsed_ms',
+        'recorded_at',
+        'ip_tag',
+        'exclusion',
+      ])
+      .expression((eb) =>
+        eb
+          .selectFrom('active')
+          .innerJoin('outputs as a', (join) =>
+            join
+              .onRef('a.publication_id', '=', 'active.publication_id')
+              .on('a.case_key', '=', caseKey)
+              .on('a.system', '=', systems[0]),
+          )
+          .innerJoin('outputs as b', (join) =>
+            join
+              .onRef('b.publication_id', '=', 'active.publication_id')
+              .on('b.case_key', '=', caseKey)
+              .on('b.system', '=', systems[1]),
+          )
+          .select((sub) => [
+            sub.val(crypto.randomUUID()).as('pair_id'),
+            sub.val(actor).as('actor_id'),
+            sub.val(family).as('family'),
+            'active.publication_id',
+            sub.val(caseKey).as('case_key'),
+            'a.output_key as a_output',
+            'b.output_key as b_output',
+            'a.system as a_system',
+            'b.system as b_system',
+            sub.val('a' as const).as('choice'),
+            sub.val('{"a": [], "b": []}').as('defects'),
+            sub.val(0).as('elapsed_ms'),
+            sub.val(options.recordedAt ?? Date.now()).as('recorded_at'),
+            sub.val(options.ipTag ?? null).as('ip_tag'),
+            sub.val(options.exclusion ?? null).as('exclusion'),
+          ])
+          .where('active.family', '=', family)
+          .limit(1),
+      ),
   ]);
 }
