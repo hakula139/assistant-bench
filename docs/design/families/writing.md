@@ -12,7 +12,7 @@ Voters can optionally tag missed requirements, incorrect facts, unclear writing,
 
 ## Case Sourcing
 
-Each family has 59 cases: 42 synthetic cases in its committed `cases.toml` and 17 synthetic `held-out` cases in the private repository, about 30% of the family. Held-out cases keep the leaderboard from being fit to the public set. A `transcript` case drawn from the owner's real tasks also belongs in the private repository, as [Data](../../conventions/data.md#data-classes) describes. A committed case derived from such a task keeps only its scenario type, never its text.
+Each family has 59 cases: 42 synthetic cases in its committed `cases.toml` and 17 synthetic `held-out` cases in the private repository, about 30% of the family. Held-out cases keep the leaderboard from being fit to the public set. A `transcript` case drawn from the owner's real tasks also belongs in the private repository, as [Data](../../conventions/data.md#data-classes) describes. A committed case derived from such a task keeps only its scenario type.
 
 Gemini 4 Argon (`gemini-4-argon-high`) drafts the instructions of the writing cases, committed and held-out, from a brief that gives each case's purpose, traps, and checklist. Another model checks each draft and fixes only factual errors, broken traps, and Markdown problems.
 
@@ -32,7 +32,7 @@ Every collection runs the gates on each output of a trial that finished without 
 
 The minimums sit below the shortest valid answer in each family, a commit message or a short chat reply, so they reject only near-empty output, and `writing-zh`'s is half of `writing-en`'s, since English takes about two to three times as many characters as Chinese for the same content. The maximums sit well above every length a case asks for, at about 3x the longest zh band and 2.4x the longest en band, so they catch only runaway output that stays under the token cap.
 
-The language gate compares Han characters with Latin words in visible prose and code comments. Code, URLs and markup do not determine the prose's language. A tie, including an output with neither, passes.
+The language gate compares Han characters with Latin words in visible prose and code comments. Code, URLs, and markup do not determine the prose's language. A tie, including an output with neither, passes.
 
 The script gate works per character, using the CC-CEDICT character sets that zhon ships: a character fails when it is Traditional and never Simplified, unless the instruction also contains it, so an output may quote a Traditional name the case supplies. Because a failure is an automatic loss, the gate never flags a character valid in both scripts. It therefore misses Traditional text written only in such characters, which a phrase-level converter would catch, a gap that narrows with length because longer Traditional text rarely avoids every Traditional-only character.
 

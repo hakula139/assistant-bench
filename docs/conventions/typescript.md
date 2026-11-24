@@ -23,13 +23,30 @@ web/src/
 └── vote/vote.astro          # The vote page, routed by the integration
 ```
 
+```text
+web/worker/
+├── access.ts                # Cloudflare Access JWT verification for private voting
+├── actors.ts                # Turnstile admission, signed actor cookies, and daily limits
+├── api.ts                   # Shared HTTP helpers and fixed error responses
+├── db.ts                    # Compiler-only Kysely query builder and D1 helpers
+├── hmac.ts                  # HMAC-SHA-256 signing and keyed ranking
+├── index.ts                 # Worker entrypoint, routing, and cron retention
+├── limits.ts                # Admission, body, undo, and retention constants
+├── pairs.ts                 # Blind pair selection, skips, and batches
+├── previews.ts              # Authenticated HTML preview responses
+├── retention.ts             # Daily pruning of old pending pairs and network tags
+├── schema.ts                # Kysely Database interface mirroring web/migrations/
+├── test/                    # Miniflare setup and Worker test helpers
+└── votes.ts                 # Vote recording, confirmation, batch votes, and undo
+```
+
 ## Comments
 
 Use `/** */` TSDoc for comments on declarations and members so editors show them on hover. Use `//` inside function bodies.
 
 ## Reports
 
-The site reads committed public families, system labels and reports. Nothing from the private data directory may enter a build. Keep the strict Pydantic and Zod report schemas in step, including nullability and public identity.
+The site reads committed public families, system labels, and reports. Nothing from the private data directory may enter a build. Keep the strict Pydantic and Zod report schemas in step, including nullability and public identity.
 
 Browser validation uses `zod/mini`. Classic Zod probes `eval`, which violates the page CSP, so classic schema construction stays in the content loaders and their schema modules. Other consumers import their types.
 
@@ -37,16 +54,16 @@ Dispatch scorer and render behavior through the shared registries, including met
 
 ## Components
 
-- Add shadcn/ui components with `pnpm exec shadcn add <component>` from `web/`, then adjust the committed copy. Preserve keyboard behavior, available-space limits and control contrast.
-- Prefer component variants and Tailwind utilities, with raw CSS reserved for theme tokens. Shared appearances have one component, variant or class constant.
+- Add shadcn/ui components with `pnpm exec shadcn add <component>` from `web/`, then adjust the committed copy. Preserve keyboard behavior, available-space limits, and control contrast.
+- Prefer component variants and Tailwind utilities, with raw CSS reserved for theme tokens. Shared appearances have one component, variant, or class constant.
 - Keep running text within `measure` and page blocks `stack` apart. Use flex `gap` between stacked blocks because Astro's `display: contents` island wrappers break sibling-margin spacing.
-- Hydrate only interactive components and keep island props serializable. Filters use `useSearchParam`. Choices carrying different datasets, such as closed rounds, use static routes so each page carries only its own data.
+- Hydrate only interactive components and keep island props serializable. Filters use `useSearchParam`. Choices carrying different datasets use static routes so each page carries only its own data.
 
 ## Charts
 
-Use `PlotFigure` and the shared chart primitives for responsive sizing, measured label margins, marks and axes. Derive point-plot domains consistently and show clipped outliers. Closed rounds use their frozen method, rules and public identities.
+Use `PlotFigure` and the shared chart primitives for responsive sizing, measured label margins, marks, and axes. Derive point-plot domains consistently and show clipped outliers. Closed rounds use their frozen method, rules, and public identities.
 
-Use `logTicks` with the axis mark's `text` option because Plot's default log formatter blanks labels on spans under a decade. Take colors from CSS variables. Recheck lightness, chroma, color-vision separation and contrast in both themes before changing the series and emphasis hues.
+Use `logTicks` with the axis mark's `text` option because Plot's default log formatter blanks labels on spans under a decade. Take colors from CSS variables. Recheck lightness, chroma, color-vision separation, and contrast in both themes before changing the series and emphasis hues.
 
 Every chart needs a table twin with the same values, and tooltips may show only values available there. Static point plots can serve as their own table. [Site](../design/site.md) owns presentation and interaction requirements.
 
@@ -54,4 +71,4 @@ Every chart needs a table twin with the same values, and tooltips may show only 
 
 The client and routes share the API schemas in `lib/arena.ts`. Use `zod/mini` as a namespace import, since its named `z` export retains the full Zod bundle. Keep bindings generated from `web/wrangler.toml` out of version control.
 
-A write that must not interleave with another is one SQL statement or one D1 batch, which D1 executes transactionally. [Arena](../design/arena.md) owns admission, fixed error responses, blinding and schema evolution. [Site](../design/site.md#the-vote-page) owns the voting interaction.
+Build Worker queries with Kysely through `web/worker/db.ts` against the `Database` interface in `web/worker/schema.ts`, which `web/worker/schema.test.ts` checks for parity against `web/migrations/`. A write that must not interleave with another is one SQL statement or one D1 batch, which D1 executes transactionally. [Arena](../design/arena.md) owns admission, fixed error responses, blinding, and schema evolution. [Site](../design/site.md#the-vote-page) owns the voting interaction.
