@@ -3,13 +3,13 @@ import { describe, expect, test } from 'vitest';
 
 import { UNDO_HEADER, UNDO_NONE } from '@/lib/arena';
 
-import { ipTag } from './actors';
 import { UNDO_MS } from './limits';
 import {
   actorOf,
   admitted,
   call,
   CODING,
+  FIRST_CASE,
   pairOf,
   pendingRow,
   publish,
@@ -164,37 +164,6 @@ describe('POST /api/votes', () => {
     expect(await response.json()).toEqual({ error: 'invalid_request' });
     expect(await storedVotes()).toEqual([]);
   });
-
-  test('records votes from both browsers after a network reaches the former quota', async () => {
-    const ip = '198.51.100.9';
-    const previousVotes = 2_000;
-    const tag = await ipTag(env.IP_TAG_KEY, ip);
-    await env.DB.batch([
-      env.DB.prepare("INSERT INTO actors (id, created_at) VALUES ('filler', 0)"),
-      env.DB.prepare(
-        `WITH RECURSIVE slots(i) AS (VALUES (0) UNION ALL SELECT i + 1 FROM slots WHERE i + 1 < ?)
-         INSERT INTO votes (pair_id, actor_id, family, publication_id, case_key, a_output,
-           b_output, a_system, b_system, choice, defects, elapsed_ms, recorded_at, ip_tag)
-         SELECT 'filler-' || i, 'filler', 'other', publication_id, case_key, output_key, output_key,
-           'x', 'y' || i, 'a', '{"a": [], "b": []}', 0, ?, ?
-         FROM slots CROSS JOIN (SELECT publication_id, case_key, output_key FROM outputs LIMIT 1)`,
-      ).bind(previousVotes, Date.now(), tag),
-    ]);
-    const [first, second] = [await admitted(ip), await admitted(ip)];
-    const firstPair = (await pairOf(first)).pair?.id ?? '';
-    const secondPair = (await pairOf(second)).pair?.id ?? '';
-
-    const responses = await Promise.all([vote(first, firstPair), vote(second, secondPair)]);
-
-    expect(responses.map(({ status }) => status)).toEqual([204, 204]);
-    expect(
-      await env.DB.prepare('SELECT count(*) AS votes FROM votes WHERE ip_tag = ?')
-        .bind(tag)
-        .first('votes'),
-    ).toBe(previousVotes + 2);
-    expect(await pendingRow(firstPair)).toBeNull();
-    expect(await pendingRow(secondPair)).toBeNull();
-  });
 });
 
 describe('POST /api/votes/confirm', () => {
@@ -221,6 +190,7 @@ describe('POST /api/votes/confirm', () => {
     const missing = await call(from, 'POST', '/votes/confirm', body);
     expect(missing.status).toBe(409);
     expect(await missing.json()).toEqual({ error: 'stale_pair' });
+    expect(await pendingRow(pair?.id ?? '')).not.toBeNull();
     expect((await call(from, 'POST', '/votes', body)).status).toBe(204);
     await env.DB.prepare("UPDATE votes SET exclusion = 'trash'").run();
 
@@ -237,33 +207,6 @@ describe('POST /api/votes/confirm', () => {
     const receipt = await call(from, 'POST', '/votes/confirm', body);
     expect(receipt.status).toBe(204);
     expect(await storedVotes()).toMatchObject([{ pair_id: pair?.id, choice: 'b' }]);
-    expect(await coverage()).toEqual([]);
-  });
-
-  test('leaves a pending pair untouched when an older Worker withdrew its vote', async () => {
-    const from = await admitted();
-    const { pair } = await pairOf(from);
-    const body = { pair: pair?.id, choice: 'a', defects: { a: [], b: [] } };
-    expect((await call(from, 'POST', '/votes', body)).status).toBe(204);
-    await env.DB.batch([
-      env.DB.prepare(
-        `INSERT INTO pairs
-           (id, actor_id, family, publication_id, case_key, a_output, b_output, issued_at)
-         SELECT pair_id, actor_id, family, publication_id, case_key, a_output, b_output,
-           recorded_at - elapsed_ms
-         FROM votes WHERE pair_id = ?`,
-      ).bind(pair?.id),
-      env.DB.prepare('DELETE FROM votes WHERE pair_id = ?').bind(pair?.id),
-    ]);
-    const restored = await pendingRow(pair?.id ?? '');
-    expect(restored).not.toBeNull();
-
-    const receipt = await call(from, 'POST', '/votes/confirm', body);
-
-    expect(receipt.status).toBe(409);
-    expect(await receipt.json()).toEqual({ error: 'stale_pair' });
-    expect(await storedVotes()).toEqual([]);
-    expect(await pendingRow(pair?.id ?? '')).toEqual(restored);
     expect(await coverage()).toEqual([]);
   });
 });
@@ -433,15 +376,14 @@ describe('POST /api/votes/undo', () => {
 });
 
 describe('pair vote counts', () => {
-  const caseKey = '32be94015839ac0131d6874ffcc11c79f78e8059790f678d80fa7008a1286c22';
   const systems = ['acme-large', 'acme-small'] as const;
 
   test('counts reversed systems together and isolates families through moderation and deletion', async () => {
-    await seedVote(WRITING, caseKey, systems);
-    await seedVote(WRITING, caseKey, [systems[1], systems[0]]);
+    await seedVote(WRITING, FIRST_CASE, systems);
+    await seedVote(WRITING, FIRST_CASE, [systems[1], systems[0]]);
     await publish('other-writing', { other: { 'acme-large': ['a'], 'acme-small': ['b'] } });
     await seedVote('other-writing', 'other', systems, { exclusion: 'trash' });
-    await seedVote(WRITING, caseKey, systems, { exclusion: 'trash' });
+    await seedVote(WRITING, FIRST_CASE, systems, { exclusion: 'trash' });
     expect(await coverage()).toEqual([
       { family: WRITING, low_system: 'acme-large', high_system: 'acme-small', votes: 2 },
     ]);

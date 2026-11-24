@@ -1,6 +1,5 @@
 import { env } from 'cloudflare:workers';
-import { Hono } from 'hono';
-import { setSignedCookie } from 'hono/cookie';
+import { generateSignedCookie } from 'hono/cookie';
 import { exportJWK, generateKeyPair, SignJWT, UnsecuredJWT, type JWK } from 'jose';
 import { assert, beforeAll, describe, expect, test, vi } from 'vitest';
 
@@ -9,7 +8,8 @@ import { UNDO_HEADER, type PairState } from '@/lib/arena';
 import { verifyOwner } from './access';
 import { app } from './index';
 import { ACTOR_MAX_AGE_MS } from './limits';
-import { publish, WRITING } from './test/support';
+import { PREVIEW_UNAVAILABLE } from './previews';
+import { expectIsolation, publish, WRITING } from './test/support';
 
 const ORIGIN = 'https://private.example.com' as Cloudflare.PrivateEnv['APP_ORIGIN'];
 const OWNER = '00000000-0000-4000-8000-000000000001';
@@ -113,6 +113,11 @@ function deployment() {
 }
 
 function expectPrivate(response: Response, preview = false) {
+  if (preview) {
+    expectIsolation(response, ["frame-ancestors 'self'"]);
+    return;
+  }
+
   expect(response.headers.get('Cache-Control')).toBe('no-store');
   expect(response.headers.get('X-Frame-Options')).toBe('SAMEORIGIN');
   const policy = response.headers
@@ -122,39 +127,16 @@ function expectPrivate(response: Response, preview = false) {
   expect(policy?.filter((directive) => directive.startsWith('frame-ancestors'))).toEqual([
     "frame-ancestors 'self'",
   ]);
-  if (preview) {
-    expect(policy).toEqual(
-      expect.arrayContaining([
-        'sandbox',
-        "default-src 'none'",
-        "style-src 'unsafe-inline'",
-        'img-src data:',
-        'font-src data:',
-        "connect-src 'none'",
-        "form-action 'none'",
-        "base-uri 'none'",
-        "object-src 'none'",
-        "frame-src 'none'",
-      ]),
-    );
-    expect(response.headers.get('Referrer-Policy')).toBe('no-referrer');
-    expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff');
-    expect(response.headers.get('X-DNS-Prefetch-Control')).toBe('off');
-  }
 }
 
 async function cookieFor(actor: string) {
-  const signer = new Hono().get('/', async (c) => {
-    await setSignedCookie(c, 'bench-actor', actor, 'test-private-actor-key', {
-      prefix: 'host',
-      path: '/',
-      secure: true,
-      httpOnly: true,
-      sameSite: 'Strict',
-    });
-    return c.text('Signed synthetic actor.');
+  const signed = await generateSignedCookie('__Host-bench-actor', actor, 'test-private-actor-key', {
+    path: '/',
+    secure: true,
+    httpOnly: true,
+    sameSite: 'Strict',
   });
-  return (await signer.request(ORIGIN)).headers.get('Set-Cookie')?.split(';')[0] ?? '';
+  return signed.split(';')[0];
 }
 
 describe('verifyOwner', () => {
@@ -194,53 +176,51 @@ describe('verifyOwner', () => {
     expect(await verifyOwner(fixture.request(token), fixture.settings)).toBe(false);
   });
 
-  test.each(['unsigned', 'wrong signature', 'symmetric algorithm', 'Bearer prefix'])(
-    'rejects %s without trusting JWT metadata',
-    async (scenario) => {
-      const fixture = deployment();
-      const claims = fixture.claims();
-      const token =
-        scenario === 'unsigned'
-          ? new UnsecuredJWT(claims).encode()
-          : scenario === 'wrong signature'
-            ? await new SignJWT(claims)
-                .setProtectedHeader({
-                  alg: 'RS256',
-                  kid: 'primary',
-                  jku: 'https://other.example.com/keys',
-                })
-                .sign(rotated.privateKey)
-            : scenario === 'symmetric algorithm'
-              ? await new SignJWT(claims)
-                  .setProtectedHeader({ alg: 'HS256', kid: 'primary' })
-                  .sign(new TextEncoder().encode('synthetic-symmetric-signing-key'))
-              : `Bearer ${await fixture.token()}`;
+  test.each<readonly [string, (fixture: ReturnType<typeof deployment>) => Promise<string>]>([
+    ['unsigned', (fixture) => Promise.resolve(new UnsecuredJWT(fixture.claims()).encode())],
+    [
+      'wrong signature',
+      (fixture) =>
+        new SignJWT(fixture.claims())
+          .setProtectedHeader({
+            alg: 'RS256',
+            kid: 'primary',
+            jku: 'https://other.example.com/keys',
+          })
+          .sign(rotated.privateKey),
+    ],
+    [
+      'symmetric algorithm',
+      (fixture) =>
+        new SignJWT(fixture.claims())
+          .setProtectedHeader({ alg: 'HS256', kid: 'primary' })
+          .sign(new TextEncoder().encode('synthetic-symmetric-signing-key')),
+    ],
+    ['Bearer prefix', async (fixture) => `Bearer ${await fixture.token()}`],
+  ])('rejects %s without trusting JWT metadata', async (_, makeToken) => {
+    const fixture = deployment();
 
-      expect(await verifyOwner(fixture.request(token), fixture.settings)).toBe(false);
-    },
-  );
+    expect(await verifyOwner(fixture.request(await makeToken(fixture)), fixture.settings)).toBe(
+      false,
+    );
+  });
 
-  test.each(['Cf-Access-Authenticated-User-Email', 'Authorization', 'Cookie'])(
-    'ignores %s as an alternative to the raw assertion header',
-    async (header) => {
-      const fixture = deployment();
-      const token = await fixture.token();
-      const value =
-        header === 'Cookie'
-          ? `CF_Authorization=${token}`
-          : header === 'Authorization'
-            ? `Bearer ${token}`
-            : EMAILS[0];
+  test.each<readonly [string, (token: string) => string]>([
+    ['Cf-Access-Authenticated-User-Email', () => EMAILS[0]],
+    ['Authorization', (token) => `Bearer ${token}`],
+    ['Cookie', (token) => `CF_Authorization=${token}`],
+  ])('ignores %s as an alternative to the raw assertion header', async (header, makeValue) => {
+    const fixture = deployment();
+    const token = await fixture.token();
 
-      const verified = await verifyOwner(
-        new Request(ORIGIN, { headers: { [header]: value } }),
-        fixture.settings,
-      );
+    const verified = await verifyOwner(
+      new Request(ORIGIN, { headers: { [header]: makeValue(token) } }),
+      fixture.settings,
+    );
 
-      expect(verified).toBe(false);
-      expect(fixture.fetched).not.toHaveBeenCalled();
-    },
-  );
+    expect(verified).toBe(false);
+    expect(fixture.fetched).not.toHaveBeenCalled();
+  });
 
   test('rejects another RSA algorithm even when its public key is in the trusted key set', async () => {
     const fixture = deployment();
@@ -257,35 +237,36 @@ describe('verifyOwner', () => {
     expect(await verifyOwner(fixture.request(token), fixture.settings)).toBe(false);
   });
 
-  test.each([
-    'not JSON',
-    '["first@example.com"]',
-    '["first@example.com","second@example.com","third@example.com"]',
-    '["first@example.com","invalid"]',
-  ])('fails closed for invalid owner configuration %s', async (owners) => {
+  test('accepts a single configured owner email', async () => {
     const fixture = deployment();
-    fixture.settings.PRIVATE_OWNER_EMAILS = owners;
+    fixture.settings.PRIVATE_OWNER_EMAILS = JSON.stringify(['alice@example.com']);
+    const token = await fixture.token({ email: 'alice@example.com' });
 
-    expect(await verifyOwner(fixture.request(await fixture.token()), fixture.settings)).toBe(false);
+    expect(await verifyOwner(fixture.request(token), fixture.settings)).toBe(true);
   });
 
-  test.each(['unavailable', 'malformed', 'redirect'])(
-    'fails closed when the trusted key endpoint is %s',
-    async (scenario) => {
+  test.each(['not JSON', '[]', '["first@example.com","invalid"]'])(
+    'fails closed for invalid owner configuration %s',
+    async (owners) => {
       const fixture = deployment();
-      fixture.fetched.mockResolvedValueOnce(
-        scenario === 'unavailable'
-          ? new Response(null, { status: 503 })
-          : scenario === 'redirect'
-            ? Response.redirect('https://other.example.com/keys')
-            : Response.json({ keys: 'invalid' }),
-      );
+      fixture.settings.PRIVATE_OWNER_EMAILS = owners;
 
       expect(await verifyOwner(fixture.request(await fixture.token()), fixture.settings)).toBe(
         false,
       );
     },
   );
+
+  test.each<readonly [string, () => Response]>([
+    ['unavailable', () => new Response(null, { status: 503 })],
+    ['malformed', () => Response.json({ keys: 'invalid' })],
+    ['redirect', () => Response.redirect('https://other.example.com/keys')],
+  ])('fails closed when the trusted key endpoint is %s', async (_, makeResponse) => {
+    const fixture = deployment();
+    fixture.fetched.mockResolvedValueOnce(makeResponse());
+
+    expect(await verifyOwner(fixture.request(await fixture.token()), fixture.settings)).toBe(false);
+  });
 
   test('caches trusted keys, refreshes a rotated key after cooldown, and expires retired keys', async () => {
     const fixture = deployment();
@@ -329,7 +310,11 @@ describe('private request admission', () => {
       });
 
       expect(response.status).toBe(403);
-      expectPrivate(response, path.startsWith('/api/previews/'));
+      const preview = path.startsWith('/api/previews/');
+      expectPrivate(response, preview);
+      if (preview) {
+        expect(await response.text()).toBe(PREVIEW_UNAVAILABLE);
+      }
       expect(fixture.assets).not.toHaveBeenCalled();
       expect(prepare).not.toHaveBeenCalled();
     },
@@ -369,34 +354,32 @@ describe('private request admission', () => {
     },
   );
 
-  test.each(['missing', 'unsigned', 'tampered', 'another actor', 'absent from database'])(
-    'requires a page reload for a %s actor cookie, even with valid Access',
-    async (scenario) => {
-      const fixture = deployment();
-      const admitted = await fixture.send('/vote/', await fixture.token());
-      const valid = admitted.headers.get('Set-Cookie')?.split(';')[0];
-      let cookie = valid;
-      if (scenario === 'missing') {
-        cookie = undefined;
-      } else if (scenario === 'unsigned') {
-        cookie = `__Host-bench-actor=${OWNER}`;
-      } else if (scenario === 'tampered') {
-        cookie = `${valid ?? ''}x`;
-      } else if (scenario === 'another actor') {
-        cookie = await cookieFor('00000000-0000-4000-8000-000000000002');
-      } else {
+  test.each<readonly [string, (valid: string | undefined) => Promise<string | undefined>]>([
+    ['missing', () => Promise.resolve(undefined)],
+    ['unsigned', () => Promise.resolve(`__Host-bench-actor=${OWNER}`)],
+    ['tampered', (valid) => Promise.resolve(`${valid ?? ''}x`)],
+    ['another actor', () => cookieFor('00000000-0000-4000-8000-000000000002')],
+    [
+      'absent from database',
+      async (valid) => {
         await env.DB.prepare('DELETE FROM actors').run();
-      }
+        return valid;
+      },
+    ],
+  ])('requires a page reload for a %s actor cookie, even with valid Access', async (_, arrange) => {
+    const fixture = deployment();
+    const admitted = await fixture.send('/vote/', await fixture.token());
+    const valid = admitted.headers.get('Set-Cookie')?.split(';')[0];
+    const cookie = await arrange(valid);
 
-      const response = await fixture.send(`/api/pair?family=${WRITING}`, await fixture.token(), {
-        cookie,
-      });
+    const response = await fixture.send(`/api/pair?family=${WRITING}`, await fixture.token(), {
+      cookie,
+    });
 
-      expect(response.status).toBe(401);
-      expectPrivate(response);
-      expect(await response.json()).toEqual({ error: 'reload_required' });
-    },
-  );
+    expect(response.status).toBe(401);
+    expectPrivate(response);
+    expect(await response.json()).toEqual({ error: 'reload_required' });
+  });
 
   test.each([
     ['/api/families', 'GET'],
@@ -531,6 +514,7 @@ describe('private request admission', () => {
     expect(await success.text()).toContain('<h1>');
     expect(missingCookie.status).toBe(401);
     expect(missingAccess.status).toBe(403);
+    expect(await missingAccess.text()).toBe(PREVIEW_UNAVAILABLE);
     expect(notFound.status).toBe(404);
     for (const response of [success, missingCookie, missingAccess, notFound]) {
       expectPrivate(response, true);

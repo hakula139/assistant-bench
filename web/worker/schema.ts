@@ -3,13 +3,18 @@ import type { Generated } from 'kysely';
 import type { Choice, PairView } from '@/lib/arena';
 import type { Category } from '@/lib/categories';
 
-/**
- * Vote-store tables and views across `web/migrations/*.sql`.
- *
- * Keep each table and view as an inline `name: { ... };` block: `schema.test.ts` parses this
- * interface directly to check table column names, types, nullability, and defaults, and view names
- * and columns, against the migrated D1 schema.
- */
+interface PairColumns {
+  id: string;
+  actor_id: string;
+  family: string;
+  publication_id: string;
+  case_key: string;
+  a_output: string;
+  b_output: string;
+  issued_at: number;
+}
+
+/** Vote-store tables and views across `web/migrations/*.sql`. */
 export interface Database {
   publications: {
     id: string;
@@ -56,16 +61,7 @@ export interface Database {
     created_at: number;
     ip_tag: string | null;
   };
-  pairs: {
-    id: string;
-    actor_id: string;
-    family: string;
-    publication_id: string;
-    case_key: string;
-    a_output: string;
-    b_output: string;
-    issued_at: number;
-  };
+  pairs: PairColumns;
   votes: {
     id: Generated<number>;
     pair_id: string;
@@ -96,26 +92,10 @@ export interface Database {
     high_system: string;
     case_keys: string;
   };
-  batch_pairs: {
-    id: string;
-    actor_id: string;
-    family: string;
-    publication_id: string;
-    case_key: string;
-    a_output: string;
-    b_output: string;
-    issued_at: number;
+  batch_pairs: PairColumns & {
     position: number;
   };
-  pending_pairs: {
-    id: string;
-    actor_id: string;
-    family: string;
-    publication_id: string;
-    case_key: string;
-    a_output: string;
-    b_output: string;
-    issued_at: number;
+  pending_pairs: PairColumns & {
     position: number;
     batched: 0 | 1;
   };

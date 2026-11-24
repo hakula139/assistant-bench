@@ -4,7 +4,17 @@ import type { PairState, PairView } from '@/lib/arena';
 import type { Defect } from '@/lib/defects';
 
 import { ApiError } from './api';
-import { all, batch, first, queries } from './db';
+import {
+  all,
+  batch,
+  first,
+  onActivePair,
+  onPairOutputA,
+  onPairOutputB,
+  PAIR_COLUMNS,
+  queries,
+  upsertPair,
+} from './db';
 import { hex, signer } from './hmac';
 import { UNDO_MS } from './limits';
 import type { Database } from './schema';
@@ -21,7 +31,6 @@ interface CandidateGroup {
   caseKeys: readonly string[];
 }
 
-/** A case and the outputs shown as A and B. */
 interface Drawn {
   caseKey: string;
   a: string;
@@ -57,16 +66,8 @@ function pendingQuery(actor: string, family: string) {
         .onRef('cases.publication_id', '=', 'pairs.publication_id')
         .onRef('cases.case_key', '=', 'pairs.case_key'),
     )
-    .innerJoin('outputs as a', (join) =>
-      join
-        .onRef('a.publication_id', '=', 'pairs.publication_id')
-        .onRef('a.output_key', '=', 'pairs.a_output'),
-    )
-    .innerJoin('outputs as b', (join) =>
-      join
-        .onRef('b.publication_id', '=', 'pairs.publication_id')
-        .onRef('b.output_key', '=', 'pairs.b_output'),
-    )
+    .innerJoin('outputs as a', onPairOutputA)
+    .innerJoin('outputs as b', onPairOutputB)
     .select([
       'pairs.id',
       'pairs.publication_id',
@@ -100,15 +101,7 @@ function pendingQuery(actor: string, family: string) {
 function actorVotesQuery(actor: string, family: string) {
   return queries
     .selectFrom('votes')
-    .select((eb) => [
-      'id',
-      'pair_id',
-      'case_key',
-      'a_system',
-      'b_system',
-      sql<number>`${eb.ref('exclusion')} IS NULL`.as('counted'),
-      'recorded_at',
-    ])
+    .select(['id', 'pair_id', 'case_key', 'a_system', 'b_system', 'exclusion', 'recorded_at'])
     .where('actor_id', '=', actor)
     .where('family', '=', family);
 }
@@ -154,7 +147,7 @@ function canIssue(
     eb.exists(
       eb
         .selectFrom('active')
-        .select(sql<1>`1`.as('ok'))
+        .select(eb.lit(1).as('ok'))
         .where('family', '=', family)
         .where('publication_id', '=', publication),
     ),
@@ -163,7 +156,7 @@ function canIssue(
       eb.exists(
         eb
           .selectFrom('batch_pairs')
-          .select(sql<1>`1`.as('ok'))
+          .select(eb.lit(1).as('ok'))
           .where('actor_id', '=', actor)
           .where('family', '=', family)
           .where('publication_id', '=', publication),
@@ -183,45 +176,21 @@ function issueQuery(
   id: string,
   drawn: Drawn,
 ) {
-  return queries
-    .insertInto('pairs')
-    .columns([
-      'id',
-      'actor_id',
-      'family',
-      'publication_id',
-      'case_key',
-      'a_output',
-      'b_output',
-      'issued_at',
-    ])
-    .expression(
-      queries
-        .selectNoFrom((eb) => [
-          eb.val(id).as('id'),
-          eb.val(actor).as('actor_id'),
-          eb.val(family).as('family'),
-          eb.val(publication).as('publication_id'),
-          eb.val(drawn.caseKey).as('case_key'),
-          eb.val(drawn.a).as('a_output'),
-          eb.val(drawn.b).as('b_output'),
-          eb.val(now).as('issued_at'),
-        ])
-        .where(() => canIssue(actor, family, publication, storedPair, voteCut)),
-    )
-    .onConflict((oc) =>
-      oc
-        .columns(['actor_id', 'family'])
-        .doUpdateSet((eb) => ({
-          id: eb.ref('excluded.id'),
-          publication_id: eb.ref('excluded.publication_id'),
-          case_key: eb.ref('excluded.case_key'),
-          a_output: eb.ref('excluded.a_output'),
-          b_output: eb.ref('excluded.b_output'),
-          issued_at: eb.ref('excluded.issued_at'),
-        }))
-        .whereRef('pairs.publication_id', '<>', 'excluded.publication_id'),
-    );
+  return upsertPair(
+    queries
+      .selectNoFrom((eb) => [
+        eb.val(id).as('id'),
+        eb.val(actor).as('actor_id'),
+        eb.val(family).as('family'),
+        eb.val(publication).as('publication_id'),
+        eb.val(drawn.caseKey).as('case_key'),
+        eb.val(drawn.a).as('a_output'),
+        eb.val(drawn.b).as('b_output'),
+        eb.val(now).as('issued_at'),
+      ])
+      .where(() => canIssue(actor, family, publication, storedPair, voteCut)),
+    true,
+  );
 }
 
 function issueBatchQuery(
@@ -235,30 +204,20 @@ function issueBatchQuery(
 ) {
   return queries
     .insertInto('batch_pairs')
-    .columns([
-      'id',
-      'actor_id',
-      'family',
-      'publication_id',
-      'case_key',
-      'a_output',
-      'b_output',
-      'issued_at',
-      'position',
-    ])
+    .columns([...PAIR_COLUMNS, 'position'])
     .expression((eb) =>
       eb
         .selectFrom(
           sql<{ key: number; value: string }>`json_each(${JSON.stringify(rows)})`.as('slot'),
         )
         .select((sub) => [
-          sql<string>`json_extract(${sub.ref('slot.value')}, '$.id')`.as('id'),
+          sub.fn<string>('json_extract', ['slot.value', sub.val('$.id')]).as('id'),
           sub.val(actor).as('actor_id'),
           sub.val(family).as('family'),
           sub.val(publication).as('publication_id'),
-          sql<string>`json_extract(${sub.ref('slot.value')}, '$.caseKey')`.as('case_key'),
-          sql<string>`json_extract(${sub.ref('slot.value')}, '$.a')`.as('a_output'),
-          sql<string>`json_extract(${sub.ref('slot.value')}, '$.b')`.as('b_output'),
+          sub.fn<string>('json_extract', ['slot.value', sub.val('$.caseKey')]).as('case_key'),
+          sub.fn<string>('json_extract', ['slot.value', sub.val('$.a')]).as('a_output'),
+          sub.fn<string>('json_extract', ['slot.value', sub.val('$.b')]).as('b_output'),
           sub.val(now).as('issued_at'),
           'slot.key as position',
         ])
@@ -296,22 +255,14 @@ function replaceQuery(
       eb.not(
         eb.exists(
           eb
-            .selectFrom('pending_pairs as other')
-            .innerJoin('outputs as a', (join) =>
-              join
-                .onRef('a.publication_id', '=', 'other.publication_id')
-                .onRef('a.output_key', '=', 'other.a_output'),
-            )
-            .innerJoin('outputs as b', (join) =>
-              join
-                .onRef('b.publication_id', '=', 'other.publication_id')
-                .onRef('b.output_key', '=', 'other.b_output'),
-            )
-            .select(sql<1>`1`.as('ok'))
-            .where('other.actor_id', '=', actor)
-            .whereRef('other.family', '=', 'chosen.family')
-            .whereRef('other.publication_id', '=', 'chosen.publication_id')
-            .where('other.case_key', '=', drawn.caseKey)
+            .selectFrom('pending_pairs as pairs')
+            .innerJoin('outputs as a', onPairOutputA)
+            .innerJoin('outputs as b', onPairOutputB)
+            .select(eb.lit(1).as('ok'))
+            .where('pairs.actor_id', '=', actor)
+            .whereRef('pairs.family', '=', 'chosen.family')
+            .whereRef('pairs.publication_id', '=', 'chosen.publication_id')
+            .where('pairs.case_key', '=', drawn.caseKey)
             .where('a.system', 'in', [lowSystem, highSystem])
             .where('b.system', 'in', [lowSystem, highSystem]),
         ),
@@ -322,18 +273,22 @@ function replaceQuery(
         eb.exists(
           eb
             .selectFrom('votes')
-            .select(sql<1>`1`.as('ok'))
+            .select(eb.lit(1).as('ok'))
             .where('actor_id', '=', actor)
             .whereRef('family', '=', 'chosen.family')
             .where('case_key', '=', drawn.caseKey)
             .where((sub) =>
-              sub(sql<string>`min(${sub.ref('a_system')}, ${sub.ref('b_system')})`, '=', lowSystem),
+              sub(
+                sub.fn<string>('min', ['a_system', 'b_system']),
+                '=',
+                sub.fn<string>('min', [sub.val(lowSystem), sub.val(highSystem)]),
+              ),
             )
             .where((sub) =>
               sub(
-                sql<string>`max(${sub.ref('a_system')}, ${sub.ref('b_system')})`,
+                sub.fn<string>('max', ['a_system', 'b_system']),
                 '=',
-                highSystem,
+                sub.fn<string>('max', [sub.val(lowSystem), sub.val(highSystem)]),
               ),
             ),
         ),
@@ -354,7 +309,6 @@ export function ranker(actorKey: string, actor: string, family: string): Rank {
   return async (...parts) => hex(await sign(key('draw', actor, family, ...parts)));
 }
 
-/** Cases still open to the voter with differing passing samples from both systems. */
 export function candidates(
   facts: readonly PairCasesRow[],
   voted: readonly Pick<ActorVoteRow, 'case_key' | 'a_system' | 'b_system'>[],
@@ -385,13 +339,11 @@ async function ordered<T>(items: readonly T[], rank: (item: T) => Promise<string
     .sort((a, b) => (a.rank < b.rank ? -1 : a.rank > b.rank ? 1 : 0));
 }
 
-/** One system pair's cases in the voter's order. */
 async function caseOrder(rank: Rank, { systems, caseKeys }: CandidateGroup) {
   const order = await ordered(caseKeys, (caseKey) => rank('case', ...systems, caseKey));
   return order.map(({ item }) => item);
 }
 
-/** The lowest-ranked differing sample pair, with its rank's lowest bit choosing the sides. */
 async function place(
   db: D1Database,
   publication: string,
@@ -402,12 +354,13 @@ async function place(
     db,
     queries
       .selectFrom('outputs')
-      .select(['output_key', 'case_key', 'system', 'content_digest'])
+      .select(['output_key', 'system', 'content_digest'])
       .where('publication_id', '=', publication)
       .where('case_key', '=', caseKey)
       .where('system', 'in', [lowSystem, highSystem])
       .where('verdict', '=', 'pass'),
   );
+
   const lows = outputs.filter(({ system }) => system === lowSystem);
   const highs = outputs.filter(({ system }) => system === highSystem);
   const samples = lows.flatMap((a) =>
@@ -425,10 +378,7 @@ async function place(
   };
 }
 
-/**
- * The first case, in the voter's order, of the system pair with the fewest counted votes in the
- * family, ties going to the voter's order of system pairs. `groups` must not be empty.
- */
+/** Requires non-empty `groups`. */
 export async function draw(
   rank: Rank,
   groups: ReadonlyMap<string, CandidateGroup>,
@@ -448,7 +398,6 @@ export async function draw(
   return { caseKey, systems: group.systems };
 }
 
-/** The case after `current` in the voter's order for one system pair, wrapping around. */
 export async function next(
   rank: Rank,
   group: CandidateGroup | undefined,
@@ -463,10 +412,8 @@ export async function next(
   return caseKey === current ? null : { caseKey, systems: group.systems };
 }
 
-/** An actor's standing in a family, as one batch reads it. */
 interface Standing {
   active: ActiveRow;
-  /** The pending pair, while it belongs to the active publication. */
   pending: PendingRow | undefined;
   offered: PendingRow[];
   storedPair: string | null;
@@ -474,7 +421,6 @@ interface Standing {
   groups: ReadonlyMap<string, CandidateGroup>;
 }
 
-/** Reads the family's active publication, or 404 `no_round`, with the actor's standing in it. */
 async function read(db: D1Database, actor: string, family: string): Promise<Standing> {
   const [activeRows, pendingRows, voteRows, pairRows] = await batch(db, [
     activeQuery(family),
@@ -509,7 +455,7 @@ function latestUndoPair(voted: ActorVoteRow[], now: number): string | null {
   let latest: ActorVoteRow | undefined;
   for (const vote of voted) {
     if (
-      vote.counted &&
+      vote.exclusion === null &&
       vote.recorded_at > now - UNDO_MS &&
       (latest === undefined || vote.id > latest.id)
     ) {
@@ -517,6 +463,19 @@ function latestUndoPair(voted: ActorVoteRow[], now: number): string | null {
     }
   }
   return latest?.pair_id ?? null;
+}
+
+function pairView(active: ActiveRow, pending: PendingRow): PairView {
+  return {
+    id: pending.id,
+    instruction: pending.instruction,
+    checklist: JSON.parse(pending.checklist) as string[],
+    category: pending.category,
+    ...(active.render === 'html'
+      ? { render: active.render }
+      : { render: active.render, a: pending.a, b: pending.b }),
+    defects: JSON.parse(active.defects) as Defect[],
+  };
 }
 
 function view(
@@ -534,25 +493,13 @@ function view(
   return { state, undoPair };
 }
 
-function pairView(active: ActiveRow, pending: PendingRow): PairView {
-  return {
-    id: pending.id,
-    instruction: pending.instruction,
-    checklist: JSON.parse(pending.checklist) as string[],
-    category: pending.category,
-    ...(active.render === 'html'
-      ? { render: active.render }
-      : { render: active.render, a: pending.a, b: pending.b }),
-    defects: JSON.parse(active.defects) as Defect[],
-  };
-}
-
 function reserve(groups: Map<string, CandidateGroup>, { caseKey, systems }: Comparison) {
   const pairKey = key(...systems);
   const group = groups.get(pairKey);
   if (group === undefined) {
     return;
   }
+
   const caseKeys = group.caseKeys.filter((remaining) => remaining !== caseKey);
   if (caseKeys.length === 0) {
     groups.delete(pairKey);
@@ -580,36 +527,6 @@ async function currentCoverage(db: D1Database, family: string) {
       .where('family', '=', family),
   );
   return new Map(coverage.map(({ low, high, votes }) => [key(...sorted(low, high)), votes]));
-}
-
-/** The actor's pending pair in a family, drawn afresh when it belongs to no active publication. */
-export async function pairState(
-  db: D1Database,
-  actorKey: string,
-  actor: string,
-  family: string,
-  now: number,
-): Promise<PairSnapshot> {
-  const initial = await read(db, actor, family);
-  const publication = initial.active.id;
-  let standing = initial;
-  for (let attempt = 0; attempt < 2; attempt++) {
-    if (standing.pending !== undefined || standing.groups.size === 0) {
-      return view(standing, standing.pending, now);
-    }
-    const issued = await issue(db, actorKey, actor, family, standing, now);
-    if (issued !== undefined) {
-      return issued;
-    }
-
-    if (attempt === 0) {
-      standing = await read(db, actor, family);
-      if (standing.active.id !== publication) {
-        break;
-      }
-    }
-  }
-  throw new ApiError(409, 'stale_pair');
 }
 
 async function issue(
@@ -640,6 +557,36 @@ async function issue(
   return current?.id === id ? view(standing, current, now, undoPair) : undefined;
 }
 
+export async function pairState(
+  db: D1Database,
+  actorKey: string,
+  actor: string,
+  family: string,
+  now: number,
+): Promise<PairSnapshot> {
+  const initial = await read(db, actor, family);
+  const publication = initial.active.id;
+  let standing = initial;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (standing.pending !== undefined || standing.groups.size === 0) {
+      return view(standing, standing.pending, now);
+    }
+
+    const issued = await issue(db, actorKey, actor, family, standing, now);
+    if (issued !== undefined) {
+      return issued;
+    }
+
+    if (attempt === 0) {
+      standing = await read(db, actor, family);
+      if (standing.active.id !== publication) {
+        break;
+      }
+    }
+  }
+  throw new ApiError(409, 'stale_pair');
+}
+
 /** Offers at most one open batch per browser and family. Active receipts remain stable on retry. */
 export async function pairBatch(
   db: D1Database,
@@ -655,6 +602,7 @@ export async function pairBatch(
   if (offered.some(({ batched }) => batched) || offered.length >= count) {
     return existing();
   }
+
   const remaining = available(standing);
   if (remaining.size === 0) {
     return existing();
@@ -670,6 +618,7 @@ export async function pairBatch(
     counts.set(pairKey, (counts.get(pairKey) ?? 0) + 1);
     comparisons.push(comparison);
   }
+
   const rows = await Promise.all(
     comparisons.map(async (comparison) => ({
       id: crypto.randomUUID(),
@@ -687,10 +636,6 @@ export async function pairBatch(
   return current.slice(0, count).map((pair) => pairView(active, pair));
 }
 
-/**
- * Replaces the pending pair with the next case for the same two systems under a new ID, keeping
- * it when that system pair has no other case left.
- */
 export async function skip(
   db: D1Database,
   actorKey: string,
@@ -702,11 +647,7 @@ export async function skip(
     db,
     queries
       .selectFrom('pending_pairs as pairs')
-      .innerJoin('active', (join) =>
-        join
-          .onRef('active.family', '=', 'pairs.family')
-          .onRef('active.publication_id', '=', 'pairs.publication_id'),
-      )
+      .innerJoin('active', onActivePair)
       .select('pairs.family')
       .where('pairs.id', '=', pair)
       .where('pairs.actor_id', '=', actor),
@@ -749,6 +690,7 @@ export async function skip(
   if (replaced.changes === 0) {
     throw new ApiError(409, 'stale_pair');
   }
+
   const nextPair = current.results.find(
     ({ publication_id }) => publication_id === standing.active.id,
   );

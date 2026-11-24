@@ -1,9 +1,9 @@
 import { ApiError } from './api';
-import { first, queries } from './db';
+import { first, onActivePair, queries } from './db';
 
-export const previewUnavailable = 'Preview unavailable. Reload the voting page to try again.';
+export const PREVIEW_UNAVAILABLE = 'Preview unavailable. Reload the voting page to try again.';
 
-export const previewHeaders = {
+export const PREVIEW_HEADERS = {
   'Cache-Control': 'private, no-store',
   'Content-Security-Policy':
     "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'; frame-src 'none'",
@@ -13,7 +13,6 @@ export const previewHeaders = {
   'X-Content-Type-Options': 'nosniff',
 };
 
-/** Reads the selected HTML document only while this actor owns its active pending pair. */
 export async function preview(
   db: D1Database,
   actor: string,
@@ -25,11 +24,7 @@ export async function preview(
     db,
     queries
       .selectFrom('pending_pairs as pairs')
-      .innerJoin('active', (join) =>
-        join
-          .onRef('active.family', '=', 'pairs.family')
-          .onRef('active.publication_id', '=', 'pairs.publication_id'),
-      )
+      .innerJoin('active', onActivePair)
       .innerJoin('publications', (join) =>
         join
           .onRef('publications.id', '=', 'pairs.publication_id')
@@ -44,6 +39,7 @@ export async function preview(
       .where('pairs.id', '=', pair)
       .where('pairs.actor_id', '=', actor),
   );
+
   const content = row?.content ?? null;
   if (content === null) {
     throw new ApiError(404, 'not_found');

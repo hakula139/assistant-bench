@@ -14,7 +14,6 @@ const TAG_BYTES = 16;
 
 const siteverifyResult = z.object({ success: z.boolean(), hostname: z.optional(z.string()) });
 
-/** Keep IPv4 addresses and reduce IPv6 addresses to their /64 network. */
 export function network(address: string): string {
   const halves = address.toLowerCase().split('::');
   if (halves.length === 1 && !address.includes(':')) {
@@ -35,12 +34,10 @@ export function network(address: string): string {
     .join(':')}::/64`;
 }
 
-/** The opaque tag that stands for an address's network in every stored row. */
 export async function ipTag(key: string, address: string): Promise<string> {
   return hex((await signer(key)(network(address))).slice(0, TAG_BYTES));
 }
 
-/** Checks a Turnstile token with Cloudflare, for the hostname this deployment's widget runs on. */
 export async function verifyChallenge(
   env: PublicBindings,
   token: string,
@@ -56,7 +53,6 @@ export async function verifyChallenge(
   }
 }
 
-/** Creates an actor unless its tag already admitted `ACTORS_PER_TAG` browsers in the window. */
 export async function admit(db: D1Database, tag: string, now: number): Promise<string> {
   const id = crypto.randomUUID();
   const { changes } = await run(
@@ -90,7 +86,6 @@ export async function admit(db: D1Database, tag: string, now: number): Promise<s
   return id;
 }
 
-/** Preserves the private owner's identity and original creation time across browsers. */
 export async function admitOwner(db: D1Database, actor: string, now: number): Promise<void> {
   await run(
     db,
@@ -101,7 +96,6 @@ export async function admitOwner(db: D1Database, actor: string, now: number): Pr
   );
 }
 
-/** The actor ID the cookie carries under a valid signature, before any lookup. */
 export async function claimedActor(c: Context<Api>): Promise<string | null> {
   const actor = await getSignedCookie(c, c.env.ACTOR_KEY, COOKIE, 'host');
   return typeof actor === 'string' && actor !== '' ? actor : null;
@@ -118,11 +112,15 @@ export async function issueCookie(c: Context<Api>, actor: string): Promise<void>
   });
 }
 
-/** Whether the claimed actor exists and its cookie has not outlived its lifetime. */
-export async function knownActor(db: D1Database, actor: string | null, now: number) {
+export async function knownActor(
+  db: D1Database,
+  actor: string | null,
+  now: number,
+): Promise<boolean> {
   if (actor === null) {
     return false;
   }
+
   const row = await first(
     db,
     queries
@@ -134,7 +132,7 @@ export async function knownActor(db: D1Database, actor: string | null, now: numb
   return row !== null;
 }
 
-/** The request's actor, or 401 `admission_required`. */
+/** The actor, or 401 `reload_required` in private mode and `admission_required` otherwise. */
 export async function requireActor(c: Context<Api>, now: number): Promise<string> {
   const actor = c.get('claimed');
   if (c.env.STORE === 'private') {
@@ -147,6 +145,7 @@ export async function requireActor(c: Context<Api>, now: number): Promise<string
     }
     return actor;
   }
+
   if (actor === null || !(await knownActor(c.env.DB, actor, now))) {
     throw new ApiError(401, 'admission_required');
   }

@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { describe, expect, test, vi } from 'vitest';
 
-import { pairState, UNDO_HEADER, UNDO_NONE } from '@/lib/arena';
+import { pairState, UNDO_HEADER, UNDO_NONE, type PairState } from '@/lib/arena';
 
 import { candidates, draw, next, ranker, type Rank } from './pairs';
 import {
@@ -9,17 +9,18 @@ import {
   admitted,
   call,
   CODING,
+  duringPlacement,
   pairOf,
   pendingRow,
   publish,
   seedVote,
+  systemsOf,
   vote,
   WRITING,
 } from './test/support';
 
 const SYNTHETIC = 'writing-synthetic';
 
-/** Three systems with differing outputs on each of `count` cases. */
 function threeWay(count: number) {
   return Object.fromEntries(
     Array.from({ length: count }, (_, index) => [
@@ -31,35 +32,6 @@ function threeWay(count: number) {
       },
     ]),
   );
-}
-
-const systemsOf = (row: { a_system: string; b_system: string } | null) =>
-  row === null ? null : [row.a_system, row.b_system].sort();
-
-/** Runs another request while the first pair draw is still placing its samples. */
-function duringPlacement(action: () => Promise<void>) {
-  const prepare = env.DB.prepare.bind(env.DB);
-  let interrupted = false;
-  vi.spyOn(env.DB, 'prepare').mockImplementation((query) => {
-    const statement = prepare(query);
-    if (query.includes('"system" in (?, ?)')) {
-      const bind = statement.bind.bind(statement);
-      vi.spyOn(statement, 'bind').mockImplementation((...values) => {
-        const bound = bind(...values);
-        const all = bound.all.bind(bound);
-        vi.spyOn(bound, 'all').mockImplementation(async <T>() => {
-          const result = await all<T>();
-          if (!interrupted) {
-            interrupted = true;
-            await action();
-          }
-          return result;
-        });
-        return bound;
-      });
-    }
-    return statement;
-  });
 }
 
 describe('candidates', () => {
@@ -356,13 +328,48 @@ describe('GET /api/pair', () => {
     expect(first.pair?.id).toBe(second);
   });
 
-  test.each([
-    ['exhausted', CODING, 0, false],
-    ['with another draw available', WRITING, 2, false],
-    ['with a new pending pair', WRITING, 2, true],
-  ] as const)(
+  test.each<
+    readonly [
+      string,
+      string,
+      number,
+      boolean,
+      (late: PairState, voted: string | undefined, following: string | undefined) => void,
+    ]
+  >([
+    [
+      'exhausted',
+      CODING,
+      0,
+      false,
+      (late) => {
+        expect(late.pair).toBeNull();
+      },
+    ],
+    [
+      'with another draw available',
+      WRITING,
+      2,
+      false,
+      (late, voted) => {
+        expect(late.pair?.id).toEqual(expect.any(String));
+        expect(late.pair?.id).not.toBe(voted);
+      },
+    ],
+    [
+      'with a new pending pair',
+      WRITING,
+      2,
+      true,
+      (late, voted, following) => {
+        expect(late.pair?.id).toEqual(expect.any(String));
+        expect(late.pair?.id).toBe(following);
+        expect(late.pair?.id).not.toBe(voted);
+      },
+    ],
+  ])(
     'reads current state when another tab votes on its draw and is %s',
-    async (_, family, remaining, issuedNext) => {
+    async (_, family, remaining, issuedNext, assertPair) => {
       const from = await admitted();
       let voted: string | undefined;
       let following: string | undefined;
@@ -379,15 +386,7 @@ describe('GET /api/pair', () => {
 
       expect(voted).toEqual(expect.any(String));
       expect(late).toMatchObject({ votes: 1, remaining, undo: true });
-      if (remaining === 0) {
-        expect(late.pair).toBeNull();
-      } else {
-        expect(late.pair?.id).toEqual(expect.any(String));
-        expect(late.pair?.id).not.toBe(voted);
-      }
-      if (issuedNext) {
-        expect(late.pair?.id).toBe(following);
-      }
+      assertPair(late, voted, following);
       expect(await pairOf(from, family)).toEqual(late);
     },
   );
@@ -504,6 +503,28 @@ describe('POST /api/pair/skip', () => {
     expect(new Set(cases.slice(0, 4)).size).toBe(4);
     expect(cases[4]).toBe(cases[0]);
     expect(await env.DB.prepare('SELECT count(*) AS n FROM votes').first('n')).toBe(0);
+  });
+
+  test('rejects a skip onto a Unicode system pair already voted during placement', async () => {
+    const bmp = 'system-\ue000';
+    const astral = 'system-\u{10000}';
+    await publish(SYNTHETIC, {
+      first: { [bmp]: ['First BMP.'], [astral]: ['First astral.'] },
+      second: { [bmp]: ['Second BMP.'], [astral]: ['Second astral.'] },
+    });
+    const from = await admitted();
+    const actor = await actorOf(from);
+    const { pair } = await pairOf(from, SYNTHETIC);
+    const initial = await pendingRow(pair?.id ?? '');
+    const otherCase = initial?.case_key === 'first' ? 'second' : 'first';
+    duringPlacement(async () => {
+      await seedVote(SYNTHETIC, otherCase, [bmp, astral], { actor });
+    });
+
+    const response = await call(from, 'POST', '/pair/skip', { pair: pair?.id });
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: 'stale_pair' });
   });
 
   test('reads the passing outputs once', async () => {

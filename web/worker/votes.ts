@@ -1,26 +1,30 @@
-import { sql, type Compilable, type InferResult } from 'kysely';
+import type { Compilable, InferResult } from 'kysely';
 
 import type { TaggedDefects, UndoRequest, VoteRequest, VoteStatus } from '@/lib/arena';
 import type { Defect } from '@/lib/defects';
 
 import { ApiError } from './api';
-import { batch, first, queries } from './db';
+import {
+  batch,
+  first,
+  onActivePair,
+  onPairOutputA,
+  onPairOutputB,
+  queries,
+  upsertPair,
+} from './db';
 import { UNDO_MS } from './limits';
 
 function findQuery(pair: string, actor: string) {
   return queries
-    .selectFrom(queries.selectNoFrom(sql<1>`1`.as('probe')).as('probe'))
+    .selectFrom(queries.selectNoFrom((eb) => [eb.lit(1).as('probe')]).as('probe'))
     .leftJoin('votes as prior', (join) =>
       join.on('prior.pair_id', '=', pair).on('prior.actor_id', '=', actor),
     )
     .leftJoin('pending_pairs as pairs', (join) =>
       join.on('pairs.id', '=', pair).on('pairs.actor_id', '=', actor),
     )
-    .leftJoin('active', (join) =>
-      join
-        .onRef('active.family', '=', 'pairs.family')
-        .onRef('active.publication_id', '=', 'pairs.publication_id'),
-    )
+    .leftJoin('active', onActivePair)
     .leftJoin('publications', 'publications.id', 'active.publication_id')
     .select((eb) => [
       'prior.choice',
@@ -40,7 +44,7 @@ function receiptQuery(pair: string, actor: string) {
 
 /** Reads the receipt for a missed write before another submission or undo can change it. */
 function checkMissQuery(pair: string, actor: string) {
-  return receiptQuery(pair, actor).where(sql<number>`changes()`, '=', 0);
+  return receiptQuery(pair, actor).where((eb) => eb(eb.fn<number>('changes', []), '=', 0));
 }
 
 function recordQuery(
@@ -71,21 +75,9 @@ function recordQuery(
     .expression((eb) =>
       eb
         .selectFrom('pending_pairs as pairs')
-        .innerJoin('active', (join) =>
-          join
-            .onRef('active.family', '=', 'pairs.family')
-            .onRef('active.publication_id', '=', 'pairs.publication_id'),
-        )
-        .innerJoin('outputs as a', (join) =>
-          join
-            .onRef('a.publication_id', '=', 'pairs.publication_id')
-            .onRef('a.output_key', '=', 'pairs.a_output'),
-        )
-        .innerJoin('outputs as b', (join) =>
-          join
-            .onRef('b.publication_id', '=', 'pairs.publication_id')
-            .onRef('b.output_key', '=', 'pairs.b_output'),
-        )
+        .innerJoin('active', onActivePair)
+        .innerJoin('outputs as a', onPairOutputA)
+        .innerJoin('outputs as b', onPairOutputB)
         .select((sub) => [
           'pairs.id',
           'pairs.actor_id',
@@ -98,7 +90,9 @@ function recordQuery(
           'b.system as b_system',
           sub.val(request.choice).as('choice'),
           sub.val(JSON.stringify(defects)).as('defects'),
-          sql<number>`max(0, ${now} - ${sub.ref('pairs.issued_at')})`.as('elapsed_ms'),
+          sub
+            .fn<number>('max', [sub.val(0), sub(sub.val(now), '-', sub.ref('pairs.issued_at'))])
+            .as('elapsed_ms'),
           sub.val(now).as('recorded_at'),
           sub.val(tag).as('ip_tag'),
         ])
@@ -110,56 +104,32 @@ function recordQuery(
 }
 
 function restoreQuery(actor: string, family: string, pair: string, restored: string, now: number) {
-  return queries
-    .insertInto('pairs')
-    .columns([
-      'id',
-      'actor_id',
-      'family',
-      'publication_id',
-      'case_key',
-      'a_output',
-      'b_output',
-      'issued_at',
-    ])
-    .expression((eb) =>
-      eb
-        .selectFrom(
-          eb
-            .selectFrom('votes')
-            .selectAll()
-            .where('actor_id', '=', actor)
-            .where('family', '=', family)
-            .where('recorded_at', '>', now - UNDO_MS)
-            .where('exclusion', 'is', null)
-            .orderBy('id', 'desc')
-            .limit(1)
-            .as('latest'),
-        )
-        .select((sub) => [
-          sub.val(restored).as('id'),
-          'latest.actor_id',
-          'latest.family',
-          'latest.publication_id',
-          'latest.case_key',
-          'latest.a_output',
-          'latest.b_output',
-          sql<number>`${sub.ref('latest.recorded_at')} - ${sub.ref('latest.elapsed_ms')}`.as(
-            'issued_at',
-          ),
-        ])
-        .where('latest.pair_id', '=', pair),
-    )
-    .onConflict((oc) =>
-      oc.columns(['actor_id', 'family']).doUpdateSet((eb) => ({
-        id: eb.ref('excluded.id'),
-        publication_id: eb.ref('excluded.publication_id'),
-        case_key: eb.ref('excluded.case_key'),
-        a_output: eb.ref('excluded.a_output'),
-        b_output: eb.ref('excluded.b_output'),
-        issued_at: eb.ref('excluded.issued_at'),
-      })),
-    );
+  return upsertPair((eb) =>
+    eb
+      .selectFrom(
+        eb
+          .selectFrom('votes')
+          .selectAll()
+          .where('actor_id', '=', actor)
+          .where('family', '=', family)
+          .where('recorded_at', '>', now - UNDO_MS)
+          .where('exclusion', 'is', null)
+          .orderBy('id', 'desc')
+          .limit(1)
+          .as('latest'),
+      )
+      .select((sub) => [
+        sub.val(restored).as('id'),
+        'latest.actor_id',
+        'latest.family',
+        'latest.publication_id',
+        'latest.case_key',
+        'latest.a_output',
+        'latest.b_output',
+        sub(sub.ref('latest.recorded_at'), '-', sub.ref('latest.elapsed_ms')).as('issued_at'),
+      ])
+      .where('latest.pair_id', '=', pair),
+  );
 }
 
 function withdrawQuery(actor: string, family: string, pair: string) {
@@ -168,7 +138,7 @@ function withdrawQuery(actor: string, family: string, pair: string) {
     .where('actor_id', '=', actor)
     .where('family', '=', family)
     .where('pair_id', '=', pair)
-    .where(sql<number>`changes()`, '=', 1)
+    .where((eb) => eb(eb.fn<number>('changes', []), '=', 1))
     .returning('id');
 }
 
@@ -176,7 +146,6 @@ type FoundRow = InferResult<ReturnType<typeof findQuery>>[number];
 type ReceiptRow = InferResult<ReturnType<typeof receiptQuery>>[number];
 type WriteRow = InferResult<ReturnType<typeof recordQuery>>[number] | ReceiptRow;
 
-/** Whether a stored vote holds the same choice and the same tags on each side. */
 function same(choice: string, saved: string, request: VoteRequest): boolean {
   const tags = JSON.parse(saved) as TaggedDefects;
   const set = (items: readonly string[]) => JSON.stringify([...new Set(items)].sort());
@@ -193,7 +162,6 @@ function receiptStatus(request: VoteRequest, receipt: ReceiptRow | null): VoteSt
     : 'stale_pair';
 }
 
-/** Supplies the publication's ordered tags for a new vote, or resolves the request immediately. */
 function decide(
   request: VoteRequest,
   found: FoundRow | undefined,
@@ -220,7 +188,6 @@ function decide(
   };
 }
 
-/** Classifies all receipts in input order and writes eligible new votes with one timestamp. */
 export async function recordBatch(
   db: D1Database,
   actor: string,
@@ -228,11 +195,12 @@ export async function recordBatch(
   requests: readonly VoteRequest[],
   now: number,
   family?: string,
-) {
+): Promise<{ pair: string; status: VoteStatus }[]> {
   const found = await batch(
     db,
     requests.map(({ pair }) => findQuery(pair, actor)),
   );
+
   const statuses: VoteStatus[] = [];
   const writes: Compilable<WriteRow>[] = [];
   const offsets: { index: number; offset: number }[] = [];
@@ -248,6 +216,7 @@ export async function recordBatch(
       );
     }
   }
+
   const results = await batch(db, writes);
   for (const { index, offset } of offsets) {
     const miss = results[offset + 1].results.at(0);
@@ -276,8 +245,7 @@ export async function record(
   }
 }
 
-/** Confirms an exact stored vote without changing a vote or its pending pair. */
-export async function confirm(db: D1Database, actor: string, request: VoteRequest) {
+export async function confirm(db: D1Database, actor: string, request: VoteRequest): Promise<void> {
   const receipt = await first(db, receiptQuery(request.pair, actor));
   if (receiptStatus(request, receipt) === 'stale_pair') {
     throw new ApiError(409, 'stale_pair');
@@ -288,7 +256,12 @@ export async function confirm(db: D1Database, actor: string, request: VoteReques
  * Withdraws the specified vote while it is the latest undoable vote in the family. The restored
  * pair keeps its issue time and gets a fresh ID so the withdrawn vote cannot be replayed.
  */
-export async function undo(db: D1Database, actor: string, request: UndoRequest, now: number) {
+export async function undo(
+  db: D1Database,
+  actor: string,
+  request: UndoRequest,
+  now: number,
+): Promise<void> {
   const { family, pair } = request;
   const restored = crypto.randomUUID();
   const [, withdrawn] = await batch(db, [
