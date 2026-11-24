@@ -234,23 +234,27 @@ def _agent_config(system: System) -> trial_config.AgentConfig:
 
 def job(
     family: Family,
-    systems: list[System],
+    roster: list[System],
     tasks: list[Path],
     *,
     root: Path,
     sources: list[tuple[SourceJobConfig, Path]],
+    selected_names: set[str] | None = None,
 ) -> JobConfig:
-    """Build a job that runs every system on every task of the family.
+    """Build a job for the selected systems, defaulting to the whole roster.
 
-    The systems are as `family_systems` returns them. The job diffs against the
-    family's earlier jobs, so Harbor runs only the trials that none of them
-    completed with the same task version and agent config. A task's tests grade
-    its trials whatever the scorer, while a rendered case has no tests, so the
-    verifier runs only for a task family, which also runs fewer trials at once. A
-    job whose harnesses are all single-call runs in the host environment, which
-    starts no container, and any other job runs in Harbor's Docker environment.
+    The roster is as `family_systems` returns it and determines the environment
+    for both filtered and full jobs. Harbor reuses trials from earlier jobs
+    with the same task version, agent config, and environment. A task's tests
+    grade its trials whatever the scorer, while a rendered case has no tests,
+    so the verifier runs only for a task family, which also runs fewer trials
+    at once.
     """
-    agents = [_agent_config(system) for system in systems]
+    agents = [
+        _agent_config(system)
+        for system in roster
+        if selected_names is None or system.name in selected_names
+    ]
     source_jobs = [config for config, _ in sources]
     tasks_source = family.source == 'tasks'
     return _job(
@@ -258,7 +262,7 @@ def job(
         agents,
         tasks,
         source_jobs,
-        environment=_environment(systems, family.source_root.parent),
+        environment=_environment(roster, family.source_root.parent),
         n_attempts=family.settings.samples,
         n_concurrent=N_CONCURRENT_CONTAINERS if tasks_source else N_CONCURRENT_TRIALS,
         verify=tasks_source,
@@ -327,10 +331,10 @@ def current_inputs(
     The inputs are the agent config, the environment config, and whether the
     verifier is disabled.
     """
-    resolved = family_systems(
+    roster = family_systems(
         family, [system for system in systems if system.name in family.settings.systems]
     )
-    environment = _environment(resolved, family.source_root.parent)
+    environment = _environment(roster, family.source_root.parent)
     overlays: list[ExtraDockerComposeLock] = []
     for path in environment.extra_docker_compose:
         with path.open('rb') as file:
@@ -343,7 +347,7 @@ def current_inputs(
             identity,
             family.source != 'tasks',
         )
-        for system in resolved
+        for system in roster
     }
 
 

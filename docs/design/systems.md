@@ -36,7 +36,7 @@ A successful probe refuses the whole run when its reported model set changes or 
 
 ## Harnesses
 
-Case families use a host environment that starts no container and refuses commands and file transfers. Task families run in Docker, including `bench check`'s oracle and nop. Every trial of a job shares its environment. Installed agents add host access for their inference proxy while preserving the task's network policy and clearing those overlays for a separate verifier.
+Case families use a host environment that starts no container and refuses commands and file transfers. Task families run in Docker, including `bench check`'s oracle and nop. For `bench run`, the harnesses of all systems in the family determine the environment, even when `--system` selects a subset. If any system uses an installed agent, every trial shares the `InstalledDocker` environment and its Compose overlay for proxy access. The overlay preserves the task's network policy, and Harbor clears it for a separate verifier.
 
 Systems without an explicit harness run as `generate` in case families and inherit a task family's [`harness`](../guide/authoring.md#families). An installed agent's per-system `harness` and pinned `version` override that default. Claude Code requires native Messages, and Codex requires Responses. Both require task families. Only `generate` accepts a system prompt, and `bench check` and `bench run` refuse unsupported combinations before a job starts.
 

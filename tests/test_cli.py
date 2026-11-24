@@ -50,6 +50,7 @@ from assistant_bench.collection import Collection
 from assistant_bench.database import SQLiteDatabase
 from assistant_bench.families import Category, Family, Gate, load_cases, load_family
 from assistant_bench.harnesses import fingerprint
+from assistant_bench.harnesses.docker import HOST_OVERLAY
 from assistant_bench.harnesses.endpoint import SDK_HEADERS_VAR, SECRET_HEADERS_FILE_VAR
 from assistant_bench.harnesses.usage import Attempt, MeasuredUsage
 from assistant_bench.messages import InputError
@@ -1288,6 +1289,75 @@ class TestRun:
             'opus-5.5-high': {DiffAction.REUSE},
             'kimi-k3.1-pro-high': {DiffAction.RERUN},
         }
+
+    @pytest.mark.parametrize('families', [('f',), ()], ids=['family', 'global'])
+    def test_collects_and_reuses_a_filtered_run_in_a_mixed_family(
+        self,
+        families: tuple[str, ...],
+        families_dir: Path,
+        resolved: dict[str, System],
+        submitted: list[JobConfig],
+        cloud: RunContext,
+        private_store: SQLiteDatabase,
+    ) -> None:
+        write_task_family(
+            families_dir,
+            'echo',
+            systems=('acme-large', 'acme-small'),
+            author_vendor='openai',
+        )
+        resolved['acme-large'] = make_system(vendor='openai')
+        resolved['acme-small'] = make_system(
+            name='acme-small',
+            route='acme/small',
+            api='openai-responses',
+            harness='codex',
+            version='1.2.3',
+            vendor='openai',
+        )
+
+        result = invoke('run', *families, '--system', 'acme-large')
+        assert result.exit_code == 0, result.output
+        (filtered,) = submitted
+        first = archive_job(cloud, filtered, private_store)
+        (trial,) = first.glob('*/result.json')
+
+        result = invoke('collect', 'f')
+        assert result.exit_code == 0, result.output
+        outputs = read_outputs('f', cloud.state)
+
+        result = invoke('run', 'f')
+        assert result.exit_code == 0, result.output
+        _, full = submitted
+        actions = planned_actions(full)
+
+        assert (len(outputs), actions) == (
+            1,
+            {'acme-large': {DiffAction.REUSE}, 'acme-small': {DiffAction.RERUN}},
+        )
+        (output,) = outputs
+        assert (
+            output.job,
+            output.trial,
+            output.case,
+            output.system,
+            output.reward,
+        ) == (
+            first.name,
+            trial.parent.name,
+            'echo',
+            'acme-large',
+            1.0,
+        )
+
+        assert [agent.kwargs['system'] for agent in filtered.agents] == ['acme-large']
+        assert filtered.environment == full.environment
+        assert full.environment.import_path == (
+            'assistant_bench.harnesses.docker:InstalledDocker'
+        )
+        assert [path.name for path in full.environment.extra_docker_compose] == [
+            HOST_OVERLAY.name
+        ]
 
     def test_rejects_a_named_family_without_systems(
         self, submitted: list[JobConfig]
