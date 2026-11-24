@@ -154,11 +154,7 @@ class VotesSettings(_Settings):
     """Publish the public and synthetic cases for voting in production."""
 
     reference: str
-    """Listed system against which overall and category expected net points are scored.
-
-    Archived Elo snapshots can use the most-voted system as the anchor when this
-    reference is outside the ranked component.
-    """
+    """Listed system against which expected net points are scored."""
 
     render: Literal['text', 'diff', 'html'] = 'text'
     """Output presentation. Only task families yield diffs."""

@@ -120,6 +120,6 @@ When a change moves fingerprints:
 
 1. Run `uv run bench fingerprints`, which fails on each changed system whose closed reports froze its earlier fingerprint.
 2. Give each changed system that a closed report names a new table name with a suffix identifying its effort or snapshot and a distinct `display_name`.
-3. Replace the old name in each family's `systems` list and `reference` where applicable. A board scored against the replacement reference has no ranked systems if that reference lacks qualifying preference comparisons.
+3. Replace the old name in each family's `systems` list and `reference` where applicable. A board scored against the replacement reference has no ranked systems if that reference has no preference comparisons.
 4. Preserve valid closed reports and task authorship for retired systems, and remove their runnable tables.
 5. Run `uv run pytest tests/test_repository.py -k manifest --update-fixtures` to rewrite `fingerprints.json`, then `uv run bench fingerprints` to confirm that it passes.
