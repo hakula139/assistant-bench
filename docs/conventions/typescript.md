@@ -27,9 +27,9 @@ web/src/
 web/worker/
 ├── access.ts                # Cloudflare Access JWT verification for private voting
 ├── actors.ts                # Turnstile admission, signed actor cookies, and daily limits
-├── api.ts                   # Shared HTTP helpers and fixed error responses
+├── api.ts                   # Hono route environment types and ApiError
 ├── db.ts                    # Compiler-only Kysely query builder and D1 helpers
-├── hmac.ts                  # HMAC-SHA-256 signing and keyed ranking
+├── hmac.ts                  # HMAC-SHA-256 signing and hex encoding
 ├── index.ts                 # Worker entrypoint, routing, and cron retention
 ├── limits.ts                # Admission, body, undo, and retention constants
 ├── pairs.ts                 # Blind pair selection, skips, and batches
