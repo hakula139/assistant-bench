@@ -1331,10 +1331,10 @@ class TestRun:
         _, full = submitted
         actions = planned_actions(full)
 
-        assert (len(outputs), actions) == (
-            1,
-            {'acme-large': {DiffAction.REUSE}, 'acme-small': {DiffAction.RERUN}},
-        )
+        assert actions == {
+            'acme-large': {DiffAction.REUSE},
+            'acme-small': {DiffAction.RERUN},
+        }
         (output,) = outputs
         assert (
             output.job,
@@ -1349,7 +1349,6 @@ class TestRun:
             'acme-large',
             1.0,
         )
-
         assert [agent.kwargs['system'] for agent in filtered.agents] == ['acme-large']
         assert filtered.environment == full.environment
         assert full.environment.import_path == (
