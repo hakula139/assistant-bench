@@ -9,7 +9,12 @@ from harbor.job_plan import JobPlan
 from typer.testing import CliRunner
 
 from assistant_bench import cli, jobs
-from assistant_bench.catalog import SystemAlias, load_export, load_systems
+from assistant_bench.catalog import (
+    NixosConfigExport,
+    SystemAlias,
+    load_export,
+    load_systems,
+)
 from assistant_bench.families import case_task, load_family
 from assistant_bench.harnesses import agent_kwargs, fingerprint
 from assistant_bench.paths import FAMILIES_DIR
@@ -22,6 +27,7 @@ from support import (
     make_system,
     voted_tasks,
     with_settings,
+    write_votes_family,
 )
 
 
@@ -99,7 +105,85 @@ class TestListedSystems:
         )
         assert members[model].condition == 'default'
 
-    def test_refuses_two_aliases_with_the_same_public_id_and_condition(self) -> None:
+    def test_refuses_unlisted_system_aliases_key(self, families_dir: Path) -> None:
+        cases = write_votes_family(families_dir, ['acme-large'], name='unlisted')
+        with cases.with_name('family.toml').open('a') as config:
+            config.write(
+                '\n[system_aliases.stray]\n'
+                'model_effort = "acme-large"\n'
+                'condition = "prompted"\n'
+                'prompt = "nixos-config:claudeCode"\n'
+                'display_name = "Stray"\n'
+            )
+
+        with pytest.raises(
+            ValueError, match='system aliases must be listed in `systems`: `stray`'
+        ):
+            load_family('unlisted', root=families_dir)
+
+    def test_refuses_alias_shadowing_canonical_key(
+        self, export: NixosConfigExport
+    ) -> None:
+        base = make_system()
+        alias = SystemAlias(
+            model_effort=base.name,
+            condition='prompted',
+            display_name='Shadow',
+            prompt='nixos-config:claudeCode',
+        )
+        family = with_settings(
+            VOTES,
+            systems=[base.name],
+            system_aliases={base.name: alias},
+        )
+
+        with pytest.raises(ValueError, match='shadow canonical keys'):
+            jobs.listed_systems(family, {base.name: base}, export=export)
+
+    def test_deduplicates_unknown_canonical_keys(
+        self, export: NixosConfigExport
+    ) -> None:
+        alias = SystemAlias(
+            model_effort='missing-model',
+            condition='prompted',
+            display_name='Missing Prompted',
+            prompt='nixos-config:claudeCode',
+        )
+        family = with_settings(
+            VOTES,
+            systems=['missing-model', 'missing-prompted'],
+            system_aliases={'missing-prompted': alias},
+        )
+
+        with pytest.raises(ValueError) as error:
+            jobs.listed_systems(family, {}, export=export)
+
+        assert str(error.value).startswith(
+            'Family `f` lists `missing-model`, which `systems.toml` does not define.'
+        )
+
+    def test_refuses_duplicate_display_name(self, export: NixosConfigExport) -> None:
+        base = make_system()
+        alias = SystemAlias(
+            model_effort=base.name,
+            condition='prompted',
+            display_name=base.display_name,
+            prompt='nixos-config:claudeCode',
+        )
+        family = with_settings(
+            VOTES,
+            systems=[base.name, 'prompted'],
+            system_aliases={'prompted': alias},
+        )
+
+        with pytest.raises(
+            ValueError, match=f'repeats the display name `{base.display_name}`'
+        ):
+            jobs.listed_systems(family, {base.name: base}, export=export)
+
+    def test_refuses_two_aliases_with_the_same_public_id_and_condition(
+        self, export: NixosConfigExport
+    ) -> None:
         family = load_family('instructions-format')
         base = make_system()
         alias = SystemAlias(
@@ -119,9 +203,35 @@ class TestListedSystems:
         )
 
         with pytest.raises(ValueError, match='repeats the `prompted` condition'):
-            jobs.listed_systems(family, {base.name: base}, export=load_export())
+            jobs.listed_systems(family, {base.name: base}, export=export)
 
-    def test_refuses_duplicate_canonical_fingerprint_bindings(self) -> None:
+
+class TestResolveFamilySystems:
+    def test_allows_rekeying_a_canonical_configuration(
+        self, export: NixosConfigExport
+    ) -> None:
+        base = make_system()
+        alias = SystemAlias(
+            model_effort=base.name,
+            condition='default',
+            display_name='Acme Large v2',
+        )
+        family = with_settings(
+            VOTES,
+            systems=['acme-large-v2'],
+            system_aliases={'acme-large-v2': alias},
+        )
+
+        (resolved,) = jobs.resolve_family_systems(family, {base.name: base}, export)
+
+        assert resolved.name == 'acme-large-v2'
+        assert resolved.canonical_name == base.name
+        assert resolved.condition == 'default'
+        assert fingerprint(resolved) == fingerprint(base)
+
+    def test_refuses_duplicate_canonical_fingerprint_bindings(
+        self, export: NixosConfigExport
+    ) -> None:
         base = make_system()
         alias = SystemAlias(
             model_effort=base.name,
@@ -143,7 +253,7 @@ class TestListedSystems:
         with pytest.raises(
             ValueError, match='conditions `first` and `second` to the same fingerprint'
         ):
-            jobs.resolve_family_systems(family, {base.name: base}, load_export())
+            jobs.resolve_family_systems(family, {base.name: base}, export)
 
 
 class TestJob:

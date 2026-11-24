@@ -117,12 +117,14 @@ def listed_systems(
             f'Family `{family.name}` has system aliases {code(sorted(shadowed))} '
             f'that shadow canonical keys in `{SYSTEMS_FILE}`.'
         )
-    unknown = [
-        key
-        for name in family.settings.systems
-        if (key := aliases[name].model_effort if name in aliases else name)
-        not in systems
-    ]
+    unknown = list(
+        dict.fromkeys(
+            key
+            for name in family.settings.systems
+            if (key := aliases[name].model_effort if name in aliases else name)
+            not in systems
+        )
+    )
     if unknown:
         raise InputError(
             f'Family `{family.name}` lists {code(unknown)}, which '
@@ -225,7 +227,16 @@ def resolve_family_systems(
     systems: Mapping[str, System],
     export: NixosConfigExport,
 ) -> list[System]:
-    """Resolve, check, and finalize a family's systems."""
+    """Resolve, validate, and finalize a family's runnable systems.
+
+    Raises
+    ------
+    InputError
+        A listed key is unknown, an alias shadows a canonical key, a display
+        name or `(public_id, condition)` repeats, a harness or pair check
+        fails, or two conditions of the same canonical system resolve to the
+        same fingerprint.
+    """
     listed = listed_systems(family, systems, export)
     check_systems(family, listed)
     resolved = family_systems(family, listed)
@@ -379,7 +390,6 @@ def probe_job(system: System, task: Path, root: Path) -> JobConfig:
 type EnvironmentInputs = tuple[
     trial_config.EnvironmentConfig, tuple[ExtraDockerComposeLock, ...] | None
 ]
-type TrialInputs = tuple[trial_config.AgentConfig, EnvironmentInputs, bool]
 
 
 def environment_inputs(
@@ -395,45 +405,30 @@ def environment_inputs(
 
 def current_inputs(
     family: Family, systems: list[System]
-) -> dict[str, tuple[TrialInputs, ...]]:
-    """Map each listed system to the trial inputs its job can record.
+) -> dict[str, tuple[trial_config.AgentConfig, EnvironmentInputs, bool]]:
+    """Map each system the family lists to the inputs a current trial records.
 
     The inputs are the agent config, the environment config, and whether the
     verifier is disabled.
     """
-    resolved = family_systems(
+    roster = family_systems(
         family, [system for system in systems if system.name in family.settings.systems]
     )
-    source_root = family.source_root.parent
-    full = _environment_lock(_environment(resolved, source_root))
-    standard_systems = [
-        system for system in resolved if not HARNESSES[system.harness].installed
-    ]
-    standard = (
-        _environment_lock(_environment(standard_systems, source_root))
-        if 0 < len(standard_systems) < len(resolved)
-        else full
-    )
-    return {
-        system.name: tuple(
-            (_agent_config(system), environment, family.source != 'tasks')
-            for environment in (
-                (full, standard)
-                if not HARNESSES[system.harness].installed and full != standard
-                else (full,)
-            )
-        )
-        for system in resolved
-    }
-
-
-def _environment_lock(environment: trial_config.EnvironmentConfig) -> EnvironmentInputs:
+    environment = _environment(roster, family.source_root.parent)
     overlays: list[ExtraDockerComposeLock] = []
     for path in environment.extra_docker_compose:
         with path.open('rb') as file:
             digest = hashlib.file_digest(file, 'sha256').hexdigest()
         overlays.append(ExtraDockerComposeLock(path=path, digest=f'sha256:{digest}'))
-    return environment_inputs(environment, overlays or None)
+    identity = environment_inputs(environment, overlays or None)
+    return {
+        system.name: (
+            _agent_config(system),
+            identity,
+            family.source != 'tasks',
+        )
+        for system in roster
+    }
 
 
 def check_job(family: Family, tasks: list[Path], *, root: Path) -> JobConfig:

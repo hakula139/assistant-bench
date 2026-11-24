@@ -92,8 +92,8 @@ runner = CliRunner()
 REAL_EXECUTE = execution.execute
 
 RENAME_GUIDE = (
-    'Give each changed system a new name in each affected family and keep '
-    'the old table while other families list it, as `docs/guide/authoring.md#systems` '
+    'Assign a new family key in each affected family and keep the old alias '
+    'or table while other families list it, as `docs/guide/authoring.md#systems` '
     'describes.'
 )
 DRIFTED = (
@@ -1756,7 +1756,7 @@ class TestRun:
                 17,
                 1,
                 'Family `f` would reach $18.00, over its `budget_usd` of $17.00: '
-                '`large` $6.00 spent and $12.00 projected.\n',
+                '`f/large` $6.00 spent and $12.00 projected.\n',
                 id='over',
             ),
         ],

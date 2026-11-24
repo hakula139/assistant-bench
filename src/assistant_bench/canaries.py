@@ -92,6 +92,11 @@ class Record(BaseModel):
         )
 
 
+def source_generate(system: System) -> System:
+    """Return the single-call `generate` configuration probed for `system`."""
+    return system.model_copy(update={'harness': 'generate', 'version': None})
+
+
 def prepare(
     configs: Iterable[tuple[JobConfig, Mapping[str, System]]],
     *,
@@ -103,9 +108,7 @@ def prepare(
     for config, systems in configs:
         for name in jobs.pending_trials(config):
             original = systems[name]
-            source = original.model_copy(
-                update={'harness': 'generate', 'version': None}
-            )
+            source = source_generate(original)
             pending.setdefault((name, fingerprint(source)), (original, source))
     if not pending:
         return []
@@ -195,7 +198,7 @@ def run(probes: list[Probe], context: RunContext) -> list[Record]:
         records.append(record)
         if not record.success:
             problems.append(
-                f'System `{record.system}`: canary probe failed. '
+                f'System {_system_label(probe.original)}: canary probe failed. '
                 'The run was refused. Inspect its canary records.'
             )
             continue
@@ -205,7 +208,7 @@ def run(probes: list[Probe], context: RunContext) -> list[Record]:
         if winner is None:
             raise InputError('The accepted canary baseline could not be confirmed.')
         baseline = Record.model_validate_json(winner)
-        if (problem := _baseline_problem(record, baseline)) is not None:
+        if (problem := _baseline_problem(probe.original, record, baseline)) is not None:
             problems.append(problem)
 
     if problems:
@@ -345,7 +348,14 @@ def _record(
     )
 
 
-def _baseline_problem(record: Record, baseline: Record) -> str | None:
+def _system_label(system: System) -> str:
+    label = f'`{system.canonical_name}`'
+    if system.condition == 'default':
+        return label
+    return f'{label} (condition `{system.condition}`)'
+
+
+def _baseline_problem(system: System, record: Record, baseline: Record) -> str | None:
     if (
         not baseline.success
         or baseline.source_generate_fingerprint != record.source_generate_fingerprint
@@ -360,7 +370,7 @@ def _baseline_problem(record: Record, baseline: Record) -> str | None:
         return None
     model_change = 'The reported model changed. ' if models_changed else ''
     return (
-        f'System `{record.system}`: canary differs from its baseline on '
+        f'System {_system_label(system)}: canary differs from its baseline on '
         f'`{baseline.time.date()}`. Input tokens: `{old_tokens}` → `{new_tokens}`. '
         f'{model_change}The run was refused. Inspect its canary records. '
         'Give a changed system a new name. After verifying a benign route change, '

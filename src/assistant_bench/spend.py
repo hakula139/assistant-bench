@@ -403,7 +403,10 @@ def total_usd(spend: list[Spend], projections: list[Projection]) -> float:
 
 
 def budget_problem(
-    family: Family, spend: list[Spend], projections: list[Projection]
+    family: Family,
+    spend: list[Spend],
+    projections: list[Projection],
+    labels: Mapping[str, str] | None = None,
 ) -> str | None:
     """Return why the run would exceed the family's `budget_usd`, if it would.
 
@@ -427,8 +430,9 @@ def budget_problem(
         for projection in projections
         if projection.priced and (usd := projection.usd)
     }
+    names = labels or {}
     shares = ', '.join(
-        f'`{name}` ${spent.get(name, 0):.2f} spent and '
+        f'{names.get(name, f"`{name}`")} ${spent.get(name, 0):.2f} spent and '
         f'${projected.get(name, 0):.2f} projected'
         for name in sorted(spent.keys() | projected.keys())
     )

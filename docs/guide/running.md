@@ -65,7 +65,7 @@ uv run bench run --system instructions-format/gpt-6.1-sol-high --condition promp
 
 `bench systems` lists each runnable `family/model-effort` ID, its conditions and their display names. Give it one or more families to narrow the list. Use an ID with `--system` to select that model and effort in one family. Where a family compares conditions, omitting `--condition` selects them all. For example, the command above runs only the prompted side of the instruction check. Use `default` for the bare side.
 
-A run without selectors runs every family that lists systems. Naming families limits the run to those families. An unqualified model and effort, such as `--system gpt-6.1-sol-high`, selects it across the chosen families or, when no family is named, wherever it runs. Repeat `--system` to select several IDs.
+A run without selectors runs every family that lists systems. Naming families limits the run to those families. An unqualified model and effort, such as `--system gpt-6.1-sol-high`, selects it across the chosen families or, when no family is named, wherever it runs. Repeat `--system` to select several IDs. `--condition` also works without `--system`, selecting that condition across the named families or, when no family is named, every family that defines it.
 
 Each case and system pair runs `samples` times with automatic retries disabled. A reply cut off by the completion allowance remains a recorded incomplete output and fails the completion gate. An HTTP error fails the trial. Case trials start no container and need no Docker.
 

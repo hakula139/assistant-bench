@@ -149,10 +149,12 @@ class SystemAlias(BaseModel):
     def _check_variant(self) -> Self:
         if (self.harness is None) != (self.version is None):
             raise ValueError('`harness` and `version` must be set together')
-        if self.condition == 'default':
+        if self.prompt is not None and self.harness is not None:
+            raise ValueError('`prompt` and `harness` cannot be set together')
+        if self.condition == 'default' and (
+            self.prompt is not None or self.harness is not None
+        ):
             raise ValueError('`default` is reserved for the canonical configuration')
-        if (self.prompt is None) == (self.harness is None):
-            raise ValueError('set exactly one of `prompt` and `harness`')
         return self
 
 
@@ -226,8 +228,9 @@ def parse_systems(
     Raises
     ------
     InputError
-        The document does not parse or validate, a table fails to resolve, or
-        two systems share a display name.
+        The document does not parse or validate, a table fails to resolve,
+        two systems share a display name, or two tables define the same
+        model and effort.
     """
     configs = parse_system_configs(document)
     owners: dict[str, str] = {}
@@ -311,7 +314,18 @@ def resolve_system(
 def resolve_alias(
     name: str, alias: SystemAlias, base: System, export: NixosConfigExport
 ) -> System:
-    """Resolve family settings while retaining the key recorded in trial locks."""
+    """Resolve a family alias against its canonical system.
+
+    Keeps the alias's storage key while applying the family-local display name,
+    condition, API, prompt, or installed harness.
+
+    Raises
+    ------
+    InputError
+        The overridden API is unsupported by the catalog model, native Messages
+        is chosen for a model without thinking rules, or the prompt is
+        unavailable.
+    """
     api = alias.api or base.api
     if alias.api is not None and api not in base.supported_apis:
         raise InputError(

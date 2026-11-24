@@ -67,14 +67,13 @@ class TestSystemAlias:
             ({'version': '1.2.3'}, 'must be set together'),
             ({'harness': 'codex', 'version': 'latest'}, 'pattern'),
             ({'harness': 'codex', 'version': '../1.2.3'}, 'pattern'),
-            ({}, 'exactly one'),
             (
                 {
                     'prompt': 'nixos-config:codex',
                     'harness': 'codex',
                     'version': '1.2.3',
                 },
-                'exactly one',
+                'cannot be set together',
             ),
             ({'prompt': 'nixos-config:codex', 'condition': 'default'}, 'reserved'),
         ],
@@ -83,7 +82,6 @@ class TestSystemAlias:
             'missing-harness',
             'unpinned-version',
             'path-version',
-            'empty-variant',
             'agent-with-prompt',
             'default-condition',
         ],
@@ -99,6 +97,18 @@ class TestSystemAlias:
 
         with pytest.raises(ValueError, match=reason):
             SystemAlias.model_validate(required | fields)
+
+    @pytest.mark.parametrize('condition', ['default', 'v2'])
+    def test_allows_rekeying_a_canonical_configuration(self, condition: str) -> None:
+        alias = SystemAlias(
+            model_effort='large',
+            condition=condition,
+            display_name='Acme Large v2',
+        )
+
+        assert alias.prompt is None
+        assert alias.harness is None
+        assert alias.condition == condition
 
 
 class TestLoadSystems:
@@ -551,3 +561,25 @@ class TestResolveAlias:
             resolve_alias('x', alias, base, export)
 
         assert str(error.value) == message
+
+    def test_rejects_native_messages_without_thinking_rules(
+        self, export: NixosConfigExport
+    ) -> None:
+        base = make_system(
+            effort=None,
+            supported_apis=('openai-chat-completions', 'anthropic-messages'),
+        )
+        alias = SystemAlias(
+            model_effort=base.name,
+            condition='installed',
+            display_name='Acme Claude Code',
+            harness='claude-code',
+            version='2.1.319',
+            api='anthropic-messages',
+        )
+
+        with pytest.raises(
+            ValueError,
+            match="native Messages requires the catalog model's thinking rules",
+        ):
+            resolve_alias('installed', alias, base, export)

@@ -1090,3 +1090,46 @@ class TestRun:
             assert [
                 entry.responses for entry in read_ledger('canaries', second.state)
             ] == [[winner.usage], [contender.usage]]
+
+    def test_formats_alias_condition_in_failure_and_baseline_messages(
+        self,
+        tmp_path: Path,
+        endpoint: StubEndpoint,
+        host_jobs: list[JobConfig],
+        run_context: RunContext,
+    ) -> None:
+        system = make_system(
+            name='acme-large-prompted',
+            model_effort='acme-large-medium',
+            condition='prompted',
+        )
+        endpoint.status = 500
+        endpoint.response = {'error': {'message': 'boom'}}
+        with pytest.raises(
+            InputError,
+            match=(
+                r'System `acme-large-medium` \(condition `prompted`\): '
+                r'canary probe failed\.'
+            ),
+        ):
+            canaries.run([prepare_probe(system, tmp_path)], run_context)
+        review_publications(run_context)
+
+        endpoint.status = 200
+        first = completion('READY')
+        first['model'] = 'large-2026'
+        endpoint.response = first
+        canaries.run([prepare_probe(system, tmp_path)], run_context)
+        review_publications(run_context)
+
+        second = completion('READY')
+        second['model'] = 'other-2026'
+        endpoint.response = second
+        with pytest.raises(
+            InputError,
+            match=(
+                r'System `acme-large-medium` \(condition `prompted`\): '
+                r'canary differs from its baseline'
+            ),
+        ):
+            canaries.run([prepare_probe(system, tmp_path)], run_context)

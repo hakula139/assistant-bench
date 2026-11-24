@@ -12,7 +12,9 @@ from assistant_bench import canaries, cli
 from assistant_bench.catalog import NixosConfigExport
 from assistant_bench.database import SQLiteDatabase
 from assistant_bench.harnesses import fingerprint
+from assistant_bench.harnesses.usage import MeasuredUsage
 from assistant_bench.runtime import RunContext
+from assistant_bench.spend import Accounting, Entry
 from assistant_bench.state import Run, State
 from support import START, make_system, write_votes_family
 
@@ -152,6 +154,22 @@ class TestRunTargets:
                 ['writing', '--condition', 'prompted'],
                 'Family `writing` has no system with condition `prompted`.',
             ),
+            (
+                ['--condition', 'nonexistent'],
+                'No family lists a system with condition `nonexistent`.',
+            ),
+            (
+                [
+                    'comparison',
+                    'writing',
+                    '--system',
+                    'acme-large-medium',
+                    '--condition',
+                    'prompted',
+                ],
+                'Family `writing` has no system with condition `prompted` matching '
+                '`acme-large-medium`.',
+            ),
         ],
     )
     def test_refuses_unknown_or_out_of_scope_bindings(
@@ -191,6 +209,60 @@ class TestSpend:
             'Family `comparison`: $0.00 spent and projected.',
         ]
 
+    @pytest.mark.usefixtures('family_catalog')
+    def test_formats_budget_problem_with_public_id_and_condition(
+        self,
+        families_dir: Path,
+        private_store: SQLiteDatabase,
+        run_context: RunContext,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        config = families_dir / 'comparison' / 'family.toml'
+        config.write_text('budget_usd = 1\n' + config.read_text())
+        system = make_system(name='acme-large-prompted')
+        accounting = Accounting.of(system)
+        entry = Entry(
+            trial='c__1',
+            system=system.name,
+            fingerprint='fp',
+            started_at=START,
+            finished_at=START,
+            responses=[MeasuredUsage(1_000_000, 0, 0, 100_000, None)],
+            job='job-1',
+            price=accounting.price,
+            ceiling_usd=accounting.ceiling_usd,
+        )
+        private_store.execute(
+            'INSERT INTO attempt_entries '
+            '(scope, job, trial, started_at, claim_id, attempt_id, entry_json) '
+            'VALUES (?, ?, ?, ?, NULL, NULL, ?)',
+            (
+                'comparison',
+                entry.job,
+                entry.trial,
+                entry.started_at.isoformat(),
+                entry.model_dump_json(),
+            ),
+        )
+        monkeypatch.setattr(cli, 'open_context', lambda: nullcontext(run_context))
+
+        result = CliRunner().invoke(
+            cli.app,
+            [
+                'spend',
+                '--system',
+                'comparison/acme-large-medium',
+                '--condition',
+                'prompted',
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert (
+            'over its `budget_usd` of $1.00: `comparison/acme-large-medium` '
+            '(condition `prompted`)'
+        ) in result.stdout
+
 
 class TestResetCanary:
     @pytest.mark.usefixtures('family_catalog')
@@ -216,7 +288,14 @@ class TestResetCanary:
             ),
         ):
             private_state.create_run(
-                Run(run_id, 'canaries', run_id, None, None, START.isoformat())
+                Run(
+                    id=run_id,
+                    scope='canaries',
+                    job=run_id,
+                    code_revision=None,
+                    case_revision=None,
+                    created_at=START.isoformat(),
+                )
             )
             source = fingerprint(system)
             record = json.dumps(
@@ -243,3 +322,33 @@ class TestResetCanary:
         for (key, context), (record, cleared) in records.items():
             assert private_state.baseline(key, context) == (None if cleared else record)
             assert record in private_state.records(key)
+
+    @pytest.mark.usefixtures('family_catalog')
+    def test_refuses_condition_with_bare_storage_key(self) -> None:
+        result = CliRunner().invoke(
+            cli.app,
+            ['reset-canary', 'acme-large-medium', '--condition', 'prompted'],
+            env={'COLUMNS': '200'},
+        )
+
+        assert result.exit_code == 2, result.output
+        assert (
+            'Specify a family/model-effort ID with this option.'
+            in Text.from_ansi(result.stderr).plain
+        )
+
+    @pytest.mark.usefixtures('family_catalog')
+    def test_reports_system_argument_hint_for_invalid_qualified_id(self) -> None:
+        result = CliRunner().invoke(
+            cli.app,
+            ['reset-canary', 'comparison/acme-large-prompted'],
+            env={'COLUMNS': '200'},
+        )
+
+        assert result.exit_code == 2, result.output
+        stderr = Text.from_ansi(result.stderr).plain
+        assert "Invalid value for 'SYSTEM':" in stderr
+        assert (
+            'Family `comparison` does not list `comparison/acme-large-prompted`.'
+            in stderr
+        )

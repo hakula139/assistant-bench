@@ -37,8 +37,6 @@ Harbor records a configuration's family key in the agent kwargs. Collection matc
 | `coding-repo`         | `opus-5.5-claude-code-high`   | `opus-5.5-high`         | `installed` |
 | `coding-repo`         | `gemini-3.8-flash-codex-high` | `gemini-3.8-flash-high` | `installed` |
 
-To migrate an existing condition from a global table to a family alias, keep its recorded family key in `systems`, `reference` or checker `pairs` wherever it already appears. Move its condition settings to `system_aliases` under that key and point `model_effort` at the shared global table. Update scripts that select the old key with `--system` to use the mapped `<family>/<model-effort>` and `--condition`. This change requires no rewrite of trials, closed reports or the fingerprint manifest when the resolved configuration stays the same.
-
 ### Model Swaps
 
 A fingerprint hashes a system's route, so it cannot see an endpoint that serves another model under an unchanged route. Collection therefore checks each pool, the outputs of one system under one fingerprint, for two signals. A pool conflicts when its responses report more than one model, or, in a case family, when its outputs of one case differ by more than the larger of 2 input tokens and 2% of the lower count, a margin that a one-token jitter stays within and another tokenizer exceeds on most cases. Neither signal proves which model answered. A gateway that echoes the requested name hides a backend swap from the model field, and one that recounts tokens with its own tokenizer hides it from the token count. A swap within one tokenizer family, such as a quantized checkpoint or a smaller sibling, passes both signals unless the reported model changes, and so does a provider that recognizes the bench's requests.
@@ -49,7 +47,7 @@ A successful probe refuses the whole run when its reported model set changes or 
 
 ## Harnesses
 
-Case families use a host environment that starts no container and refuses commands and file transfers. Task families run in Docker, including `bench check`'s oracle and nop. For `bench run`, the harnesses of all systems in the family determine the environment, even when `--system` selects a subset. If any system uses an installed agent, every trial shares the `InstalledDocker` environment and its Compose overlay for proxy access. The overlay preserves the task's network policy, and Harbor clears it for a separate verifier. Collection accepts either current job environment for a system that can run in both, while Harbor evaluates reuse and regrading against the environment the new job selects.
+Case families use a host environment that starts no container and refuses commands and file transfers. Task families run in Docker, including `bench check`'s oracle and nop. For `bench run`, the harnesses of all systems in the family determine the environment, even when `--system` selects a subset. If any system uses an installed agent, every trial shares the `InstalledDocker` environment and its Compose overlay for proxy access. The overlay preserves the task's network policy, and Harbor clears it for a separate verifier.
 
 Systems without an explicit harness run as `generate` in case families and inherit a task family's [`harness`](../guide/authoring.md#families). An installed agent's per-system `harness` and pinned `version` override that default. Claude Code requires native Messages, and Codex requires Responses. Both require task families. Only `generate` accepts a system prompt, and `bench check` and `bench run` refuse unsupported combinations before a job starts.
 

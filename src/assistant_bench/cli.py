@@ -83,8 +83,8 @@ from assistant_bench.tasks import (
 SYSTEMS_DOC = 'docs/guide/authoring.md#systems'
 HARBOR_DOC = 'docs/research/harbor.md#quirks-of-the-pinned-release'
 SYSTEM_RENAME_GUIDE = (
-    'Give each changed system a new name in each affected family and keep '
-    f'the old table while other families list it, as `{SYSTEMS_DOC}` describes.'
+    'Assign a new family key in each affected family and keep the old alias '
+    f'or table while other families list it, as `{SYSTEMS_DOC}` describes.'
 )
 USAGE_SOURCES: dict[Basis, str] = {'own': 'its own', 'borrowed': "another system's"}
 
@@ -268,18 +268,22 @@ def _run_families(
         return
     prepared = _prepare(targets, export, context)
     problems: list[str] = []
-    for family, selected, job in prepared:
-        spent, projections = _projection(family, selected, job, context)
-        _echo_projection(family, selected, spent, projections)
-        if (problem := budget_problem(family, spent, projections)) is not None:
+    for target, job in prepared:
+        family = target.family
+        labels = {
+            system.name: _system_label(system, family.name) for system in target.roster
+        }
+        spent, projections = _projection(family, target.selected, job, context)
+        _echo_projection(family, labels, spent, projections)
+        if (problem := budget_problem(family, spent, projections, labels)) is not None:
             problems.append(problem)
     if problems:
         raise InputError('\n'.join(problems))
 
     probes = canaries.prepare(
         (
-            (job, {system.name: system for system in selected})
-            for _, selected, job in prepared
+            (job, {system.name: system for system in target.selected})
+            for target, job in prepared
         ),
         root=context.root,
         source_root=context.public_root,
@@ -294,7 +298,8 @@ def _run_families(
         )
     _run_canaries(probes, context)
 
-    for family, selected, job in prepared:
+    for target, job in prepared:
+        family, selected = target.family, target.selected
         run_id = str(uuid4())
         failure: BaseException | None = None
         try:
@@ -379,16 +384,19 @@ def spend(
             condition=condition,
             root=context.public_root / 'families',
         )
-        for family, selected, job in _prepare(targets, export, context):
+        for target, job in _prepare(targets, export, context):
+            family = target.family
             labels = {
                 system.name: _system_label(system, family.name)
-                for system in jobs.resolve_family_systems(family, systems, export)
+                for system in target.roster
             }
-            spent, projections = _projection(family, selected, job, context)
+            spent, projections = _projection(family, target.selected, job, context)
             for entry in spent:
                 typer.echo(_spend_line(entry, labels))
-            _echo_projection(family, selected, spent, projections)
-            if (problem := budget_problem(family, spent, projections)) is not None:
+            _echo_projection(family, labels, spent, projections)
+            if (
+                problem := budget_problem(family, spent, projections, labels)
+            ) is not None:
                 typer.echo(problem)
 
 
@@ -409,14 +417,14 @@ def reset_canary(
     if '/' in system:
         export, catalog = _catalog()
         contexts = [
-            (
-                member.name,
-                fingerprint(
-                    member.model_copy(update={'harness': 'generate', 'version': None})
-                ),
-            )
+            (member.name, fingerprint(canaries.source_generate(member)))
             for target in _run_targets(
-                None, [system], catalog, export, condition=condition
+                None,
+                [system],
+                catalog,
+                export,
+                condition=condition,
+                system_hint="'SYSTEM'",
             )
             for member in target.selected
         ]
@@ -651,9 +659,9 @@ def _prepare(
     targets: list[_RunTarget],
     export: NixosConfigExport,
     context: RunContext,
-) -> list[tuple[Family, list[System], JobConfig]]:
-    """Return each family to run with its systems and its job."""
-    prepared: list[tuple[Family, list[System], JobConfig]] = []
+) -> list[tuple[_RunTarget, JobConfig]]:
+    """Return each run target with its job."""
+    prepared: list[tuple[_RunTarget, JobConfig]] = []
     check_case_entries(
         private_root=context.private_root,
         families_root=context.public_root / 'families',
@@ -691,8 +699,7 @@ def _prepare(
             )
         prepared.append(
             (
-                family,
-                selected,
+                target,
                 jobs.job(
                     family,
                     target.roster,
@@ -721,6 +728,7 @@ def _run_targets(
     *,
     condition: str | None = None,
     root: Path | None = None,
+    system_hint: str = "'--system'",
 ) -> list[_RunTarget]:
     """Return each family to run with its roster and selected systems."""
     family_scope = families if families is not None else family_names(root=root)
@@ -772,7 +780,7 @@ def _run_targets(
         (),
         'No selected family lists',
         'Choose a family and system from `bench systems`.',
-        param_hint="'--system'",
+        param_hint=system_hint,
     )
     if families is None:
         known_names(
@@ -780,7 +788,7 @@ def _run_targets(
             systems,
             'No family lists',
             f'Check the name against `{SYSTEMS_FILE}`.',
-            param_hint="'--system'",
+            param_hint=system_hint,
         )
 
     listed: set[str] = set()
@@ -797,14 +805,14 @@ def _run_targets(
             local,
             full,
             f'Family `{family_name}` does not list',
-            param_hint="'--system'",
+            param_hint=system_hint,
         )
         if families is not None:
             known_names(
                 bare,
                 short,
                 f'Family `{family_name}` does not list',
-                param_hint="'--system'",
+                param_hint=system_hint,
             )
         listed.update(short)
         requested = set(bare) | set(local)
@@ -817,6 +825,15 @@ def _run_targets(
             if matched and (condition is None or condition == system.condition):
                 matching.update(matched)
                 chosen.append(system)
+        if families is not None and condition is not None:
+            known_names(
+                bare,
+                {system.canonical_name for system in chosen},
+                f'Family `{family_name}` has no system with condition '
+                f'`{condition}` matching',
+                'See the available conditions in `bench systems`.',
+                param_hint="'--condition'",
+            )
         if chosen:
             targets.append(_RunTarget(family, members, chosen))
 
@@ -825,7 +842,7 @@ def _run_targets(
         listed,
         'No family lists',
         "Add it to `systems` in a family's `family.toml`.",
-        param_hint="'--system'",
+        param_hint=system_hint,
     )
     if condition is not None:
         known_names(
@@ -969,6 +986,17 @@ def _echo_conflicts(family: Family, outputs: list[Output]) -> None:
         typer.echo(conflict)
 
 
+def _format_label(name: str, condition: str | None = None) -> str:
+    label = f'`{name}`'
+    return label if condition is None else f'{label} (condition `{condition}`)'
+
+
+def _system_label(system: System, family: str | None = None) -> str:
+    name = system.public_id(family) if family is not None else system.canonical_name
+    condition = system.condition if system.condition != 'default' else None
+    return _format_label(name, condition)
+
+
 def _spend_line(entry: Spend, labels: Mapping[str, str]) -> str:
     label = labels.get(entry.system, f'`{entry.system}`')
     attempts = (
@@ -1010,24 +1038,12 @@ def _projection(
     return spent, project(jobs.pending_trials(job), spent, selected)
 
 
-def _format_label(name: str, condition: str | None = None) -> str:
-    label = f'`{name}`'
-    return label if condition is None else f'{label} (condition `{condition}`)'
-
-
-def _system_label(system: System, family: str | None = None) -> str:
-    name = system.public_id(family) if family is not None else system.canonical_name
-    condition = system.condition if system.model_effort is not None else None
-    return _format_label(name, condition)
-
-
 def _echo_projection(
     family: Family,
-    systems: list[System],
+    labels: Mapping[str, str],
     spent: list[Spend],
     projections: list[Projection],
 ) -> None:
-    labels = {system.name: _system_label(system, family.name) for system in systems}
     for projection in projections:
         if not projection.pending:
             continue
