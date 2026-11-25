@@ -5,7 +5,7 @@
   "systems": {
     "deepseek-v4.1-flash-1017-high": {
       "display_name": "DeepSeek V4.1 Flash 1017 · High",
-      "fingerprint": "62ab16924320ebd4"
+      "fingerprint": "45cb41398498b97e"
     },
     "gemini-3.8-flash-high": {
       "display_name": "Gemini 3.8 Flash · High",
@@ -17,11 +17,11 @@
     },
     "gpt-6-astra-high": {
       "display_name": "GPT-6 Astra · High",
-      "fingerprint": "b2b9822608744d3b"
+      "fingerprint": "0e867a39fe2d4d74"
     },
     "gpt-6.1-sol-high": {
       "display_name": "GPT-6.1 Sol · High",
-      "fingerprint": "bf2ee9387f68aadf"
+      "fingerprint": "ab45934b6604d069"
     },
     "kimi-k3-high": {
       "display_name": "Kimi K3 · High",
@@ -29,7 +29,7 @@
     },
     "opus-5.5-high": {
       "display_name": "Claude Opus 5.5 · High",
-      "fingerprint": "12689b65138772c2"
+      "fingerprint": "283ebf6f950196ec"
     }
   },
   "results": {

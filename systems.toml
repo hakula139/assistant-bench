@@ -4,17 +4,41 @@ api = "anthropic-messages"
 effort = "high"
 display_name = "Claude Opus 5.5 · High"
 
+["sonnet-5.5-high"]
+model = "claude-sonnet-5-5"
+api = "anthropic-messages"
+effort = "high"
+display_name = "Claude Sonnet 5.5 · High"
+
+["haiku-5.5-high"]
+model = "claude-haiku-5-5"
+api = "anthropic-messages"
+effort = "high"
+display_name = "Claude Haiku 5.5 · High"
+
 ["gpt-6-astra-high"]
 model = "gpt-6-astra"
 api = "openai-responses"
 effort = "high"
 display_name = "GPT-6 Astra · High"
 
+["gpt-6-luna-high"]
+model = "gpt-6-luna"
+api = "openai-responses"
+effort = "high"
+display_name = "GPT-6 Luna · High"
+
 ["gpt-6.1-sol-high"]
 model = "gpt-6.1-sol"
 api = "openai-responses"
 effort = "high"
 display_name = "GPT-6.1 Sol · High"
+
+["gpt-6.1-terra-high"]
+model = "gpt-6.1-terra"
+api = "openai-responses"
+effort = "high"
+display_name = "GPT-6.1 Terra · High"
 
 ["gpt-6.2-astra-high"]
 model = "gpt-6.2-astra"
@@ -28,15 +52,20 @@ api = "openai-responses"
 effort = "high"
 display_name = "GPT-6.2 Sol · High"
 
-["gemini-4-argon-high"]
-model = "gemini-4-argon"
+["gemini-4-carbon-high"]
+model = "gemini-4-carbon"
 effort = "high"
-display_name = "Gemini 4 Argon · High"
+display_name = "Gemini 4 Carbon · High"
 
-["gemini-3.8-flash-high"]
-model = "gemini-3.8-flash"
+["gemini-4-neon-high"]
+model = "gemini-4-neon"
 effort = "high"
-display_name = "Gemini 3.8 Flash · High"
+display_name = "Gemini 4 Neon · High"
+
+["gemini-4-hydrogen-high"]
+model = "gemini-4-hydrogen"
+effort = "high"
+display_name = "Gemini 4 Hydrogen · High"
 
 ["deepseek-v4.1-flash-1017-high"]
 model = "deepseek-v4.1-flash"

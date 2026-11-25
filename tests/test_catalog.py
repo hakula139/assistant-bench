@@ -245,12 +245,17 @@ class TestLoadSystems:
 
         assert {name: system.display_name for name, system in systems.items()} == {
             'opus-5.5-high': 'Claude Opus 5.5 · High',
+            'sonnet-5.5-high': 'Claude Sonnet 5.5 · High',
+            'haiku-5.5-high': 'Claude Haiku 5.5 · High',
             'gpt-6-astra-high': 'GPT-6 Astra · High',
+            'gpt-6-luna-high': 'GPT-6 Luna · High',
             'gpt-6.1-sol-high': 'GPT-6.1 Sol · High',
+            'gpt-6.1-terra-high': 'GPT-6.1 Terra · High',
             'gpt-6.2-astra-high': 'GPT-6.2 Astra · High',
             'gpt-6.2-sol-high': 'GPT-6.2 Sol · High',
-            'gemini-4-argon-high': 'Gemini 4 Argon · High',
-            'gemini-3.8-flash-high': 'Gemini 3.8 Flash · High',
+            'gemini-4-carbon-high': 'Gemini 4 Carbon · High',
+            'gemini-4-neon-high': 'Gemini 4 Neon · High',
+            'gemini-4-hydrogen-high': 'Gemini 4 Hydrogen · High',
             'deepseek-v4.1-flash-1017-high': 'DeepSeek V4.1 Flash 1017 · High',
             'kimi-k3.1-pro-high': 'Kimi K3.1 Pro · High',
         }
@@ -259,7 +264,9 @@ class TestLoadSystems:
             name for name, system in systems.items() if system.api == 'openai-responses'
         } == {
             'gpt-6-astra-high',
+            'gpt-6-luna-high',
             'gpt-6.1-sol-high',
+            'gpt-6.1-terra-high',
             'gpt-6.2-astra-high',
             'gpt-6.2-sol-high',
         }
@@ -269,6 +276,9 @@ class TestLoadSystems:
             native.max_output_tokens,
             native.context_window,
         ) == ('anthropic-messages', 128000, 1000000)
+        assert not any(
+            '/nix/store/' in text for text in load_export().instructions.values()
+        )
 
 
 class TestResolveSystem:

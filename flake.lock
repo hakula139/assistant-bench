@@ -64,11 +64,11 @@
     "nixos-config": {
       "flake": false,
       "locked": {
-        "lastModified": 1795439992,
-        "narHash": "sha256-IrBhpE/OYDlH5ObMLrI5uXLfs0szOdQ2woGOmm7HHSw=",
+        "lastModified": 1795601015,
+        "narHash": "sha256-uMFShdBmaDEvlwaUW6tT/C00frwPSITCpc/5BhL9gPQ=",
         "owner": "hakulab",
         "repo": "nixos-config",
-        "rev": "d144806f5c8aa46f48f0c3261e07134f3f6e2150",
+        "rev": "0e679587a4444606ce4da3a654a2bff8ed1b42e3",
         "type": "github"
       },
       "original": {

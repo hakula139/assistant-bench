@@ -14,9 +14,11 @@ The catalog's `maxTokens` is the completion allowance the bench configures, incl
 
 ## Fingerprints
 
-A system's fingerprint hashes its harness, model name, generation version, and every kwarg the harness gives its agent except the trial labels, so a trial's agent config changes only with the system's fingerprint or name. Those kwargs carry the resolved API, effort, and completion allowance, the prompt under `generate`, the context window as the input limit under `terminus-2`, and the thinking mode of native Messages. The generation version adds the generation protocol that `pyproject.toml`'s `[tool.assistant-bench]` declares, the locked Harbor version under `terminus-2`, and the native protocol and API version of native Messages. SDK versions, the table name, and public labels are excluded. A task family binds its harness before fingerprinting, so a system has a distinct identity on case and task families.
+A system's fingerprint hashes only what shapes model, harness, and prompt behavior: its harness, canonical catalog `model`, generation version, and every kwarg the harness gives its agent except the trial labels. Those kwargs carry the resolved API, effort, and completion allowance, the resolved prompt under `generate`, the context window as the input limit under `terminus-2`, the thinking mode of native Messages, and the pinned CLI version and configuration under installed agents. The generation version adds the generation protocol that `pyproject.toml`'s `[tool.assistant-bench]` declares, the locked Harbor version under `terminus-2` and installed agents, and the native protocol and API version of native Messages.
 
-Votes and scores pool only within one fingerprint. A nixos-config bump that leaves the resolved generation settings unchanged keeps its pool.
+Operational, routing, packaging, and metadata details are excluded so they never invalidate a benchmark pool: the serving `route` (provider channel ID, allowing pools to span route changes for the same model), Nix store path prefixes in exported `nixos-config:*` instructions (omitted from the export via stable placeholders), SDK versions, the `nixos-config` commit `rev`, the table or storage key `name`, public labels (`display_name`), `vendor`, billing and `price` metadata, and `context_window` under harnesses that do not pass it (`generate` and `claude-code`). A task family binds its harness before fingerprinting, so a system has a distinct identity on case and task families.
+
+Votes and scores pool only within one fingerprint. A nixos-config bump that leaves the resolved generation settings unchanged, including a route change or an unrelated commit, keeps its pool.
 
 In a task family, a configuration absent from the family's closed reports can keep its family key when its fingerprint changes. Its earlier trials stay in the archive. Their agent configuration carries the old fingerprint, so Harbor excludes them from reuse and regrading and collection excludes them from current outputs. After a report freezes the current fingerprint, the configuration can continue under that fingerprint while older trials remain archived. For voted families, [official publication](arena.md#publication-and-closing) also checks the evidence in both voting stores before the changed fingerprint can serve under that key.
 
@@ -35,11 +37,12 @@ Harbor records a configuration's family key in the agent kwargs. Collection matc
 | Any                   | `<model-effort>`              | `<model-effort>`        | `default`   |
 | `instructions-format` | `<model-effort>-nixos`        | `<model-effort>`        | `prompted`  |
 | `coding-repo`         | `opus-5.5-claude-code-high`   | `opus-5.5-high`         | `installed` |
+| `coding-repo`         | `gpt-6.2-sol-codex-high`      | `gpt-6.2-sol-high`      | `installed` |
 | `coding-repo`         | `gemini-3.8-flash-codex-high` | `gemini-3.8-flash-high` | `installed` |
 
 ### Model Swaps
 
-A fingerprint hashes a system's route, so it cannot see an endpoint that serves another model under an unchanged route. Collection therefore checks each pool, the outputs of one system under one fingerprint, for two signals. A pool conflicts when its responses report more than one model, or, in a case family, when its outputs of one case differ by more than the larger of 2 input tokens and 2% of the lower count, a margin that a one-token jitter stays within and another tokenizer exceeds on most cases. Neither signal proves which model answered. A gateway that echoes the requested name hides a backend swap from the model field, and one that recounts tokens with its own tokenizer hides it from the token count. A swap within one tokenizer family, such as a quantized checkpoint or a smaller sibling, passes both signals unless the reported model changes, and so does a provider that recognizes the bench's requests.
+A fingerprint hashes a system's catalog model rather than its serving route, so it neither invalidates a pool on a route switch nor sees an endpoint that serves another model behind a route. Collection therefore checks each pool, the outputs of one system under one fingerprint, for two signals. A pool conflicts when its responses report more than one model, or, in a case family, when its outputs of one case differ by more than the larger of 2 input tokens and 2% of the lower count, a margin that a one-token jitter stays within and another tokenizer exceeds on most cases. Neither signal proves which model answered. A gateway that echoes the requested name hides a backend swap from the model field, and one that recounts tokens with its own tokenizer hides it from the token count. A swap within one tokenizer family, such as a quantized checkpoint or a smaller sibling, passes both signals unless the reported model changes, and so does a provider that recognizes the bench's requests.
 
 Before adding trials, `bench run` sends one fixed synthetic canary through each pending system's `generate` binding. Families share a probe when they use the same recorded key and source generation fingerprint. The probe preserves the route, API, effort and resolved system prompt, including for systems normally run through an installed agent. It has one Harbor attempt, no SDK retries, and at most 2,048 completion tokens including reasoning. Its first successful response with valid usage establishes the baseline for that source generate identity and probe protocol. A changed instruction, resolved probe configuration or completion allowance starts another protocol. Each record keeps the original system identity, the source generate identity and the actual probe identity separately.
 
@@ -69,11 +72,11 @@ Harbor records each trial's agent and environment import paths in the job's `con
 
 The flake takes [nixos-config](https://github.com/hakulab/nixos-config) as a `flake = false` input and imports only pure Nix files from it, which evaluate without Nixpkgs or a host. Its `nixos-config` package writes one JSON file, which the dev shell exports as `BENCH_NIXOS_CONFIG`:
 
-| Field          | Content                                                                                   |
-| -------------- | ----------------------------------------------------------------------------------------- |
-| `rev`          | The input's commit, recorded on every output                                              |
-| `catalog`      | The model catalog: vendors, channels and routes, prices, effort rules, and display names  |
-| `instructions` | Each client's rendered global instruction file, keyed as `claudeCode`, `codex`, and `omp` |
+| Field          | Content                                                                                                                                                                            |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `rev`          | The input's commit, recorded on every output                                                                                                                                       |
+| `catalog`      | The model catalog: vendors, channels and routes, prices, effort rules, and display names                                                                                           |
+| `instructions` | Each client's rendered global instruction file, keyed as `claudeCode`, `codex`, and `omp`, keeping stable `@docsDir@` and `@devkitSource@` placeholders instead of Nix store paths |
 
 ## Concurrency
 

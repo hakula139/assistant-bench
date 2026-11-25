@@ -76,15 +76,15 @@ HARNESSES: dict[str, Harness] = {
 def fingerprint(identity: SystemIdentity) -> str:
     """Hash of what shapes the outputs. Votes pool only within one fingerprint.
 
-    It covers the generation version, the model name, and every agent kwarg but
-    the trial labels, so an agent config changes only with the fingerprint or
-    the system's name.
+    It covers the generation version, the canonical catalog model, and every
+    agent kwarg but the trial labels, excluding operational details such as the
+    serving route so switching routes for the same model preserves its pool.
     """
     harness = HARNESSES[identity.harness]
     encoded = json.dumps(
         {
             'harness': identity.harness,
-            'model_name': identity.route,
+            'model': identity.model,
             'options': harness.options(identity),
             'version': identity.generation.version(harness.harbor_loop, identity.api),
         },

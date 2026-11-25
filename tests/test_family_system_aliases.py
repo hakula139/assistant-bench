@@ -72,12 +72,12 @@ class TestListedSystems:
                 'Claude Opus 5.5 · Claude Code · High',
             ),
             (
-                'gemini-3.8-flash-codex-high',
-                'gemini-3.8-flash-high',
+                'gpt-6.2-sol-codex-high',
+                'gpt-6.2-sol-high',
                 'openai-responses',
                 'codex',
                 '0.167.0',
-                'Gemini 3.8 Flash · Codex · High',
+                'GPT-6.2 Sol · Codex · High',
             ),
         ],
     )
@@ -265,8 +265,8 @@ class TestJob:
         family = load_family('coding-repo', root=FAMILIES_DIR)
         fixture = voted_tasks(families_dir, 'keep', 'regrade')
         tasks = [case_task(fixture, task) for task in ('keep', 'regrade')]
-        name = 'gemini-3.8-flash-codex-high'
-        previous = models['gemini-3.8-flash-high'].model_copy(
+        name = 'gpt-6.2-sol-codex-high'
+        previous = models['gpt-6.2-sol-high'].model_copy(
             update={
                 'name': name,
                 'api': 'openai-responses',
@@ -284,7 +284,7 @@ class TestJob:
         selected = [
             system
             for system in jobs.listed_systems(family, models, export=export)
-            if system.public_id(family.name) == 'coding-repo/gemini-3.8-flash-high'
+            if system.public_id(family.name) == 'coding-repo/gpt-6.2-sol-high'
             and system.condition == 'installed'
         ]
         sources = [jobs.job_source(archived)]

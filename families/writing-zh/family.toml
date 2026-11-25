@@ -5,16 +5,21 @@ public = true
 public_voting = true
 systems = [
   "opus-5.5-high",
+  "sonnet-5.5-high",
+  "haiku-5.5-high",
   "gpt-6-astra-high",
+  "gpt-6-luna-high",
   "gpt-6.1-sol-high",
+  "gpt-6.1-terra-high",
   "gpt-6.2-astra-high",
   "gpt-6.2-sol-high",
-  "gemini-4-argon-high",
-  "gemini-3.8-flash-high",
+  "gemini-4-carbon-high",
+  "gemini-4-neon-high",
+  "gemini-4-hydrogen-high",
   "deepseek-v4.1-flash-1017-high",
   "kimi-k3.1-pro-high",
 ]
-reference = "gemini-3.8-flash-high"
+reference = "deepseek-v4.1-flash-1017-high"
 language = "zh"
 samples = 2
 categories = ["docs", "essay", "fiction", "message", "reply", "review"]

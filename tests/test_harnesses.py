@@ -81,15 +81,17 @@ class TestFingerprint:
         assert differences == expected
 
     def test_hashes_the_identity_of_a_system_under_any_name(self) -> None:
-        assert fingerprint(make_system()) == 'b49c966f7ca680e0'
-        assert fingerprint(make_system(name='x')) == 'b49c966f7ca680e0'
-        assert fingerprint(make_system(display_name='x')) == 'b49c966f7ca680e0'
-        assert fingerprint(make_system(vendor='other')) == 'b49c966f7ca680e0'
+        assert fingerprint(make_system()) == '072c8ee520018bd1'
+        assert fingerprint(make_system(name='x')) == '072c8ee520018bd1'
+        assert fingerprint(make_system(display_name='x')) == '072c8ee520018bd1'
+        assert fingerprint(make_system(vendor='other')) == '072c8ee520018bd1'
+        assert fingerprint(make_system(route='acme/other')) == '072c8ee520018bd1'
 
     @pytest.mark.parametrize(
         ('base', 'change', 'changes'),
         [
-            pytest.param({}, {'route': 'acme/large-2'}, True, id='route'),
+            pytest.param({}, {'model': 'acme-other'}, True, id='model'),
+            pytest.param({}, {'route': 'acme/large-2'}, False, id='route'),
             pytest.param({}, {'effort': 'high'}, True, id='effort'),
             pytest.param({}, {'prompt': 'Be brief.'}, True, id='prompt'),
             pytest.param({}, {'harness': 'terminus-2'}, True, id='harness'),

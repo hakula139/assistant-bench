@@ -366,6 +366,7 @@ def make_system(**overrides: Any) -> System:
         'name': 'acme-large',
         'display_name': 'Acme Large',
         'vendor': 'acme',
+        'model': 'acme-large',
         'route': 'acme/large',
         'api': 'openai-chat-completions',
         'harness': 'generate',

@@ -11,8 +11,8 @@ A family corresponds to one directory under `families/` and one leaderboard, con
 ```toml
 scorer = "votes"
 display_name = "Smoke Test · Text"
-systems = ["opus-5.5-high", "gemini-3.8-flash-high"]
-reference = "gemini-3.8-flash-high"
+systems = ["opus-5.5-high", "deepseek-v4.1-flash-1017-high"]
+reference = "deepseek-v4.1-flash-1017-high"
 samples = 1
 categories = ["message"]
 ```
@@ -93,12 +93,12 @@ effort = "high"
 display_name = "Claude Opus 5.5 · High"
 ```
 
-| Key            | Meaning                                                                                                                                 |
-| -------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `model`        | A nixos-config catalog model, which supplies the route, vendor, capacities, and prices                                                  |
-| `api`          | `openai-chat-completions` by default, `openai-responses`, or `anthropic-messages`. The catalog must support the selected API and effort |
-| `effort`       | Required when the model has effort rules: one of its `thinking.efforts`. A model without them takes none                                |
-| `display_name` | The public label for the default condition. Each global table needs a distinct label                                                    |
+| Key            | Meaning                                                                                                                                    |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `model`        | A nixos-config catalog model, which supplies the vendor, capacities, prices, and operational serving route (excluded from the fingerprint) |
+| `api`          | `openai-chat-completions` by default, `openai-responses`, or `anthropic-messages`. The catalog must support the selected API and effort    |
+| `effort`       | Required when the model has effort rules: one of its `thinking.efforts`. A model without them takes none                                   |
+| `display_name` | The public label for the default condition. Each global table needs a distinct label                                                       |
 
 List the table key in a family's `systems` to run its default condition. To compare another condition, define an alias in `family.toml` and list its key in `systems` too. This entry adds a system prompt to the same model and effort in `instructions-format`.
 
