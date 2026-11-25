@@ -5,18 +5,28 @@ public = false
 systems = [
   "opus-5.5-high",
   "opus-5.5-high-nixos",
+  "sonnet-5.5-high",
+  "sonnet-5.5-high-nixos",
+  "haiku-5.5-high",
+  "haiku-5.5-high-nixos",
   "gpt-6-astra-high",
   "gpt-6-astra-high-nixos",
+  "gpt-6-luna-high",
+  "gpt-6-luna-high-nixos",
   "gpt-6.1-sol-high",
   "gpt-6.1-sol-high-nixos",
+  "gpt-6.1-terra-high",
+  "gpt-6.1-terra-high-nixos",
   "gpt-6.2-astra-high",
   "gpt-6.2-astra-high-nixos",
   "gpt-6.2-sol-high",
   "gpt-6.2-sol-high-nixos",
-  "gemini-4-argon-high",
-  "gemini-4-argon-high-nixos",
-  "gemini-3.8-flash-high",
-  "gemini-3.8-flash-high-nixos",
+  "gemini-4-carbon-high",
+  "gemini-4-carbon-high-nixos",
+  "gemini-4-neon-high",
+  "gemini-4-neon-high-nixos",
+  "gemini-4-hydrogen-high",
+  "gemini-4-hydrogen-high-nixos",
   "deepseek-v4.1-flash-1017-high",
   "deepseek-v4.1-flash-1017-high-nixos",
   "kimi-k3.1-pro-high",
@@ -24,12 +34,17 @@ systems = [
 ]
 pairs = [
   { bare = "opus-5.5-high", prompted = "opus-5.5-high-nixos" },
+  { bare = "sonnet-5.5-high", prompted = "sonnet-5.5-high-nixos" },
+  { bare = "haiku-5.5-high", prompted = "haiku-5.5-high-nixos" },
   { bare = "gpt-6-astra-high", prompted = "gpt-6-astra-high-nixos" },
+  { bare = "gpt-6-luna-high", prompted = "gpt-6-luna-high-nixos" },
   { bare = "gpt-6.1-sol-high", prompted = "gpt-6.1-sol-high-nixos" },
+  { bare = "gpt-6.1-terra-high", prompted = "gpt-6.1-terra-high-nixos" },
   { bare = "gpt-6.2-astra-high", prompted = "gpt-6.2-astra-high-nixos" },
   { bare = "gpt-6.2-sol-high", prompted = "gpt-6.2-sol-high-nixos" },
-  { bare = "gemini-4-argon-high", prompted = "gemini-4-argon-high-nixos" },
-  { bare = "gemini-3.8-flash-high", prompted = "gemini-3.8-flash-high-nixos" },
+  { bare = "gemini-4-carbon-high", prompted = "gemini-4-carbon-high-nixos" },
+  { bare = "gemini-4-neon-high", prompted = "gemini-4-neon-high-nixos" },
+  { bare = "gemini-4-hydrogen-high", prompted = "gemini-4-hydrogen-high-nixos" },
   { bare = "deepseek-v4.1-flash-1017-high", prompted = "deepseek-v4.1-flash-1017-high-nixos" },
   { bare = "kimi-k3.1-pro-high", prompted = "kimi-k3.1-pro-high-nixos" },
 ]
@@ -42,17 +57,41 @@ condition = "prompted"
 prompt = "nixos-config:claudeCode"
 display_name = "Claude Opus 5.5 · High · Instructions"
 
+[system_aliases."sonnet-5.5-high-nixos"]
+model_effort = "sonnet-5.5-high"
+condition = "prompted"
+prompt = "nixos-config:claudeCode"
+display_name = "Claude Sonnet 5.5 · High · Instructions"
+
+[system_aliases."haiku-5.5-high-nixos"]
+model_effort = "haiku-5.5-high"
+condition = "prompted"
+prompt = "nixos-config:claudeCode"
+display_name = "Claude Haiku 5.5 · High · Instructions"
+
 [system_aliases."gpt-6-astra-high-nixos"]
 model_effort = "gpt-6-astra-high"
 condition = "prompted"
 prompt = "nixos-config:claudeCode"
 display_name = "GPT-6 Astra · High · Instructions"
 
+[system_aliases."gpt-6-luna-high-nixos"]
+model_effort = "gpt-6-luna-high"
+condition = "prompted"
+prompt = "nixos-config:claudeCode"
+display_name = "GPT-6 Luna · High · Instructions"
+
 [system_aliases."gpt-6.1-sol-high-nixos"]
 model_effort = "gpt-6.1-sol-high"
 condition = "prompted"
 prompt = "nixos-config:claudeCode"
 display_name = "GPT-6.1 Sol · High · Instructions"
+
+[system_aliases."gpt-6.1-terra-high-nixos"]
+model_effort = "gpt-6.1-terra-high"
+condition = "prompted"
+prompt = "nixos-config:claudeCode"
+display_name = "GPT-6.1 Terra · High · Instructions"
 
 [system_aliases."gpt-6.2-astra-high-nixos"]
 model_effort = "gpt-6.2-astra-high"
@@ -66,17 +105,23 @@ condition = "prompted"
 prompt = "nixos-config:claudeCode"
 display_name = "GPT-6.2 Sol · High · Instructions"
 
-[system_aliases."gemini-4-argon-high-nixos"]
-model_effort = "gemini-4-argon-high"
+[system_aliases."gemini-4-carbon-high-nixos"]
+model_effort = "gemini-4-carbon-high"
 condition = "prompted"
 prompt = "nixos-config:claudeCode"
-display_name = "Gemini 4 Argon · High · Instructions"
+display_name = "Gemini 4 Carbon · High · Instructions"
 
-[system_aliases."gemini-3.8-flash-high-nixos"]
-model_effort = "gemini-3.8-flash-high"
+[system_aliases."gemini-4-neon-high-nixos"]
+model_effort = "gemini-4-neon-high"
 condition = "prompted"
 prompt = "nixos-config:claudeCode"
-display_name = "Gemini 3.8 Flash · High · Instructions"
+display_name = "Gemini 4 Neon · High · Instructions"
+
+[system_aliases."gemini-4-hydrogen-high-nixos"]
+model_effort = "gemini-4-hydrogen-high"
+condition = "prompted"
+prompt = "nixos-config:claudeCode"
+display_name = "Gemini 4 Hydrogen · High · Instructions"
 
 [system_aliases."deepseek-v4.1-flash-1017-high-nixos"]
 model_effort = "deepseek-v4.1-flash-1017-high"

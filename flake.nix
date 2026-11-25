@@ -44,13 +44,9 @@
         # ------------------------------------------------------------------------------------------
         promptFragments = import "${nixos-config}/home/modules/llm-assistants/shared/prompt-fragments";
 
-        devkitSource =
-          (builtins.fetchTree (builtins.fromJSON (builtins.readFile "${nixos-config}/flake.lock"))
-            .nodes.devkit.locked).outPath;
-
+        # Omit Nix store paths so unrelated nixos-config or devkit bumps keep rendered prompts stable.
         instructionSet = import "${nixos-config}/home/modules/llm-assistants/shared/instructions" {
-          inherit promptFragments devkitSource;
-          docsDir = "${nixos-config}/home/modules/llm-assistants/shared/instructions/docs";
+          inherit promptFragments;
         };
 
         nixosConfigExport = pkgs.writeText "nixos-config.json" (

@@ -168,6 +168,7 @@ class SystemIdentity(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
+    model: str
     route: str
     api: Api
     max_output_tokens: int = Field(gt=0)
@@ -294,6 +295,7 @@ def resolve_system(
     try:
         return System(
             generation=generation,
+            model=config.model,
             route=route,
             api=config.api,
             max_output_tokens=entry.max_output_tokens,

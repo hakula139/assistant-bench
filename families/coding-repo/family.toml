@@ -5,18 +5,23 @@ public = false
 public_voting = true
 systems = [
   "opus-5.5-high",
+  "sonnet-5.5-high",
+  "haiku-5.5-high",
   "gpt-6-astra-high",
+  "gpt-6-luna-high",
   "gpt-6.1-sol-high",
+  "gpt-6.1-terra-high",
   "gpt-6.2-astra-high",
   "gpt-6.2-sol-high",
-  "gemini-4-argon-high",
-  "gemini-3.8-flash-high",
+  "gemini-4-carbon-high",
+  "gemini-4-neon-high",
+  "gemini-4-hydrogen-high",
   "deepseek-v4.1-flash-1017-high",
   "kimi-k3.1-pro-high",
   "opus-5.5-claude-code-high",
-  "gemini-3.8-flash-codex-high",
+  "gpt-6.2-sol-codex-high",
 ]
-reference = "gemini-3.8-flash-high"
+reference = "gpt-6.2-sol-high"
 render = "diff"
 samples = 1
 harness = "terminus-2"
@@ -31,10 +36,9 @@ harness = "claude-code"
 version = "2.1.319"
 display_name = "Claude Opus 5.5 · Claude Code · High"
 
-[system_aliases."gemini-3.8-flash-codex-high"]
-model_effort = "gemini-3.8-flash-high"
+[system_aliases."gpt-6.2-sol-codex-high"]
+model_effort = "gpt-6.2-sol-high"
 condition = "installed"
-api = "openai-responses"
 harness = "codex"
 version = "0.167.0"
-display_name = "Gemini 3.8 Flash · Codex · High"
+display_name = "GPT-6.2 Sol · Codex · High"
