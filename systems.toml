@@ -16,23 +16,11 @@ api = "anthropic-messages"
 effort = "high"
 display_name = "Claude Haiku 5.5 · High"
 
-["gpt-6-astra-high"]
-model = "gpt-6-astra"
-api = "openai-responses"
-effort = "high"
-display_name = "GPT-6 Astra · High"
-
 ["gpt-6-luna-high"]
 model = "gpt-6-luna"
 api = "openai-responses"
 effort = "high"
 display_name = "GPT-6 Luna · High"
-
-["gpt-6.1-sol-high"]
-model = "gpt-6.1-sol"
-api = "openai-responses"
-effort = "high"
-display_name = "GPT-6.1 Sol · High"
 
 ["gpt-6.1-terra-high"]
 model = "gpt-6.1-terra"

@@ -1216,13 +1216,13 @@ class TestRun:
         write_votes_family(families_dir, ['opus-5.5-high'])
 
         result = invoke(
-            'run', 'f', '--system', 'gpt-6-astra-high', '--system', 'opus-5.5-high'
+            'run', 'f', '--system', 'gpt-6.2-astra-high', '--system', 'opus-5.5-high'
         )
 
         assert result.exit_code == 2
         assert (
             "Invalid value for '--system': Family `f` does not list "
-            '`gpt-6-astra-high`. Choose among `opus-5.5-high`.'
+            '`gpt-6.2-astra-high`. Choose among `opus-5.5-high`.'
             in Text.from_ansi(result.stderr).plain
         )
         assert submitted == []
@@ -1233,7 +1233,7 @@ class TestRun:
         cloud: RunContext,
         private_store: SQLiteDatabase,
     ) -> None:
-        named = ['gpt-6.1-sol-high', 'kimi-k3.1-pro-high']
+        named = ['gpt-6.2-sol-high', 'kimi-k3.1-pro-high']
         args = [arg for name in named for arg in ('--system', name)]
         result = invoke('run', 'smoke-text', *args)
         assert result.exit_code == 0, result.output
@@ -1501,7 +1501,7 @@ class TestRun:
     @pytest.mark.parametrize(
         ('name', 'hint'),
         [
-            ('gpt-6-astra-high', "Add it to `systems` in a family's `family.toml`."),
+            ('gpt-6.2-astra-high', "Add it to `systems` in a family's `family.toml`."),
             ('acme-missing', 'Check the name against `systems.toml`.'),
         ],
         ids=['unlisted', 'unknown'],
@@ -2257,7 +2257,7 @@ class TestCollect:
             'own-b',
             'other-a',
             'other-b',
-            systems=('opus-5.5-high', 'gpt-6-astra-high'),
+            systems=('opus-5.5-high', 'gpt-6.2-astra-high'),
             author_vendor='anthropic',
         )
         for name in ('other-a', 'other-b'):
@@ -2276,7 +2276,7 @@ class TestCollect:
                 reward=float(case.startswith('own') == (system == 'opus-5.5-high')),
             )
             for case in ('own-a', 'own-b', 'other-a', 'other-b')
-            for system in ('opus-5.5-high', 'gpt-6-astra-high')
+            for system in ('opus-5.5-high', 'gpt-6.2-astra-high')
         ]
 
         def collect(
@@ -2294,8 +2294,8 @@ class TestCollect:
             'other-vendor tasks 0/2 (0.0%).\n'
         ) in result.output
         assert (
-            'System `f/gpt-6-astra-high`: pass rate on own-vendor tasks 2/2 (100.0%), '
-            'other-vendor tasks 0/2 (0.0%).\n'
+            'System `f/gpt-6.2-astra-high`: pass rate on own-vendor tasks '
+            '2/2 (100.0%), other-vendor tasks 0/2 (0.0%).\n'
         ) in result.output
 
     @pytest.mark.parametrize('reward', [0.0, None], ids=['failed', 'ungraded'])
