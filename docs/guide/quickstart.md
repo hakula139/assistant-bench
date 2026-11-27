@@ -37,7 +37,7 @@ uv run bench check smoke
 
 # List the runnable systems and generate both sides of a pair
 uv run bench systems smoke-text
-uv run bench run --system smoke-text/opus-5.5-high --system smoke-text/gpt-6.1-sol-high
+uv run bench run --system smoke-text/opus-5.5-high --system smoke-text/gpt-6.2-sol-high
 ```
 
 Pick any two IDs from `bench systems smoke-text` for the generation command. The endpoint must serve both models' routes from the nixos-config catalog.

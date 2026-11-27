@@ -247,9 +247,7 @@ class TestLoadSystems:
             'opus-5.5-high': 'Claude Opus 5.5 · High',
             'sonnet-5.5-high': 'Claude Sonnet 5.5 · High',
             'haiku-5.5-high': 'Claude Haiku 5.5 · High',
-            'gpt-6-astra-high': 'GPT-6 Astra · High',
             'gpt-6-luna-high': 'GPT-6 Luna · High',
-            'gpt-6.1-sol-high': 'GPT-6.1 Sol · High',
             'gpt-6.1-terra-high': 'GPT-6.1 Terra · High',
             'gpt-6.2-astra-high': 'GPT-6.2 Astra · High',
             'gpt-6.2-sol-high': 'GPT-6.2 Sol · High',
@@ -263,9 +261,7 @@ class TestLoadSystems:
         assert {
             name for name, system in systems.items() if system.api == 'openai-responses'
         } == {
-            'gpt-6-astra-high',
             'gpt-6-luna-high',
-            'gpt-6.1-sol-high',
             'gpt-6.1-terra-high',
             'gpt-6.2-astra-high',
             'gpt-6.2-sol-high',

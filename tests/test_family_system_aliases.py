@@ -310,7 +310,7 @@ class TestFingerprints:
             [
                 'spend',
                 '--system',
-                'instructions-format/gpt-6.1-sol-high',
+                'instructions-format/gpt-6.2-sol-high',
                 '--condition',
                 'prompted',
             ],
@@ -322,7 +322,7 @@ class TestFingerprints:
     ) -> None:
         export = load_export()
         systems = load_systems(export)
-        name = 'gpt-6.1-sol-high'
+        name = 'gpt-6.2-sol-high'
         archived = (FIXTURES / 'report-checkers.json').read_text()
         archived = (
             archived.replace('"acme"', f'"{name}"')
