@@ -211,7 +211,7 @@ importers:
         version: 5.3.0
       '@hono/standard-validator':
         specifier: ^0.4.1
-        version: 0.4.1(@standard-schema/spec@1.1.0)(hono@4.13.21)
+        version: 0.4.1(@standard-schema/spec@1.1.0)(hono@4.13.22)
       '@marsidev/react-turnstile':
         specifier: ^1.6.3
         version: 1.6.3(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
@@ -241,7 +241,7 @@ importers:
         version: 3.2.5
       hono:
         specifier: ^4.13.14
-        version: 4.13.21
+        version: 4.13.22
       jose:
         specifier: ^6.2.15
         version: 6.2.18
@@ -3649,8 +3649,8 @@ packages:
   hermes-parser@0.25.1:
     resolution: {integrity: sha512-6pEjquH3rqaI6cYAXYPcz9MS4rY6R4ngRgrgfDshRptUZIc3lw0MCIJIGDj9++mfySOuPTHB4nrSW99BCvOPIA==}
 
-  hono@4.13.21:
-    resolution: {integrity: sha512-h9UsguqfVk4kjUwLvQpHOmOaJpW10jz9lp8bvKUUa04wJG/fabKFBqXZ06D6LFaeKQZtUZRVeg0gfkTTEsX7Mw==}
+  hono@4.13.22:
+    resolution: {integrity: sha512-wncKd5/40Pj8grx0RZ2fgNIicFEmVFwIHT5UFLTnphR8I6AQWFf9c2JoM6ZJ9g8y4pMzg3sNlCVNe0m2Yclg0Q==}
     engines: {node: '>=16.9.0'}
 
   hookified@1.15.1:
@@ -6054,10 +6054,10 @@ snapshots:
       - supports-color
       - typescript
 
-  '@hono/standard-validator@0.4.1(@standard-schema/spec@1.1.0)(hono@4.13.21)':
+  '@hono/standard-validator@0.4.1(@standard-schema/spec@1.1.0)(hono@4.13.22)':
     dependencies:
       '@standard-schema/spec': 1.1.0
-      hono: 4.13.21
+      hono: 4.13.22
 
   '@humanfs/core@0.19.2':
     dependencies:
@@ -8716,7 +8716,7 @@ snapshots:
     dependencies:
       hermes-estree: 0.25.1
 
-  hono@4.13.21: {}
+  hono@4.13.22: {}
 
   hookified@1.15.1: {}
 
